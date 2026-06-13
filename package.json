@@ -1,28 +1,27 @@
 {
-  "name": "alojamentoideal.pt",
-  "version": "0.0.1",
-  "private": true,
-  "scripts": {
-    "build": "turbo build",
-    "dev": "turbo dev",
-    "lint": "turbo lint",
-    "format": "turbo format",
-    "typecheck": "turbo typecheck"
-  },
-  "devDependencies": {
-    "@workspace/eslint-config": "workspace:*",
-    "@workspace/typescript-config": "workspace:*",
-    "prettier": "^3.8.3",
-    "prettier-plugin-tailwindcss": "^0.8.0",
-    "turbo": "^2.9.15",
-    "typescript": "^5"
-  },
-  "packageManager": "bun@1.3.3",
-  "engines": {
-    "node": ">=20"
-  },
-  "workspaces": [
-    "apps/*",
-    "packages/*"
-  ]
+	"name": "alojamentoideal.pt",
+	"version": "0.0.1",
+	"private": true,
+	"scripts": {
+		"build": "turbo build",
+		"dev": "turbo dev",
+		"lint": "biome lint .",
+		"format": "biome format --write .",
+		"check": "biome check --write .",
+		"typecheck": "turbo typecheck"
+	},
+	"devDependencies": {
+		"@biomejs/biome": "2.5.0",
+		"@workspace/typescript-config": "workspace:*",
+		"turbo": "^2.9.15",
+		"typescript": "^5"
+	},
+	"packageManager": "bun@1.3.3",
+	"engines": {
+		"node": ">=20"
+	},
+	"workspaces": [
+		"apps/*",
+		"packages/*"
+	]
 }
