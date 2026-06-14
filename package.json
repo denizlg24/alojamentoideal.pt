@@ -8,11 +8,15 @@
 		"lint": "biome lint .",
 		"format": "biome format --write .",
 		"check": "biome check --write .",
-		"typecheck": "turbo typecheck"
+		"typecheck": "turbo typecheck",
+		"test": "turbo test",
+		"prepare": "husky"
 	},
 	"devDependencies": {
 		"@biomejs/biome": "2.5.0",
 		"@workspace/typescript-config": "workspace:*",
+		"husky": "^9.1.7",
+		"lint-staged": "^17.0.7",
 		"turbo": "^2.9.15",
 		"typescript": "^5"
 	},
