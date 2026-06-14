@@ -38,7 +38,7 @@
 		"@types/react-dom": "^19",
 		"@workspace/typescript-config": "workspace:*",
 		"tailwindcss": "^4",
-		"typescript": "^5"
+		"typescript": "^6"
 	},
 	"exports": {
 		"./globals.css": "./src/styles/globals.css",

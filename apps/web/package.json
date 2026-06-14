@@ -23,6 +23,6 @@
 		"@types/react": "^19",
 		"@types/react-dom": "^19",
 		"@workspace/typescript-config": "workspace:*",
-		"typescript": "^5"
+		"typescript": "^6"
 	}
 }
