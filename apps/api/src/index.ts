@@ -1,7 +1,9 @@
-import { Elysia } from "elysia";
+import { createApp } from "./app.js";
+import { getApiConfig } from "./config.js";
 
-const app = new Elysia().get("/", () => "Hello Elysia");
+const config = getApiConfig();
+const app = createApp().listen(config.port);
 
-app.listen(3000);
+console.log(`API listening on http://localhost:${config.port}`);
 
 export default app;
