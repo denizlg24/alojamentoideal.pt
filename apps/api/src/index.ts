@@ -1,9 +1,35 @@
-import { createApp } from "./app.js";
-import { getApiConfig } from "./config.js";
+import { Elysia, t } from "elysia";
 
-const config = getApiConfig();
-const app = createApp().listen(config.port);
+const healthResponse = t.Object({
+	service: t.Literal("api"),
+	status: t.Literal("ok"),
+});
 
-console.log(`API listening on http://localhost:${config.port}`);
+export function createApp() {
+	return new Elysia({ name: "api" })
+		.get(
+			"/health",
+			() => ({
+				service: "api" as const,
+				status: "ok" as const,
+			}),
+			{
+				response: healthResponse,
+			},
+		)
+		.get(
+			"/ready",
+			() => ({
+				service: "api" as const,
+				status: "ok" as const,
+			}),
+			{
+				response: healthResponse,
+			},
+		);
+}
 
+const app = createApp();
+
+export type ApiApp = ReturnType<typeof createApp>;
 export default app;

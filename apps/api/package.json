@@ -4,9 +4,9 @@
 	"type": "module",
 	"private": true,
 	"scripts": {
-		"dev": "bun --hot src/index.ts",
+		"dev": "bun --hot src/local.ts",
 		"build": "tsc --noEmit",
-		"start": "bun src/index.ts",
+		"start": "bun src/local.ts",
 		"typecheck": "tsc --noEmit",
 		"test": "bun test --pass-with-no-tests"
 	},
