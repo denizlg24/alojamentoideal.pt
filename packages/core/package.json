@@ -1,0 +1,39 @@
+{
+	"name": "@workspace/core",
+	"version": "0.0.0",
+	"type": "module",
+	"private": true,
+	"exports": {
+		".": {
+			"types": "./src/index.ts",
+			"default": "./src/index.ts"
+		},
+		"./listing-cache": {
+			"types": "./src/listing-cache/index.ts",
+			"default": "./src/listing-cache/index.ts"
+		},
+		"./integrations/hostify": {
+			"types": "./src/integrations/hostify/index.ts",
+			"default": "./src/integrations/hostify/index.ts"
+		},
+		"./integrations/bokun": {
+			"types": "./src/integrations/bokun/index.ts",
+			"default": "./src/integrations/bokun/index.ts"
+		}
+	},
+	"scripts": {
+		"typecheck": "tsc --noEmit",
+		"test": "bun test --pass-with-no-tests"
+	},
+	"dependencies": {
+		"@workspace/db": "workspace:*",
+		"drizzle-orm": "^0.44.7",
+		"zod": "^4.4.3"
+	},
+	"devDependencies": {
+		"@types/bun": "^1.3.14",
+		"@types/node": "^25",
+		"@workspace/typescript-config": "workspace:*",
+		"typescript": "^6"
+	}
+}

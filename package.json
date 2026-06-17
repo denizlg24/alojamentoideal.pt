@@ -10,7 +10,13 @@
 		"check": "biome check --write .",
 		"typecheck": "turbo typecheck",
 		"test": "turbo test",
-		"prepare": "husky"
+		"prepare": "husky",
+		"db:generate": "bun --filter @workspace/db run db:generate",
+		"db:migrate": "bun --filter @workspace/db run db:migrate",
+		"db:push": "bun --filter @workspace/db run db:push",
+		"db:studio": "bun --filter @workspace/db run db:studio",
+		"db:up": "docker compose up -d postgres",
+		"db:down": "docker compose down"
 	},
 	"devDependencies": {
 		"@biomejs/biome": "2.5.0",

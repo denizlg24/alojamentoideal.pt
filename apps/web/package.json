@@ -11,11 +11,15 @@
 		"test": "bun test --pass-with-no-tests"
 	},
 	"dependencies": {
+		"@workspace/auth": "workspace:*",
+		"@workspace/core": "workspace:*",
+		"@workspace/db": "workspace:*",
 		"@workspace/ui": "workspace:*",
 		"lucide-react": "^1.18.0",
 		"next": "16.2.9",
 		"react": "19.2.7",
-		"react-dom": "19.2.7"
+		"react-dom": "19.2.7",
+		"react-icons": "^5.6.0"
 	},
 	"devDependencies": {
 		"@tailwindcss/postcss": "^4",
