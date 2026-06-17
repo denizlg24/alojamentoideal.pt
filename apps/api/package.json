@@ -16,7 +16,6 @@
 		"@workspace/db": "workspace:*",
 		"drizzle-orm": "0.44.7",
 		"elysia": "^1.4.28",
-		"openai": "^6.44.0",
 		"zod": "^4.4.3"
 	},
 	"devDependencies": {

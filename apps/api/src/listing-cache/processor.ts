@@ -2,8 +2,6 @@ import type {
 	AccommodationListingNormalizedContent,
 	AccommodationListingProcessedContent,
 } from "@workspace/db";
-import { OpenAI } from "openai";
-import { zodTextFormat } from "openai/helpers/zod";
 import { z } from "zod";
 import { AMENITY_ICON_NAMES, AMENITY_ICON_SET } from "./amenity-icons.js";
 import {
@@ -13,6 +11,7 @@ import {
 } from "./normalizer.js";
 
 const DEFAULT_OPENAI_LISTING_MODEL = "gpt-5.5";
+const OPENAI_RESPONSES_URL = "https://api.openai.com/v1/responses";
 
 const localizedTextSchema = z.object({
 	en: z.string(),
@@ -36,6 +35,50 @@ const processedContentSchema = z.object({
 	guide: localizedTextSchema,
 	title: localizedTextSchema,
 });
+
+const localizedTextJsonSchema = {
+	additionalProperties: false,
+	properties: {
+		en: { type: "string" },
+		es: { type: "string" },
+		pt: { type: "string" },
+	},
+	required: ["en", "es", "pt"],
+	type: "object",
+} as const;
+
+const processedContentJsonSchema = {
+	additionalProperties: false,
+	properties: {
+		amenities: {
+			items: {
+				additionalProperties: false,
+				properties: {
+					icon: {
+						additionalProperties: false,
+						properties: {
+							name: { enum: AMENITY_ICON_NAMES, type: "string" },
+							set: { const: AMENITY_ICON_SET, type: "string" },
+						},
+						required: ["name", "set"],
+						type: "object",
+					},
+					id: { type: ["string", "null"] },
+					labels: localizedTextJsonSchema,
+					sourceLabel: { type: "string" },
+				},
+				required: ["icon", "id", "labels", "sourceLabel"],
+				type: "object",
+			},
+			type: "array",
+		},
+		description: localizedTextJsonSchema,
+		guide: localizedTextJsonSchema,
+		title: localizedTextJsonSchema,
+	},
+	required: ["amenities", "description", "guide", "title"],
+	type: "object",
+} as const;
 
 export type ListingProcessingStatus = "failed" | "processed" | "skipped";
 
@@ -96,11 +139,11 @@ class FallbackListingContentProcessor implements ListingContentProcessor {
 class OpenAIListingContentProcessor implements ListingContentProcessor {
 	readonly enabled = true;
 
-	readonly #client: OpenAI;
+	readonly #apiKey: string;
 	readonly #model: string;
 
 	constructor(config: { apiKey: string; model: string }) {
-		this.#client = new OpenAI({ apiKey: config.apiKey });
+		this.#apiKey = config.apiKey;
 		this.#model = config.model;
 	}
 
@@ -135,36 +178,56 @@ class OpenAIListingContentProcessor implements ListingContentProcessor {
 	private async parseListing(
 		normalized: AccommodationListingNormalizedContent,
 	): Promise<Omit<AccommodationListingProcessedContent, "model">> {
-		const response = await this.#client.responses.parse({
-			input: [
-				{
-					content:
-						"You localize short-term rental listing content. Return polished, faithful en/pt/es translations. Do not invent amenities, policies, fees, access codes, or facts. Pick one allowed Font Awesome 6 icon for each amenity.",
-					role: "system",
+		const response = await fetch(OPENAI_RESPONSES_URL, {
+			body: JSON.stringify({
+				input: [
+					{
+						content:
+							"You localize short-term rental listing content. Return polished, faithful en/pt/es translations. Do not invent amenities, policies, fees, access codes, or facts. Pick one allowed Font Awesome 6 icon for each amenity.",
+						role: "system",
+					},
+					{
+						content: JSON.stringify({
+							allowedIconNames: AMENITY_ICON_NAMES,
+							amenities: amenityInputs(normalized),
+							description: normalized.description,
+							guide: guideToText(normalized.guide),
+							title: normalized.title,
+							translations: normalized.translations,
+						}),
+						role: "user",
+					},
+				],
+				model: this.#model,
+				text: {
+					format: {
+						name: "listing_content",
+						schema: processedContentJsonSchema,
+						strict: true,
+						type: "json_schema",
+					},
 				},
-				{
-					content: JSON.stringify({
-						allowedIconNames: AMENITY_ICON_NAMES,
-						amenities: amenityInputs(normalized),
-						description: normalized.description,
-						guide: guideToText(normalized.guide),
-						title: normalized.title,
-						translations: normalized.translations,
-					}),
-					role: "user",
-				},
-			],
-			model: this.#model,
-			text: {
-				format: zodTextFormat(processedContentSchema, "listing_content"),
+			}),
+			headers: {
+				Authorization: `Bearer ${this.#apiKey}`,
+				"Content-Type": "application/json",
 			},
+			method: "POST",
 		});
+		const payload = await readJson(response);
 
-		if (!response.output_parsed) {
-			throw new Error("OpenAI returned no parsed listing content");
+		if (!response.ok) {
+			throw new Error(
+				`OpenAI listing processing failed with status ${response.status}`,
+			);
 		}
 
-		const parsed = response.output_parsed;
+		const outputText = extractOutputText(payload);
+		if (!outputText) {
+			throw new Error("OpenAI returned no listing content text");
+		}
+
+		const parsed = processedContentSchema.parse(JSON.parse(outputText));
 
 		return {
 			amenities: parsed.amenities.map((amenity) => ({
@@ -186,6 +249,53 @@ function normalizeError(error: unknown): string {
 	}
 
 	return "Listing content processing failed";
+}
+
+async function readJson(response: Response): Promise<unknown> {
+	const text = await response.text();
+	if (!text) {
+		return null;
+	}
+
+	try {
+		return JSON.parse(text) as unknown;
+	} catch {
+		return null;
+	}
+}
+
+function extractOutputText(payload: unknown): string | null {
+	const record = asRecord(payload);
+	if (typeof record.output_text === "string") {
+		return record.output_text;
+	}
+
+	const output = record.output;
+	if (!Array.isArray(output)) {
+		return null;
+	}
+
+	for (const item of output) {
+		const content = asRecord(item).content;
+		if (!Array.isArray(content)) {
+			continue;
+		}
+
+		for (const block of content) {
+			const text = asRecord(block).text;
+			if (typeof text === "string") {
+				return text;
+			}
+		}
+	}
+
+	return null;
+}
+
+function asRecord(value: unknown): Record<string, unknown> {
+	return typeof value === "object" && value !== null
+		? (value as Record<string, unknown>)
+		: {};
 }
 
 export function listingProcessingInput(

@@ -16,6 +16,26 @@ bun run test
 bun run build
 ```
 
+## Runtime configuration
+
+Required for production API startup:
+
+| Variable | Purpose |
+|---|---|
+| `DATABASE_URL` | Postgres connection used by Better Auth and listing cache tables |
+| `BETTER_AUTH_SECRET` | Better Auth signing secret; required when `NODE_ENV=production` |
+| `BETTER_AUTH_URL` | Public API origin, for example `https://api.example.com` |
+| `AUTH_TRUSTED_ORIGINS` | Comma-separated trusted web origins for Better Auth |
+| `WEB_ORIGIN` | Comma-separated web origins allowed by API CORS |
+
+Optional auth configuration:
+
+| Variable | Purpose |
+|---|---|
+| `GOOGLE_CLIENT_ID` | Enables Google auth when paired with `GOOGLE_CLIENT_SECRET` |
+| `GOOGLE_CLIENT_SECRET` | Enables Google auth when paired with `GOOGLE_CLIENT_ID` |
+| `PORT` | Local server port; Vercel provides its own runtime |
+
 ## Hostify connector
 
 Create the connector from environment configuration:

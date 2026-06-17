@@ -1,7 +1,6 @@
 import { timingSafeEqual } from "node:crypto";
 import { Elysia } from "elysia";
 import { getListingCacheConfig } from "./config.js";
-import { createHostifyListingCacheSyncFromEnv } from "./hostify-sync.js";
 
 export function listingCacheRoutes() {
 	return new Elysia({ name: "listing-cache-routes" }).post(
@@ -18,6 +17,9 @@ export function listingCacheRoutes() {
 			}
 
 			try {
+				const { createHostifyListingCacheSyncFromEnv } = await import(
+					"./hostify-sync.js"
+				);
 				const sync = createHostifyListingCacheSyncFromEnv();
 				const result = await sync.syncListings("cron");
 
