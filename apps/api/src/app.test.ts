@@ -17,6 +17,15 @@ describe("API app", () => {
 		});
 	});
 
+	it("forwards Better Auth requests", async () => {
+		const response = await app.handle(
+			new Request("http://localhost/api/auth/get-session"),
+		);
+
+		expect(response.status).toBe(200);
+		expect(await response.json()).toBeNull();
+	});
+
 	it("rejects Hostify listing cron requests without the cron secret", async () => {
 		const originalSecret = process.env.HOSTIFY_SYNC_CRON_SECRET;
 		process.env.HOSTIFY_SYNC_CRON_SECRET = "test-secret";
