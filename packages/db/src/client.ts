@@ -1,6 +1,6 @@
 import { drizzle } from "drizzle-orm/node-postgres";
 import { Pool } from "pg";
-import { schema } from "./schema.js";
+import { schema } from "./schema";
 
 const DEFAULT_DATABASE_URL =
 	"postgres://postgres:postgres@localhost:5432/alojamentoideal";

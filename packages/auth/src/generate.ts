@@ -1,4 +1,4 @@
-import { createAuth } from "./runtime.js";
+import { createAuth } from "./runtime";
 
 /**
  * Dedicated entry for the Better Auth CLI (`better-auth generate`), which

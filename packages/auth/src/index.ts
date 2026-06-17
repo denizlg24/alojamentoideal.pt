@@ -3,5 +3,5 @@ export {
 	type AuthUser,
 	getAuth,
 	type Session,
-} from "./auth.js";
-export { type AuthConfig, getAuthConfig } from "./config.js";
+} from "./auth";
+export { type AuthConfig, getAuthConfig } from "./config";

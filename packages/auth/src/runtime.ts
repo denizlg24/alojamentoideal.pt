@@ -2,8 +2,8 @@ import { getDb, schema } from "@workspace/db";
 import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { admin } from "better-auth/plugins";
-import { getAuthConfig } from "./config.js";
-import { sendVerificationEmail } from "./email.js";
+import { getAuthConfig } from "./config";
+import { sendVerificationEmail } from "./email";
 
 export function createAuth() {
 	const config = getAuthConfig();

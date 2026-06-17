@@ -1,5 +1,0 @@
-{
-	"$schema": "https://openapi.vercel.sh/vercel.json",
-	"bunVersion": "1.x",
-	"buildCommand": "bun build src/index.ts --target=bun --format=esm --external elysia --external @elysiajs/cors --outfile=src/.index.bundle.js && mv -f src/.index.bundle.js src/index.ts"
-}

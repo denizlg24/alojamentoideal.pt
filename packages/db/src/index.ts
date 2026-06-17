@@ -1,4 +1,4 @@
-export { type Database, getDb, getPool } from "./client.js";
+export { type Database, getDb, getPool } from "./client";
 export type {
 	AccommodationListingNormalizedContent,
 	AccommodationListingProcessedContent,
@@ -6,8 +6,8 @@ export type {
 	ListingSectionHashes,
 	LocalizedText,
 	ProcessedAmenity,
-} from "./schema.js";
-export * as schemaTables from "./schema.js";
+} from "./schema";
+export * as schemaTables from "./schema";
 export {
 	accommodationListing,
 	account,
@@ -16,4 +16,4 @@ export {
 	session,
 	user,
 	verification,
-} from "./schema.js";
+} from "./schema";

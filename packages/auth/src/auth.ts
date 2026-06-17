@@ -1,4 +1,4 @@
-import { type Auth, createAuth } from "./runtime.js";
+import { type Auth, createAuth } from "./runtime";
 
 export type { Auth };
 export type Session = Auth["$Infer"]["Session"];
