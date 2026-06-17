@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 
 const SENSITIVE_KEY_PATTERN =
-	/(api[_-]?key|token|secret|password|passcode|access[_-]?code|lock[_-]?pin|wifi|wi-fi|wireless|keycode|door[_-]?code)/i;
+	/(api[_-]?key|token|secret|password|passcode|access[_-]?code|lock[_-]?pin|keycode|door[_-]?code|(wifi|wi-?fi|wireless)[_-]?(password|key|passcode|code))/i;
 
 export function stableHash(value: unknown): string {
 	return createHash("sha256").update(stableStringify(value)).digest("hex");

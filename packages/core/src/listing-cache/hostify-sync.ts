@@ -139,9 +139,10 @@ export class HostifyListingCacheSync {
 		stats: HostifyListingSyncStats,
 		listingSummary: unknown,
 	): Promise<void> {
-		const externalId = readListingId(listingSummary);
+		let externalId: string | null = null;
 
 		try {
+			externalId = readListingId(listingSummary);
 			const sections = await this.fetchSections(externalId, listingSummary);
 			const projection = buildListingCacheProjection(sections);
 			const existing = await this.#repository.findListingState(

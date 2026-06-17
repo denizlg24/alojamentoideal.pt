@@ -178,68 +178,76 @@ class OpenAIListingContentProcessor implements ListingContentProcessor {
 	private async parseListing(
 		normalized: AccommodationListingNormalizedContent,
 	): Promise<Omit<AccommodationListingProcessedContent, "model">> {
-		const response = await fetch(OPENAI_RESPONSES_URL, {
-			body: JSON.stringify({
-				input: [
-					{
-						content:
-							"You localize short-term rental listing content. Return polished, faithful en/pt/es translations. Do not invent amenities, policies, fees, access codes, or facts. Pick one allowed Font Awesome 6 icon for each amenity.",
-						role: "system",
+		const controller = new AbortController();
+		const timeoutId = setTimeout(() => controller.abort(), 30000);
+
+		try {
+			const response = await fetch(OPENAI_RESPONSES_URL, {
+				body: JSON.stringify({
+					input: [
+						{
+							content:
+								"You localize short-term rental listing content. Return polished, faithful en/pt/es translations. Do not invent amenities, policies, fees, access codes, or facts. Pick one allowed Font Awesome 6 icon for each amenity.",
+							role: "system",
+						},
+						{
+							content: JSON.stringify({
+								allowedIconNames: AMENITY_ICON_NAMES,
+								amenities: amenityInputs(normalized),
+								description: normalized.description,
+								guide: guideToText(normalized.guide),
+								title: normalized.title,
+								translations: normalized.translations,
+							}),
+							role: "user",
+						},
+					],
+					model: this.#model,
+					text: {
+						format: {
+							name: "listing_content",
+							schema: processedContentJsonSchema,
+							strict: true,
+							type: "json_schema",
+						},
 					},
-					{
-						content: JSON.stringify({
-							allowedIconNames: AMENITY_ICON_NAMES,
-							amenities: amenityInputs(normalized),
-							description: normalized.description,
-							guide: guideToText(normalized.guide),
-							title: normalized.title,
-							translations: normalized.translations,
-						}),
-						role: "user",
-					},
-				],
-				model: this.#model,
-				text: {
-					format: {
-						name: "listing_content",
-						schema: processedContentJsonSchema,
-						strict: true,
-						type: "json_schema",
-					},
+				}),
+				headers: {
+					Authorization: `Bearer ${this.#apiKey}`,
+					"Content-Type": "application/json",
 				},
-			}),
-			headers: {
-				Authorization: `Bearer ${this.#apiKey}`,
-				"Content-Type": "application/json",
-			},
-			method: "POST",
-		});
-		const payload = await readJson(response);
+				method: "POST",
+				signal: controller.signal,
+			});
+			const payload = await readJson(response);
 
-		if (!response.ok) {
-			throw new Error(
-				`OpenAI listing processing failed with status ${response.status}`,
-			);
+			if (!response.ok) {
+				throw new Error(
+					`OpenAI listing processing failed with status ${response.status}`,
+				);
+			}
+
+			const outputText = extractOutputText(payload);
+			if (!outputText) {
+				throw new Error("OpenAI returned no listing content text");
+			}
+
+			const parsed = processedContentSchema.parse(JSON.parse(outputText));
+
+			return {
+				amenities: parsed.amenities.map((amenity) => ({
+					icon: amenity.icon,
+					id: amenity.id ?? null,
+					labels: amenity.labels,
+					sourceLabel: amenity.sourceLabel,
+				})),
+				description: parsed.description,
+				guide: parsed.guide,
+				title: parsed.title,
+			};
+		} finally {
+			clearTimeout(timeoutId);
 		}
-
-		const outputText = extractOutputText(payload);
-		if (!outputText) {
-			throw new Error("OpenAI returned no listing content text");
-		}
-
-		const parsed = processedContentSchema.parse(JSON.parse(outputText));
-
-		return {
-			amenities: parsed.amenities.map((amenity) => ({
-				icon: amenity.icon,
-				id: amenity.id ?? null,
-				labels: amenity.labels,
-				sourceLabel: amenity.sourceLabel,
-			})),
-			description: parsed.description,
-			guide: parsed.guide,
-			title: parsed.title,
-		};
 	}
 }
 

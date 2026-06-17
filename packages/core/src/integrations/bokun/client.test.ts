@@ -134,10 +134,13 @@ describe("BokunClient", () => {
 
 	it("does not retry mutations", async () => {
 		let calls = 0;
-		const client = clientWith(async () => {
-			calls += 1;
-			return new Response("", { status: 503 });
-		});
+		const client = makeClient(
+			async () => {
+				calls += 1;
+				return new Response("", { status: 503 });
+			},
+			{ maxReadRetries: 1 },
+		);
 
 		await client.v1.activity
 			.search({ keywords: "kayak" })

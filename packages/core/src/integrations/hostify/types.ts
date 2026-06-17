@@ -20,7 +20,7 @@ export type HostifyFilterOperator =
 export interface HostifyFilter<TField extends string = string> {
 	field: TField;
 	operator: HostifyFilterOperator;
-	value: boolean | number | string;
+	value: boolean | number | string | readonly (boolean | number | string)[];
 }
 
 export interface HostifyPagination {

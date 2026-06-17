@@ -17,6 +17,7 @@ export function getPool(): Pool {
 	if (!pool) {
 		pool = new Pool({
 			connectionString: process.env.DATABASE_URL ?? DEFAULT_DATABASE_URL,
+			connectionTimeoutMillis: 5000,
 		});
 	}
 

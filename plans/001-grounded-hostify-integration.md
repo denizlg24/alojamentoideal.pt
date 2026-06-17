@@ -7,7 +7,7 @@
 > STOP condition occurs, stop and report instead of improvising.
 >
 > **Drift check (run first)**:
-> `git diff --stat dcb678d..HEAD -- docs/data-architecture.md docs/hostify apps/api apps/web`
+> `git diff dcb678d..HEAD -- docs/data-architecture.md docs/hostify apps/api apps/web packages/* turbo.json`
 > If these paths changed since the plan was written, compare the current state
 > and capability evidence below against the live files before proceeding.
 
@@ -65,10 +65,15 @@ orders, Stripe payments, or Portuguese fiscal compliance.
 
 ### Repository state
 
-- `apps/api/src/index.ts:1-7` is only an Elysia hello-world server.
-- `apps/web/app/page.tsx:1-3` renders nothing.
-- The repository has no selected database library, migration tool, Redis
-  client, queue/worker implementation, or Hostify connector.
+- `apps/web` is a Next.js application with Better Auth integration, Bokun and
+  Hostify API clients, and a listing cache system.
+- `packages/db` provides PostgreSQL access via Drizzle ORM with pg driver and
+  typed schema migrations.
+- `packages/core` contains Bokun and Hostify integration modules with typed
+  clients, retry logic, and listing cache sync with OpenAI processing.
+- Database migrations exist for listings, sync runs, amenities, and related
+  tables.
+- Redis/Valkey client and queue/worker implementation are not yet present.
 - CI runs `bunx biome ci .`, `bun run typecheck`, `bun run test`, and
   `bun run build`.
 
@@ -425,8 +430,17 @@ Explicitly resolve:
    projections for this account.
 
 **Verify**:
-`rg -n "pending|idempot|rate limit|webhook|SNS|currency|calendar|check-in|invoice" docs/hostify`
-must find a redacted, account-specific conclusion for every item above.
+Each of the following searches must find a redacted, account-specific conclusion
+in `docs/hostify`:
+- `rg -n "pending" docs/hostify`
+- `rg -n "idempot" docs/hostify`
+- `rg -n "rate limit" docs/hostify`
+- `rg -n "webhook" docs/hostify`
+- `rg -n "SNS" docs/hostify`
+- `rg -n "currency" docs/hostify`
+- `rg -n "calendar" docs/hostify`
+- `rg -n "check-in" docs/hostify`
+- `rg -n "invoice" docs/hostify`
 
 **Gate**: Do not begin production reservation creation until items 1-3 are
 resolved. Do not expose webhook-driven state as reliable until item 4 is
