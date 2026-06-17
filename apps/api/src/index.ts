@@ -6,6 +6,4 @@ const app = new Elysia()
 	.get("/", () => "Hello Elysia")
 	.get("/me", ({ user }) => user, { auth: true });
 
-app.listen(3000);
-
 export default app;
