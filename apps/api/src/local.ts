@@ -1,5 +1,8 @@
+import { getApiConfig } from "./config.js";
 import app from "./index.js";
 
-app.listen(3000);
+const config = getApiConfig();
 
-console.log(`API listening on http://localhost:${app.server?.port ?? 3000}`);
+app.listen(config.port);
+
+console.log(`API listening on http://localhost:${config.port}`);
