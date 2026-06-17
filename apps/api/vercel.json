@@ -1,5 +1,5 @@
 {
 	"$schema": "https://openapi.vercel.sh/vercel.json",
 	"bunVersion": "1.x",
-	"buildCommand": "bun build src/main.ts --target=bun --outfile=src/index.ts"
+	"buildCommand": "bun build src/index.ts --target=bun --outfile=src/.index.bundle.js && mv -f src/.index.bundle.js src/index.ts"
 }
