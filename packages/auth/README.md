@@ -23,8 +23,9 @@ React client.
 
 ## Exports
 
-- `.` (server) — `auth` instance, `getAuthConfig`, and `Auth` / `Session` /
-  `AuthUser` types. Imports `pg`; never bundle into client code.
+- `.` (server) — lazy `getAuth()` accessor, compatibility `auth` proxy,
+  `getAuthConfig`, and `Auth` / `Session` / `AuthUser` types. Imports `pg`;
+  never bundle into client code.
 - `./client` — `authClient` (from `better-auth/react`) plus `signIn`,
   `signOut`, `signUp`, `useSession`, `getSession`, `admin`. Safe for the
   browser. The web app re-exports this from `apps/web/lib/auth-client.ts`.

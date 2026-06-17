@@ -5,33 +5,55 @@ import { admin } from "better-auth/plugins";
 import { getAuthConfig } from "./config.js";
 import { sendVerificationEmail } from "./email.js";
 
-const config = getAuthConfig();
+function createAuth() {
+	const config = getAuthConfig();
 
-export const auth = betterAuth({
-	appName: "Alojamento Ideal",
-	baseURL: config.baseURL,
-	basePath: "/api/auth",
-	secret: config.secret,
-	trustedOrigins: config.trustedOrigins,
-	database: drizzleAdapter(getDb(), {
-		provider: "pg",
-		schema,
-	}),
-	emailAndPassword: {
-		enabled: true,
-		requireEmailVerification: true,
-	},
-	emailVerification: {
-		sendOnSignUp: true,
-		autoSignInAfterVerification: true,
-		sendVerificationEmail: async ({ user, url }) => {
-			await sendVerificationEmail({ email: user.email, url });
+	return betterAuth({
+		appName: "Alojamento Ideal",
+		baseURL: config.baseURL,
+		basePath: "/api/auth",
+		secret: config.secret,
+		trustedOrigins: config.trustedOrigins,
+		database: drizzleAdapter(getDb(), {
+			provider: "pg",
+			schema,
+		}),
+		emailAndPassword: {
+			enabled: true,
+			requireEmailVerification: true,
 		},
-	},
-	socialProviders: config.google ? { google: config.google } : {},
-	plugins: [admin()],
-});
+		emailVerification: {
+			sendOnSignUp: true,
+			autoSignInAfterVerification: true,
+			sendVerificationEmail: async ({ user, url }) => {
+				await sendVerificationEmail({ email: user.email, url });
+			},
+		},
+		socialProviders: config.google ? { google: config.google } : {},
+		plugins: [admin()],
+	});
+}
 
-export type Auth = typeof auth;
-export type Session = typeof auth.$Infer.Session;
+export type Auth = ReturnType<typeof createAuth>;
+export type Session = Auth["$Infer"]["Session"];
 export type AuthUser = Session["user"];
+
+let authInstance: Auth | undefined;
+
+export function getAuth(): Auth {
+	authInstance ??= createAuth();
+
+	return authInstance;
+}
+
+export const auth = new Proxy({} as Auth, {
+	get(_target, property, receiver) {
+		const value = Reflect.get(getAuth(), property, receiver);
+
+		if (typeof value === "function") {
+			return value.bind(getAuth());
+		}
+
+		return value;
+	},
+});

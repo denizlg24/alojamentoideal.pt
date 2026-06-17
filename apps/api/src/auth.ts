@@ -1,19 +1,11 @@
 import { cors } from "@elysiajs/cors";
-import type { Auth } from "@workspace/auth";
+import { getAuth } from "@workspace/auth";
 import { Elysia } from "elysia";
 
 const webOrigins = (process.env.WEB_ORIGIN ?? "http://localhost:3001")
 	.split(",")
 	.map((origin) => origin.trim())
 	.filter((origin) => origin.length > 0);
-
-let authPromise: Promise<Auth> | undefined;
-
-function getAuth(): Promise<Auth> {
-	authPromise ??= import("@workspace/auth").then(({ auth }) => auth);
-
-	return authPromise;
-}
 
 /**
  * Elysia plugin that exposes Better Auth as the single auth origin:
@@ -31,14 +23,14 @@ export const betterAuth = new Elysia({ name: "better-auth" })
 		}),
 	)
 	.all("/api/auth/*", async ({ request }) => {
-		const auth = await getAuth();
+		const auth = getAuth();
 
 		return auth.handler(request);
 	})
 	.macro({
 		auth: {
 			async resolve({ status, request: { headers } }) {
-				const auth = await getAuth();
+				const auth = getAuth();
 				const session = await auth.api.getSession({ headers });
 
 				if (!session) {
