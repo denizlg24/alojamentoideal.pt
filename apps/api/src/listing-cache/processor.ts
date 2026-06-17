@@ -164,7 +164,19 @@ class OpenAIListingContentProcessor implements ListingContentProcessor {
 			throw new Error("OpenAI returned no parsed listing content");
 		}
 
-		return response.output_parsed;
+		const parsed = response.output_parsed;
+
+		return {
+			amenities: parsed.amenities.map((amenity) => ({
+				icon: amenity.icon,
+				id: amenity.id ?? null,
+				labels: amenity.labels,
+				sourceLabel: amenity.sourceLabel,
+			})),
+			description: parsed.description,
+			guide: parsed.guide,
+			title: parsed.title,
+		};
 	}
 }
 
