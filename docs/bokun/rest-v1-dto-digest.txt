@@ -1,0 +1,3310 @@
+AccessibilityType = enum(LIMITED_MOBILITY|LIMITED_SIGHT|WHEELCHAIR|STROLLER_OR_PRAM) {
+  
+}
+
+AccommodationAvailabilitiesDto {
+  startDate: string
+  endDate: string
+  accommodations: AccommodationReport[]
+}
+
+AccommodationAvailabilityReportDto {
+  availableRooms: AvailableRoomDto[]
+  checkInDate: string<date-time>
+  checkOutDate: string<date-time>
+  nightCount: integer<int32>
+}
+
+AccommodationBookingAnswersDto {
+  accommodationId: integer<int64>
+  answers: AnswerDto[]
+  bookingId: integer<int64>
+  rooms: RoomAnswersDto[]
+}
+
+AccommodationBookingDetailsDto {
+  accommodation: AccommodationDto
+  affiliateCommission: number<double>
+  agent: BookingAgentWithLinksDto
+  agentCommission: number<double>
+  allotment: AllotmentDto
+  answers: BookingAnswerDto[]
+  barcode: BarcodeValueDto
+  boxBooking: boolean
+  boxProduct: ProductInfoDto
+  cancelNote: string
+  cancellationDate: string<date-time>
+  cancelledBy: string
+  confirmationCode: string
+  discountAmount: number
+  discountPercentage: number<double>
+  endDate: string<date-time>
+  linksToExternalProducts: IntegratedSystemProductLinkDto[]
+  firstStartDate: string<date-time>
+  supplierContractFlags: string[]
+  sellerContractFlags: string[]
+  id: integer<int64>
+  includedOnCustomerInvoice: boolean
+  invoice: ProductInvoiceDto
+  lastEndDate: string<date-time>
+  lodgingTax: Money
+  notes: bookingNote[]
+  paidType: PaymentPaidTypeEnum
+  parentBooking: BookingDetailsDto
+  parentBookingId: integer<int64>
+  priceWithDiscount: number
+  product: ProductInfoDto
+  productConfirmationCode: string
+  rooms: RoomBookingDetailsDto[]
+  savedAmount: number
+  seller: VendorWithLinksDto
+  sellerCommission: number<double>
+  sortDate: string<date-time>
+  startDate: string<date-time>
+  status: BookingStatusEnum
+  supplier: VendorWithLinksDto
+  totalPrice: number
+}
+
+AccommodationBookingDto {
+  accommodation: ProductInfoDto
+  allotment: AllotmentDto
+  bookingStatus: string
+  creationDate: string<date-time>
+  customerUuid: string
+  endDate: string<date-time>
+  firstStartDate: string<date-time>
+  id: integer<int64>
+  includedOnCustomerInvoice: boolean
+  lastEndDate: string<date-time>
+  lastModifiedDate: string<date-time>
+  productCategory: string
+  productConfirmationCode: string
+  roomBookings: RoomBookingDto[]
+  sortDate: string<date-time>
+  startDate: string<date-time>
+  totalPrice: number
+  vendor: VendorDto
+}
+
+AccommodationBookingQuestionsDto {
+  bookingId: integer<int64>
+  accommodationId: integer<int64>
+  accommodationTitle: string
+  questions: QuestionSpecificationDto[]
+  rooms: RoomQuestionsDto[]
+}
+
+AccommodationBookingRequest {
+  accommodationId: integer<int64>
+  answers: AnswerDto[]
+  travelType: enum(BUSINESS|LEISURE|CONFERENCE)
+  note: string
+  rooms: RoomBookingRequest[]
+}
+
+AccommodationBookingRequestDto {
+  accommodationId: integer<int64>
+  checkinDate: string
+  checkoutDate: string
+  ignoreAssignmentIfFull: boolean
+  rooms: RoomBookingRequestDto[]
+  travelType: TravelTypeEnum
+}
+
+AccommodationDto {
+  actualVendor: VendorDto
+  actualId: integer<int64>
+  baseLanguage: string
+  bookableExtras: BookableExtraDto[]
+  box: boolean
+  boxedAccommodationId: integer<int64>
+  boxedVendor: VendorDto
+  categories: CategoryDto[]
+  checkInHour: integer<int32>
+  checkInMinute: integer<int32>
+  checkOutHour: integer<int32>
+  checkOutMinute: integer<int32>
+  paymentCurrencies: string[]
+  customFields: CustomFieldDto[]
+  description: string
+  excerpt: string
+  externalId: string
+  flags: string[]
+  id: integer<int64>
+  keyPhoto: PhotoDto
+  keywords: string[]
+  languages: string[]
+  lastPublished: string
+  location: LocationDto
+  photos: PhotoDto[]
+  productCategory: string
+  productGroupId: integer<int64>
+  rating: integer<int32>
+  roomTypes: RoomTypeDto[]
+  slug: string
+  tagGroups: TagGroupDto[]
+  title: string
+  vendor: VendorDto
+  videos: VideoDto[]
+  cancellationPolicy: CancellationPolicyDto
+  barcodeType: BarcodeTypeEnum
+  timeZone: string
+  storedExternally: boolean
+}
+
+AccommodationQuery {
+  accommodationId: integer<int64>
+  dateFormats: string[]
+  endDate: string
+  excludeBoxes: boolean
+  externalId: string
+  facetFilters: FacetFilter[]
+  locationFilters: LocationFilters
+  page: integer<int32>
+  pageSize: integer<int32>
+  publishedSince: string
+  rooms: RoomQuery[]
+  sortField: string
+  sortOrder: string
+  startDate: string
+  textFilter: TextFilter
+  vendorId: integer<int64>
+}
+
+AccommodationReport {
+  accommodation: AccommodationDto
+  rooms: RoomReport[]
+}
+
+Action {
+  type: string
+}
+
+ActivitiesBySupplier {
+  supplierId: integer<int64>
+  activityIds: integer<int64>[]
+}
+
+ActivityAttribute = enum(FAMILY_FRIENDLY|ECO_FRIENDLY|ROMANTIC|LUXURY|RAINY_DAY|SKIP_THE_LINE|GROUP_FRIENDLY|INDOOR|OUTDOOR|PRIVATE_ACTIVITY|TAILOR_MADE|BEACH|ADULTS_ONLY|COUPLES|SENIOR|YOUTH|VOLUNTEERS) {
+  
+}
+
+ActivityAvailabilityDto {
+  id: string
+  activityId: integer<int64>
+  activityTitle: string
+  activityOwnerId: integer<int64>
+  activityOwnerTitle: string
+  startTime: string
+  startTimeId: integer<int64>
+  startTimeLabel: string
+  flexible: boolean
+  date: integer<int64>
+  localizedDate: string
+  availabilityCount: integer<int32>
+  bookedParticipants: integer<int32>
+  minParticipants: integer<int32>
+  minParticipantsToBookNow: integer<int32>
+  productGroupId: integer<int32>
+  recurrenceId: integer<int32>
+  pickupAllotment: boolean
+  pickupAvailabilityCount: integer<int32>
+  unlimitedAvailability: boolean
+  defaultRateId: integer<int32>
+  rates: ActivityRateDto[]
+  pricesByRate: ActivityRatePrices[]
+  comboActivity: boolean
+  comboStartTimes: ComboStartTimeInfoDto[]
+  flags: string[]
+  defaultPrice: number
+  pricesByCategory: map<number<double>>
+  pickupPrice: number
+  pickupPricesByCategory: map<number<double>>
+  dropoffPrice: number
+  dropoffPricesByCategory: map<number<double>>
+  extraPrices: map<number<double>>
+  guidedLanguages: string[]
+  unavailable: boolean
+  pickupSoldOut: boolean
+  soldOut: boolean
+}
+
+ActivityBookingAnswersDto {
+  activityId: integer<int64>
+  answers: AnswerDto[]
+  pickupAnswers: AnswerDto[]
+  dropoffAnswers: AnswerDto[]
+  bookingId: integer<int64>
+  passengers: PassengerAnswersDto[]
+}
+
+ActivityBookingDetailsDto {
+  activity: ActivityDto
+  affiliateCommission: number<double>
+  agent: BookingAgentWithLinksDto
+  agentCommission: number<double>
+  answers: BookingAnswerDto[]
+  barcode: BarcodeValueDto
+  bookedDropoffPricingType: AddonPricingTypeEnum
+  bookedPickupPricingType: AddonPricingTypeEnum
+  bookedPricingCategories: PricingCategoryDto[]
+  boxBooking: boolean
+  boxProduct: ProductInfoDto
+  cancelNote: string
+  cancellationDate: string<date-time>
+  cancelledBy: string
+  comboChildBookings: ProductBookingBasicsDto[]
+  comboParentBooking: ProductBookingBasicsDto
+  confirmationCode: string
+  customized: boolean
+  date: string<date-time>
+  discountAmount: number
+  discountPercentage: number<double>
+  dropoff: boolean
+  dropoffPlace: PickupPlaceDto
+  dropoffPlaceDescription: string
+  linksToExternalProducts: IntegratedSystemProductLinkDto[]
+  extras: ExtraBookingDetailsDto[]
+  bookingFields: BookingFieldDto[]
+  supplierContractFlags: string[]
+  sellerContractFlags: string[]
+  flexible: boolean
+  id: integer<int64>
+  includedOnCustomerInvoice: boolean
+  invoice: ProductInvoiceDto
+  notes: bookingNote[]
+  paidType: PaymentPaidTypeEnum
+  parentBooking: BookingDetailsDto
+  parentBookingId: integer<int64>
+  pickup: boolean
+  pickupPlace: PickupPlaceDto
+  pickupPlaceDescription: string
+  pickupPlaceRoomNumber: string
+  pickupTime: string
+  priceWithDiscount: number
+  pricingCategoryBookings: ActivityPricingCategoryBookingDto[]
+  product: ProductInfoDto
+  productConfirmationCode: string
+  quantityByPricingCategory: map<number<int32>>
+  savedAmount: number
+  selectedFlexDayOption: string
+  seller: VendorWithLinksDto
+  sellerCommission: number<double>
+  startTime: string
+  startTimeId: integer<int64>
+  status: BookingStatusEnum
+  supplier: VendorWithLinksDto
+  totalParticipants: integer<int32>
+  totalPrice: number
+}
+
+ActivityBookingDto {
+  activity: ProductInfoDto
+  activityPrice: number
+  bookingStatus: string
+  creationDate: string<date-time>
+  customerUuid: string
+  date: string<date-time>
+  dropoff: boolean
+  dropoffPlace: PickupPlaceDto
+  dropoffPlaceDescription: string
+  dropoffPrice: number
+  extraBookings: ExtraBookingDto[]
+  extrasPrice: number
+  flexible: boolean
+  id: integer<int64>
+  includedOnCustomerInvoice: boolean
+  lastModifiedDate: string<date-time>
+  maxBookableCount: integer<int32>
+  pickup: boolean
+  pickupPlace: PickupPlaceDto
+  pickupPlaceDescription: string
+  pickupPlaceRoomNumber: string
+  pickupPrice: number
+  pricingCategoryBookings: ActivityPricingCategoryBookingDto[]
+  productCategory: string
+  productConfirmationCode: string
+  selectedFlexDayOption: string
+  startTime: StartTimeDto
+  totalPrice: number
+  unlimitedAvailability: boolean
+  vendor: VendorDto
+}
+
+ActivityBookingQuestion {
+  id: integer<int64>
+  personalData: boolean
+  questionCode: string
+  label: string
+  help: string
+  placeholder: string
+  required: boolean
+  defaultValue: string
+  dataType: AnswerDataType
+  flags: string[]
+  selectFromOptions: boolean
+  selectMultiple: boolean
+  options: AnswerOption[]
+  context: enum(BOOKING|PASSENGER|EXTRA)
+  pricingCategoryTriggerSelection: QuestionTriggerSelectionTypeEnum
+  pricingCategoryTriggers: object[]
+  rateTriggerSelection: QuestionTriggerSelectionTypeEnum
+  rateTriggers: object[]
+  extraTriggerSelection: QuestionTriggerSelectionTypeEnum
+  extraTriggers: object[]
+}
+
+ActivityBookingQuestionsDto {
+  bookingId: integer<int64>
+  activityId: integer<int64>
+  activityTitle: string
+  questions: QuestionSpecificationDto[]
+  passengers: PassengerQuestionsDto[]
+  pickupQuestions: QuestionSpecificationDto[]
+  dropoffQuestions: QuestionSpecificationDto[]
+}
+
+ActivityBookingRequest {
+  activityId: integer<int64>
+  answers: AnswerDto[]
+  pickupAnswers: AnswerDto[]
+  dropoffAnswers: AnswerDto[]
+  rateId: integer<int64>
+  startTimeId: integer<int64>
+  date: string
+  pickup: boolean
+  pickupPlaceId: integer<int64>
+  pickupDescription: string
+  dropoff: boolean
+  dropoffPlaceId: integer<int64>
+  dropoffDescription: string
+  checkedIn: boolean
+  note: string
+  customized: boolean
+  customizedTime: string
+  customizedPrice: number
+  passengers: PassengerBookingRequest[]
+}
+
+ActivityBookingRequestDto {
+  activityId: integer<int64>
+  rateId: integer<int64>
+  date: string
+  dropoff: boolean
+  dropoffPlaceDescription: string
+  dropoffPlaceId: integer<int64>
+  extras: ExtraBookingRequestDto[]
+  flexibleDayOption: string
+  pickup: boolean
+  pickupPlaceDescription: string
+  pickupPlaceId: integer<int64>
+  pickupPlaceRoomNumber: string
+  pricingCategoryBookings: ActivityPricingCategoryBookingRequestDto[]
+  startTimeId: integer<int64>
+}
+
+ActivityBookingType = enum(PASS|DATE|DATE_AND_TIME) {
+  
+}
+
+ActivityCapacityType = enum(FREE_SALE|LIMITED|ON_REQUEST) {
+  
+}
+
+ActivityCategory = enum(WALKING_TOUR|BUS_OR_MINIVAN_TOUR|AIR_OR_HELICOPTER_TOUR|SAILING_OR_BOAT_TOUR|PRIVATE_CAR_TOUR|SEGWAY_TOUR|SNOWMOBILE_TOUR|ATV_OR_QUAD_TOUR|BIKE_TOUR|HOP_ON_HOP_OFF_TOUR|TOURIST_PASS|RAIL_PASS|AMUSEMENT_PARK|AIRPORT_LOUNGE|SHOWS_AND_MUSICALS|SPECTATOR_SPORTS|FESTIVAL|MUSEUMS_AND_EXHIBITIONS|SIGHTSEEING_ATTRACTION|ZOOS_AND_AQUARIUMS|SIGHTSEEING|ARTS_AND_CULTURE|CLASSES_AND_WORKSHOPS|CULINARY|NIGHTLIFE|SHOPPING|PHOTOGRAPHY|TV_AND_MOVIES|ESCAPE_GAME|SPA_AND_WELLNESS|ADVENTURE|WATER|NATURE|SAFARI_AND_WILDLIFE|BIRDWATCHING|DOLPHIN_OR_WHALEWATCHING|SURFING|CANOEING|CAVING|CLIMBING|DIVING|GLACIER_HIKING|HIKING|HORSEBACK_RIDING|ICE_CLIMBING|KAYAKING|RAFTING|SEA_ANGLING|HUNTING|FISHING|SKIING|SNORKELING|SELF_DRIVE_TOUR|PRIVATE_ROUNDRIP|MINI_CRUISE|CITY_BREAK|SHORT_BREAK|SUN_AND_BEACH|PILGRIMAGE_OR_RELIGION|MOTORCYCLE_TOURS|MOUNTAIN_BIKE|GOLF|MULTISPORT|EDUCATIONAL_TOUR|LANGUAGE_TOUR|MEDICAL_TOUR|CULTURAL_AND_THEME_TOURS|DAY_TRIPS_AND_EXCURSIONS|HOLIDAY_AND_SEASONAL_TOURS|LUXURY_AND_SPECIAL_OCCASIONS|OBSTACLE_COURSES|ADRENALINE_AND_EXTREME|PAINTBALL|PARAGLIDING|RUNNING|SHORE_EXCURSIONS|THEME_PARKS|TROLLEY_TOURS|LAYOVER_TOURS|CLASSIC_CAR_TOURS|UNDERGROUND_TOURS|PLANTATION_TOURS|HORSE_CARRIAGE_RIDE|SKIP_THE_LINE|CITY_TOURS|TRANSFERS_AND_GROUND_TRANSPORT|VIP_AND_EXCLUSIVE|WEDDING_AND_HONEYMOON|EBIKE_TOUR) {
+  
+}
+
+ActivityDto {
+  id: integer<int64>
+  externalId: string
+  productGroupId: integer<int64>
+  productCategory: ProductCategoryEnum
+  box: boolean
+  inventoryLocal: boolean
+  inventorySupportsPricing: boolean
+  inventorySupportsAvailability: boolean
+  creationDate: string
+  lastModified: string
+  lastPublished: string
+  published: boolean
+  title: string
+  description: string
+  excerpt: string
+  cancellationPolicy: CancellationPolicyDto
+  overrideBarcodeFormat: boolean
+  barcodeType: BarcodeTypeEnum
+  timeZone: string
+  mainContactFields: CustomerFieldReferenceDto[]
+  requiredCustomerFields: string[]
+  keywords: string[]
+  flags: string[]
+  slug: string
+  baseLanguage: string
+  languages: string[]
+  paymentCurrencies: string[]
+  customFields: CustomFieldDto[]
+  tagGroups: TagGroupDto[]
+  categories: CategoryDto[]
+  keyPhoto: PhotoDto
+  photos: PhotoDto[]
+  videos: VideoDto[]
+  vendor: VendorDto
+  boxedVendor: VendorDto
+  storedExternally: boolean
+  pluginId: string
+  reviewRating: number<double>
+  reviewCount: integer<int64>
+  activityType: ActivityType
+  bookingType: ActivityBookingType
+  scheduleType: ActivityScheduleType
+  capacityType: ActivityCapacityType
+  passExpiryType: PassExpiryType
+  fixedPassExpiryDate: string[]
+  meetingType: ActivityMeetingType
+  privateActivity: boolean
+  passCapacity: integer<int32>
+  passValidForDays: integer
+  passesAvailable: integer<int32>
+  dressCode: boolean
+  passportRequired: boolean
+  supportedAccessibilityTypes: AccessibilityType[]
+  startPoints: Place[]
+  bookingQuestions: ActivityBookingQuestion[]
+  passengerFields: CustomerFieldReferenceDto[]
+  inclusions: InclusionExclusionType[]
+  included: string
+  exclusions: InclusionExclusionType[]
+  excluded: string
+  requirements: string
+  knowBeforeYouGoItems: enum(STROLLER_OR_PRAM_ACCESSIBLE|WHEELCHAIR_ACCESSIBLE|LIMITED_MOBILITY_ACCESSIBLE|LIMITED_SIGHT_ACCESSIBLE|ANIMALS_OR_PETS_ALLOWED|PUBLIC_TRANSPORTATION_NEARBY|INFANT_SEATS_AVAILABLE|INFANTS_MUST_SIT_ON_LAPS)[]
+  attention: string
+  locationCode: LocationCodeDto
+  googlePlace: object
+  resourceSlots: object[]
+  bookingCutoffMinutes: integer<int32>
+  bookingCutoffHours: integer<int32>
+  bookingCutoffDays: integer<int32>
+  bookingCutoffWeeks: integer<int32>
+  requestDeadlineMinutes: integer<int32>
+  requestDeadlineHours: integer<int32>
+  requestDeadlineDays: integer<int32>
+  requestDeadlineWeeks: integer<int32>
+  boxedActivityId: integer<int64>
+  comboActivity: boolean
+  comboParts: ComboPart[]
+  ticketPerComboComponent: boolean
+  ticketComboComponents: ComboPart[]
+  pickupActivityId: integer<int64>
+  allowCustomizedBookings: boolean
+  dayBasedAvailability: boolean
+  selectFromDayOptions: boolean
+  dayOptions: string[]
+  activityCategories: ActivityCategory[]
+  activityAttributes: ActivityAttribute[]
+  guidanceTypes: Guidance[]
+  defaultRateId: integer<int64>
+  rates: ActivityRateDto[]
+  ticketPerPerson: boolean
+  durationType: enum(MINUTES|HOURS|DAYS)
+  duration: integer<int32>
+  durationMinutes: integer<int32>
+  durationHours: integer<int32>
+  durationDays: integer<int32>
+  durationWeeks: integer<int32>
+  durationText: string
+  minAge: integer<int32>
+  nextDefaultPrice: number
+  nextDefaultPriceMoney: object
+  pickupService: boolean
+  pickupAllotment: boolean
+  pickupAllotmentType: enum(NO_ALLOTMENT|USE_ALLOTMENT|USE_COMBO_ALLOTMENT)
+  useComponentPickupAllotments: boolean
+  pickupFlags: string[]
+  customPickupAllowed: boolean
+  pickupMinutesBefore: integer<int32>
+  noPickupMsg: string
+  pickupTimeLocationBased: boolean
+  pickupTimeByLocations: object[]
+  ticketMsg: string
+  showGlobalPickupMsg: boolean
+  showNoPickupMsg: boolean
+  pickupPlaceGroups: object
+  dropoffService: boolean
+  dropoffFlags: string[]
+  customDropoffAllowed: boolean
+  useSameAsPickUpPlaces: boolean
+  dropoffPlaceGroups: object
+  difficultyLevel: enum(VERY_EASY|EASY|MODERATE|CHALLENGING|DEMANDING|EXTREME)
+  pricingCategories: PricingCategoryDto[]
+  agendaItems: AgendaItemDto[]
+  startTimes: StartTimeDto[]
+  bookableExtras: BookableExtraDto[]
+  route: ActivityRouteDto
+  hasOpeningHours: boolean
+  defaultOpeningHours: OpeningHours
+  seasonalOpeningHours: SeasonalOpeningHours[]
+  displaySettings: object
+  hasBoxes: boolean
+  requestDeadline: integer<int64>
+  actualId: integer<int64>
+  bookingCutoff: integer<int32>
+  nextDefaultPriceAsText: string
+  actualVendor: VendorDto
+}
+
+ActivityMeetingType = enum(MEET_ON_LOCATION|PICK_UP|MEET_ON_LOCATION_OR_PICK_UP) {
+  
+}
+
+ActivityPlacesDto {
+  dropoffPlaces: PickupPlaceDto[]
+  pickupPlaces: PickupPlaceDto[]
+}
+
+ActivityPriceListDateRange {
+  from*: string
+  to: string
+  rates*: ActivityRatePricesDto[]
+}
+
+ActivityPriceListDto {
+  activityId: integer<int64>
+  isPriceConverted: boolean
+  conversionRate: number<double>
+  defaultCurrency: string
+  pricesByDateRange: ActivityPriceListDateRange[]
+}
+
+ActivityPricingCategoryBookingAnswersDto {
+  answerGroups: BookingAnswerGroupDto[]
+  bookingId: integer<int64>
+}
+
+ActivityPricingCategoryBookingDto {
+  answers: BookingAnswerDto[]
+  barcode: BarcodeValueDto
+  bookedDropoffPrice: number
+  bookedPickupPrice: number
+  bookedPrice: number
+  bookedTitle: string
+  extras: ExtraBookingDetailsDto[]
+  flags: string[]
+  id: integer<int64>
+  pricingCategory: PricingCategoryDto
+  pricingCategoryId: integer<int64>
+}
+
+ActivityPricingCategoryBookingRequestDto {
+  extras: ExtraBookingRequestDto[]
+  pricingCategoryId: integer<int64>
+}
+
+ActivityQuery {
+  agendaLocationFilters: LocationFilters
+  comboActivity: boolean
+  dateFormats: string[]
+  endDate: string
+  excludeBoxes: boolean
+  externalId: string
+  facetFilters: FacetFilter[]
+  page: integer<int32>
+  pageSize: integer<int32>
+  participants: integer<int32>
+  participantsByAge: integer<int32>[]
+  publishedSince: string
+  sortField: ActivitySortField
+  sortOrder: string
+  startDate: string
+  startPointLocationFilters: LocationFilters
+  textFilter: TextFilter
+  vendorId: integer<int64>
+}
+
+ActivityRateDto {
+  id: integer<int64>
+  title: string
+  description: string
+  index: integer<int32>
+  rateCode: string
+  pricedPerPerson: boolean
+  minPerBooking: integer<int32>
+  maxPerBooking: integer<int32>
+  cancellationPolicy: CancellationPolicy
+  pickupSelectionType: AddonSelectionType
+  pickupPricingType: AddonPricingType
+  pickupPricedPerPerson: boolean
+  dropoffSelectionType: AddonSelectionType
+  dropoffPricingType: AddonPricingType
+  dropoffPricedPerPerson: boolean
+  extraConfigs: ActivityRateExtraConfig[]
+  startTimeIds: integer<int64>[]
+  tieredPricingEnabled: boolean
+  tiers: object[]
+  pricingCategoryIds: integer<int64>[]
+  details: string[]
+}
+
+ActivityRateExtraConfig {
+  id: integer<int64>
+  activityExtraId: integer<int64>
+  selectionType: ExtraSelectionType
+  pricingType: AddonPricingType
+  pricedPerPerson: boolean
+}
+
+ActivityRatePrices {
+  activityRateId: integer<int64>
+  pricePerBooking: SimpleMoney
+  pricePerCategoryUnit: PriceByItem[]
+  pickupPrice: SimpleMoney
+  pickupPricePerCategoryUnit: PriceByItem[]
+  dropoffPrice: SimpleMoney
+  dropoffPricePerCategoryUnit: PriceByItem[]
+  extraPricePerUnit: PriceByItem[]
+  extraPricePerCategoryUnit: PriceByItem[]
+}
+
+ActivityRatePricesDto {
+  rateId*: integer<int64>
+  title*: string
+  price: PriceDto
+  passengers: CategoryPriceDto[]
+  pickupPrice: PriceDto
+  dropoffPrice: PriceDto
+  extras: ExtraPriceDto[]
+}
+
+ActivityRouteDto {
+  center: GeoPoint
+  end: GeoPoint
+  mapZoomLevel: integer<int32>
+  sameStartEnd: boolean
+  start: GeoPoint
+  waypoints: GeoPoint[]
+}
+
+ActivityScheduleType = enum(FIXED|RECURRING) {
+  
+}
+
+ActivitySortField = enum(BEST_SELLING_GLOBAL|BEST_SELLING_IN_CHANNEL|ALPHABETIC|RANDOM) {
+  
+}
+
+ActivityType = enum(DAY_TOUR_OR_ACTIVITY|MULTI_DAY_TOUR|ATTRACTION|EVENT) {
+  
+}
+
+AddonPricingType = enum(INCLUDED_IN_PRICE|PRICED_SEPARATELY) {
+  
+}
+
+AddonPricingTypeEnum = enum(FREE|PER_BOOKING|PER_PERSON|PER_PERSON_PER_NIGHT) {
+  
+}
+
+AddonSelectionType = enum(OPTIONAL|PRESELECTED|UNAVAILABLE) {
+  
+}
+
+Address {
+  id: integer<int64>
+  addressLine1: string
+  addressLine2: string
+  addressLine3: string
+  city: string
+  state: string
+  postalCode: string
+  countryCode: string
+  mapZoomLevel: integer<int32>
+  geoPoint: BomGeoPoint
+  unLocode: UnLocode
+}
+
+AffiliateDto {
+  id: integer<int64>
+  idNumber: string
+  externalId: string
+  title: string
+  trackingCode: string
+  flags: string[]
+}
+
+AgendaItemDto {
+  id: integer<int64>
+  index: integer<int32>
+  title: string
+  excerpt: string
+  body: string
+  day: integer<int32>
+  flags: string[]
+  location: LocationDto
+  address: object
+  keyPhoto: PhotoDto
+  photos: PhotoDto[]
+}
+
+AgentBookingDetailsDto {
+  contractId: integer<int64>
+  contractType: string
+  id: integer<int64>
+  title: string
+}
+
+AgentInvoiceDto {
+  issuer: ItemDto
+  recipient: ItemDto
+  id: integer<int64>
+  issueDate: string<date-time>
+  currency: string
+  includedAppliedTaxes: AppliedTaxDto[]
+  excludedAppliedTaxes: AppliedTaxDto[]
+  lineItems: CustomLineItemDto[]
+}
+
+AllotmentDto {
+  id: integer<int64>
+  title: string
+}
+
+AnswerDataType = enum(SHORT_TEXT|LONG_TEXT|INT|DOUBLE|BOOLEAN|CHECKBOX_TOGGLE|DATE|DATE_AND_TIME|OPTIONS) {
+  
+}
+
+AnswerDto {
+  questionId: string
+  values: string[]
+}
+
+AnswerOption {
+  name: string
+  value: string
+}
+
+AnswerOptionDto {
+  value: string
+  label: string
+}
+
+ApiResponse {
+  fields: map<object>
+  message: string
+}
+
+AppliedTaxDto {
+  currency: string
+  tax: number
+  taxAsMoney: Money
+  taxAsText: string
+  title: string
+}
+
+AvailabilityInfoDto {
+  availableCount: integer<int32>
+  day: string
+  price: number
+  ratePrices: map<number<double>>
+}
+
+AvailableRoomDto {
+  availabilities: AvailabilityInfoDto[]
+  extraPrices: map<number<double>>
+  guestCounts: integer<int32>[]
+  id: integer<int64>
+  maxBookableCount: integer<int32>
+  rateTotalPrices: map<number<double>>
+  roomType: RoomTypeDto
+  totalPrice: number
+}
+
+BarcodeTypeEnum = enum(QR_CODE|CODE_128|PDF_417|DATA_MATRIX|AZTEC) {
+  
+}
+
+BarcodeValueDto {
+  value: string
+  offlineCode: string
+  barcodeType: BarcodeTypeEnum
+}
+
+BomGeoPoint {
+  latitude: number<double>
+  longitude: number<double>
+}
+
+BookableExtraDto {
+  id: integer<int64>
+  externalId: string
+  title: string
+  information: string
+  included: boolean
+  free: boolean
+  productGroupId: integer<int64>
+  pricingType: AddonPricingTypeEnum
+  pricingTypeLabel: string
+  price: number
+  increasesCapacity: boolean
+  maxPerBooking: integer<int32>
+  limitByPax: boolean
+  flags: string[]
+  questions: QuestionDto[]
+}
+
+BookingAgentUserDto {
+  id: integer<int64>
+  name: string
+}
+
+BookingAgentWithLinksDto {
+  id: integer<int64>
+  idNumber: string
+  linkedExternalCustomers: LinkedExternalCustomerDto[]
+  referenceCode: string
+  title: string
+}
+
+BookingAnswerDto {
+  answer: string
+  group: string
+  id: integer<int64>
+  question: string
+  type: string
+}
+
+BookingAnswerGroupDto {
+  answers: BookingAnswerDto[]
+  group: string
+  name: string
+  qandA: QuestionAnswerPairDto[]
+  questionsAndAnswers: QuestionAnswerPairDto[]
+}
+
+BookingAnswerWithIdDto {
+  answer: string
+  flags: string[]
+  group: string
+  id: integer<int64>
+  question: string
+  questionId: integer<int64>
+  type: string
+}
+
+BookingAnswerWithIdGroupDto {
+  answers: BookingAnswerWithIdDto[]
+  name: string
+}
+
+BookingAnswersDto {
+  mainContactDetails: AnswerDto[]
+  activityBookings: ActivityBookingAnswersDto[]
+  accommodationBookings: AccommodationBookingAnswersDto[]
+  rentalBookings: RentalBookingAnswersDto[]
+  transportBookings: TransportBookingAnswersDto[]
+}
+
+BookingChannelDto {
+  id: integer<int64>
+  externalId: string
+  uuid: string
+  title: string
+  backend: boolean
+  overrideVoucherHeader: boolean
+  voucherName: string
+  voucherPhoneNumber: string
+  voucherEmailAddress: string
+  voucherLogoStyle: string
+  voucherWebsite: string
+  voucherLogo: PhotoDto
+  flags: string[]
+}
+
+BookingConfirmation {
+  externalBookingReference: string
+  externalBookingEntityName: string
+  externalBookingEntityCode: string
+  showPricesInNotification: boolean
+  sendNotificationToMainContact: boolean
+  transactionDetails: TransactionDetails
+  amount: number<double>
+  currency: string
+}
+
+BookingConfirmationDto {
+  externalBookingReference: string
+  externalBookingEntityName: string
+  externalBookingEntityCode: string
+  bookingFields: BookingFieldDto[]
+  payment: CustomerPaymentDto
+}
+
+BookingDetailsDto {
+  creationDate: string<date-time>
+  cancellationDate: string<date-time>
+  bookingId: integer<int64>
+  language: string
+  confirmationCode: string
+  externalBookingReference: string
+  externalBookingEntityName: string
+  externalBookingEntityCode: string
+  status: BookingStatusEnum
+  currency: string
+  totalPrice: number
+  totalPaid: number
+  totalDue: number
+  totalPriceConverted: number
+  paymentProviderDetails: PaymentProviderDetailsDto
+  customer: CustomerDto
+  invoice: CustomerInvoiceDto
+  agentInvoice: AgentInvoiceDto
+  customerPayments: CustomerPaymentDto[]
+  extranetUser: ExtranetUserDto
+  paymentType: PaymentPaidTypeEnum
+  affiliate: AffiliateDto
+  vessel: VesselDto
+  harbour: HarbourDto
+  agent: BookingAgentWithLinksDto
+  seller: VendorDto
+  bookingChannel: BookingChannelDto
+  systemConfig: IntegratedSystemConfigDto
+  accommodationBookings: AccommodationBookingDetailsDto[]
+  carRentalBookings: CarRentalBookingDetailsDto[]
+  activityBookings: ActivityBookingDetailsDto[]
+  routeBookings: RouteBookingDetailsDto[]
+  bookingFields: BookingFieldDto[]
+}
+
+BookingEditResult {
+  actions: Action[]
+  status: Status
+}
+
+BookingFieldDto {
+  name: string
+  value: string
+}
+
+BookingItemInfoDto {
+  flags: string[]
+  id: integer<int64>
+  price: number
+  title: string
+}
+
+BookingLabelDto {
+  id: integer<int64>
+  title: string
+}
+
+BookingNoteTypeEnum = enum(GENERAL|FINANCE|OPERATIONS) {
+  
+}
+
+BookingPaymentOption = enum(NOT_PAID|ENTER_MANUALLY|PROCESS_ONLINE) {
+  
+}
+
+BookingQuestionsDto {
+  mainContactDetails: QuestionSpecificationDto[]
+  activityBookings: ActivityBookingQuestionsDto[]
+  accommodationBookings: AccommodationBookingQuestionsDto[]
+  rentalBookings: RentalBookingQuestionsDto[]
+  transportBookings: TransportBookingQuestionsDto[]
+}
+
+BookingRequest {
+  mainContactDetails: AnswerDto[]
+  activityBookings: ActivityBookingRequest[]
+  accommodationBookings: AccommodationBookingRequest[]
+  rentalBookings: RentalBookingRequest[]
+  externalBookingReference: string
+  externalBookingEntityName: string
+  externalBookingEntityCode: string
+  labels: string[]
+  promoCode: string
+  giftCardCode: string
+}
+
+BookingReservationRequestDto {
+  answers: OldBookingAnswersDto
+  bookingFields: BookingFieldDto[]
+  createPaymentsAutomatically: boolean
+  deposit: boolean
+  depositAmount: number
+  depositPercentage: number<double>
+  discountAmount: number
+  discountPercentage: number<double>
+  paymentInfo: CustomerPaymentDto
+}
+
+BookingRoleEnum = enum(SUPPLIER|SELLER) {
+  
+}
+
+BookingSearchResultItem {
+  confirmationCode: string
+  externalBookingReference: string
+  externalBookingEntityName: string
+  externalBookingEntityCode: string
+  currency: string
+  paidAmountAsText: string
+  customerInvoice: CustomerInvoiceDto
+  customer: CustomerDto
+  agent: AgentBookingDetailsDto
+  creationDate: string<date-time>
+  id: integer<int64>
+  extranetUser: ExtranetUserDto
+  affiliate: AffiliateDto
+  affiliateType: enum(NORMAL|VENDOR)
+  affiliateVendor: ItemDto
+  harbour: HarbourDto
+  vessel: VesselDto
+  promoCode: PromoCodeDto
+  paidAmountAsMoney: Money
+  paymentStatus: enum(FREE|NOT_PAID|DEPOSIT|INVOICED|PAID_IN_FULL)
+  paidPercentage: integer<int32>
+  channel: LightweightBookingChannelDto
+  seller: BookingItemInfoDto
+  salesSegment: string
+  viewerRole: string
+  labels: BookingLabelDto[]
+  productBookings: ProductBookingSearchResultItem[]
+}
+
+BookingSearchResultsDto {
+  items: BookingSearchResultItem[]
+  tookInMillis: integer<int64>
+  totalHits: integer<int64>
+}
+
+BookingStatusEnum = enum(CART|REQUESTED|RESERVED|CONFIRMED|TIMEOUT|ABORTED|CANCELLED|ERROR|ARRIVED|NO_SHOW|REJECTED) {
+  
+}
+
+CancellationPolicy {
+  id: integer<int64>
+  created: integer<int64>[]
+  title: string
+  tax: Tax
+  penaltyRules: PenaltyRule[]
+}
+
+CancellationPolicyDto {
+  id: integer<int64>
+  title: string
+  penaltyRules: PenaltyRuleDto[]
+  tax: TaxDto
+  defaultPolicy: boolean
+}
+
+CapacityTypeEnum = enum(LIMITED|UNLIMITED) {
+  
+}
+
+CarBookingAnswersDto {
+  answerGroups: BookingAnswerGroupDto[]
+  bookingId: integer<int64>
+  extraBookings: ExtraBookingAnswersDto[]
+}
+
+CarBookingDetailsDto {
+  answers: BookingAnswerDto[]
+  carType: CarTypeDto
+  dayCount: integer<int32>
+  extras: ExtraBookingDetailsDto[]
+  bookingFields: BookingFieldDto[]
+  id: integer<int64>
+  unitCount: integer<int32>
+}
+
+CarBookingDto {
+  availabilityBookings: CarTypeAvailabilityBookingDto[]
+  availabilityCount: integer<int32>
+  carPrice: number
+  carType: CarTypeInfoDto
+  endDate: string<date-time>
+  extraBookings: ExtraBookingDto[]
+  extrasPrice: number
+  id: integer<int64>
+  locationPrice: number
+  startDate: string<date-time>
+  unavailable: boolean
+  unitCount: integer<int32>
+}
+
+CarRentalBookingAnswersDto {
+  answerGroups: BookingAnswerGroupDto[]
+  bookingId: integer<int64>
+  carBookings: CarBookingAnswersDto[]
+}
+
+CarRentalBookingDetailsDto {
+  affiliateCommission: number<double>
+  agent: BookingAgentWithLinksDto
+  agentCommission: number<double>
+  answers: BookingAnswerDto[]
+  barcode: BarcodeValueDto
+  boxBooking: boolean
+  boxProduct: ProductInfoDto
+  cancelNote: string
+  cancellationDate: string<date-time>
+  cancelledBy: string
+  carBookings: CarBookingDetailsDto[]
+  carRental: CarRentalDto
+  confirmationCode: string
+  dayCount: integer<int32>
+  discountAmount: number
+  discountPercentage: number<double>
+  dropoffLocation: CarRentalLocationDto
+  endDate: string<date-time>
+  linksToExternalProducts: IntegratedSystemProductLinkDto[]
+  supplierContractFlags: string[]
+  sellerContractFlags: string[]
+  id: integer<int64>
+  includedOnCustomerInvoice: boolean
+  invoice: ProductInvoiceDto
+  notes: bookingNote[]
+  paidType: PaymentPaidTypeEnum
+  parentBooking: BookingDetailsDto
+  parentBookingId: integer<int64>
+  pickupLocation: CarRentalLocationDto
+  priceWithDiscount: number
+  product: ProductInfoDto
+  productConfirmationCode: string
+  savedAmount: number
+  seller: VendorWithLinksDto
+  sellerCommission: number<double>
+  startDate: string<date-time>
+  status: BookingStatusEnum
+  supplier: VendorWithLinksDto
+  totalPrice: number
+}
+
+CarRentalBookingDto {
+  bookingStatus: string
+  carBookings: CarBookingDto[]
+  carRental: ProductInfoDto
+  creationDate: string<date-time>
+  customerUuid: string
+  dayCount: integer<int32>
+  dropoffLocation: CarRentalLocationDto
+  endDate: string<date-time>
+  id: integer<int64>
+  includedOnCustomerInvoice: boolean
+  lastModifiedDate: string<date-time>
+  pickupLocation: CarRentalLocationDto
+  productCategory: string
+  productConfirmationCode: string
+  startDate: string<date-time>
+  totalPrice: number
+  vendor: VendorDto
+}
+
+CarRentalDto {
+  actualVendor: VendorDto
+  baseLanguage: string
+  bookableExtras: BookableExtraDto[]
+  box: boolean
+  boxedVendor: VendorDto
+  carTypes: CarTypeDto[]
+  categories: CategoryDto[]
+  paymentCurrencies: string[]
+  customFields: CustomFieldDto[]
+  defaultDropoffHour: integer<int32>
+  defaultDropoffLocationId: integer<int64>
+  defaultDropoffMinute: integer<int32>
+  defaultPickupHour: integer<int32>
+  defaultPickupLocationId: integer<int64>
+  defaultPickupMinute: integer<int32>
+  description: string
+  dropoffLocations: CarRentalLocationDto[]
+  excerpt: string
+  externalId: string
+  flags: string[]
+  id: integer<int64>
+  keyPhoto: PhotoDto
+  keywords: string[]
+  languages: string[]
+  lastPublished: string
+  photos: PhotoDto[]
+  pickupLocations: CarRentalLocationDto[]
+  pricingMode: RentalPricingModeEnum
+  productCategory: string
+  productGroupId: integer<int64>
+  slug: string
+  tagGroups: TagGroupDto[]
+  title: string
+  vendor: VendorDto
+  videos: VideoDto[]
+  cancellationPolicy: CancellationPolicyDto
+  barcodeType: BarcodeTypeEnum
+  timeZone: string
+  storedExternally: boolean
+}
+
+CarRentalLocationDto {
+  allDay: boolean
+  closingHour: integer<int32>
+  flags: string[]
+  id: integer<int64>
+  location: LocationDto
+  openingHour: integer<int32>
+  priceForDropoff: number<double>
+  priceForPickup: number<double>
+  priceForPickupAndDropoff: number<double>
+  title: string
+}
+
+CarTypeAvailabilityBookingDto {
+  availability: CarTypeAvailabilityDto
+  id: integer<int64>
+}
+
+CarTypeAvailabilityDto {
+  availabilityCount: integer<int32>
+  carTypeId: integer<int64>
+  closed: boolean
+  dayOfMonth: string<date-time>
+  id: string
+  unlimitedAvailability: boolean
+}
+
+CarTypeDto {
+  acrissCategory: string
+  acrissCode: string
+  acrissType: string
+  airConditioning: boolean
+  avgRentalPricePerDay: number
+  baseLanguage: string
+  bookingCutoff: integer<int32>
+  carRental: ItemDto
+  categories: CategoryDto[]
+  co2Emission: number<double>
+  paymentCurrencies: string[]
+  defaultDropoffHour: integer<int32>
+  defaultDropoffLocationId: integer<int64>
+  defaultDropoffMinute: integer<int32>
+  defaultPickupHour: integer<int32>
+  defaultPickupLocationId: integer<int64>
+  defaultPickupMinute: integer<int32>
+  deliveryFee: number
+  description: string
+  doorCount: integer<int32>
+  driveType: string
+  dropoffLocations: CarRentalLocationDto[]
+  exampleCarModel: string
+  excerpt: string
+  externalId: string
+  extras: BookableExtraDto[]
+  flags: string[]
+  fuelEconomy: number<double>
+  fuelType: string
+  id: integer<int64>
+  includedExtrasPrice: number
+  keyPhoto: PhotoDto
+  keywords: string[]
+  languages: string[]
+  luggageCapacity: integer<int32>
+  maxBookableCount: integer<int32>
+  maxRentalHours: integer<int32>
+  minDriverAge: integer<int32>
+  minRentalHours: integer<int32>
+  passengerCapacity: integer<int32>
+  photos: PhotoDto[]
+  pickupLocations: CarRentalLocationDto[]
+  productGroupId: integer<int64>
+  rentalPrice: number
+  rentalRestrictions: boolean
+  summary: string
+  tagGroups: TagGroupDto[]
+  title: string
+  totalPrice: number
+  transmissionType: string
+  vendor: ItemDto
+}
+
+CarTypeInfoDto {
+  exampleCarModel: string
+  flags: string[]
+  id: integer<int64>
+  title: string
+}
+
+CardPaymentProvider {
+  title: string
+  description: string
+  logo: string
+  providerId: string
+  providerType: string
+  uti: string
+  token: string
+  questions: QuestionSpecificationDto[]
+}
+
+CategoryDto {
+  allowsSelectingMultipleChildren: boolean
+  categories: CategoryDto[]
+  flags: string[]
+  id: integer<int64>
+  title: string
+}
+
+CategoryPriceDto {
+  pricingCategoryId*: integer<int64>
+  title*: string
+  ticketCategory*: TicketCategoryEnum
+  price: PriceDto
+  pickupPrice: PriceDto
+  dropoffPrice: PriceDto
+  extras: ExtraPriceDto[]
+  tieredPrices: TieredPriceDto[]
+}
+
+ChargeRequest {
+  amount: number
+  approvePageURL: string
+  cancelPageURL: string
+  cardNumber: string
+  contractId: integer<int64>
+  currency: string
+  cvc: string
+  errorPageURL: string
+  expMonth: string
+  expYear: string
+  formLanguage: string
+  name: string
+}
+
+Checkout {
+  options: CheckoutOption[]
+  questions: BookingQuestionsDto
+}
+
+CheckoutOption {
+  type: enum(AGENT_AFFILIATE|AGENT_CUSTOMER|AGENT_RESELLER|CUSTOMER_FULL_PAYMENT|CUSTOMER_PARTIAL_PAYMENT|CUSTOMER_NO_PAYMENT)
+  label: string
+  questions: QuestionSpecificationDto[]
+  amount: number
+  currency: string
+  formattedAmount: string
+  partialPayment: boolean
+  minPartialAmount: number
+  formattedMinPartialAmount: string
+  invoice: CustomerInvoiceDto
+  paymentMethods: PaymentMethods
+}
+
+CheckoutRequest {
+  checkoutOption: enum(AGENT_AFFILIATE|AGENT_CUSTOMER|AGENT_RESELLER|CUSTOMER_FULL_PAYMENT|CUSTOMER_PARTIAL_PAYMENT|CUSTOMER_NO_PAYMENT)
+  paymentMethod: enum(CARD|CASH|VOUCHER|RESERVE_FOR_EXTERNAL_PAYMENT)
+  source: enum(SHOPPING_CART|DIRECT_REQUEST)
+  shoppingCart: ShoppingCartCheckout
+  directBooking: BookingRequest
+  sendNotificationToMainContact: boolean
+  showPricesInNotification: boolean
+  amount: number<double>
+  currency: string
+  uti: string
+  paymentToken: TokenCharge
+  transactionDetails: TransactionDetails
+  successUrl: string
+  errorUrl: string
+  cancelUrl: string
+  providerPaymentParameters: map<string>
+  cardPaymentProviderAnswers: AnswerDto[]
+  checkoutOptionAnswers: AnswerDto[]
+  affiliateCode: string
+  bookingReferralSource: enum(GOOGLE_TTD_SEARCH_TICKETS_BOOKING_MODULE,|GOOGLE_TTD_ADS_COMMERCIAL_UNIT,|GOOGLE_TTD_SEARCH_EXPERIENCE_MODULE,|ABANDONED_CART)
+  googleClickId: string
+}
+
+CheckoutResponse {
+  redirectRequest: RedirectRequest
+  booking: BookingDetailsDto
+  bookingHash: string
+  travelDocuments: TravelDocuments
+}
+
+ComboPart {
+  id: integer<int64>
+}
+
+ComboStartTimeInfoDto {
+  id: integer<int64>
+  targetActivityId: integer<int64>
+  targetStartTimeId: integer<int64>
+}
+
+CurrencyUnit {
+  code: string
+  countryCodes: string[]
+  currencyCode: string
+  decimalPlaces: integer<int32>
+  defaultFractionDigits: integer<int32>
+  numeric3Code: string
+  numericCode: integer<int32>
+  pseudoCurrency: boolean
+  symbol: string
+}
+
+CustomFieldDto {
+  type: string
+  flags: string[]
+  code: string
+  title: string
+  inputFieldId: integer<int64>
+  value: string
+}
+
+CustomLineItemDto {
+  calculatedDiscount: number<double>
+  currency: string
+  customDiscount: number<double>
+  discount: number<double>
+  id: integer<int64>
+  lineItemType: CustomLineItemTypeEnum
+  quantity: integer<int32>
+  tax: TaxDto
+  taxAmount: number
+  taxAsMoney: Money
+  taxAsText: string
+  title: string
+  total: number
+  totalAsMoney: Money
+  totalAsText: string
+  totalDiscounted: number
+  totalDiscountedAsMoney: Money
+  totalDiscountedAsText: string
+  totalDue: number
+  totalDueAsMoney: Money
+  totalDueAsText: string
+  unitPrice: number
+  unitPriceAsMoney: Money
+  unitPriceAsText: string
+  unitPriceDate: string<date-time>
+}
+
+CustomLineItemTypeEnum = enum(BOOKING_FEE|CUSTOM_PRICE|DISCOUNT|OTHER) {
+  
+}
+
+CustomerCredentialsDto {
+  username: string
+}
+
+CustomerDto {
+  address: string
+  contactDetailsHidden: boolean
+  contactDetailsHiddenUntil: string<date-time>
+  country: string
+  created: string<date-time>
+  credentials: CustomerCredentialsDto
+  dateOfBirth: string<date-time>
+  email: string
+  firstName: string
+  id: integer<int64>
+  language: string
+  lastName: string
+  nationality: string
+  organization: string
+  passportExpMonth: string
+  passportExpYear: string
+  passportId: string
+  phoneNumber: string
+  phoneNumberCountryCode: string
+  place: string
+  postCode: string
+  sex: string
+  state: string
+  uuid: string
+}
+
+CustomerFieldEnum = enum(TITLE|FIRST_NAME|LAST_NAME|PERSONAL_ID_NUMBER|EMAIL|PHONE_NUMBER|NATIONALITY|GENDER|ORGANIZATION|PASSPORT_ID|PASSPORT_EXPIRY|ADDRESS|DATE_OF_BIRTH|LANGUAGE) {
+  
+}
+
+CustomerFieldReferenceDto {
+  field: CustomerFieldEnum
+  required: boolean
+}
+
+CustomerInvoiceDto {
+  currency: string
+  customLineItems: CustomLineItemDto[]
+  excludedAppliedTaxes: AppliedTaxDto[]
+  excludedTaxes: boolean
+  free: boolean
+  id: integer<int64>
+  includedAppliedTaxes: AppliedTaxDto[]
+  includedTaxes: boolean
+  invoiceNumber: string
+  issueDate: string<date-time>
+  issuer: ItemDto
+  issuerName: string
+  lodgingTaxes: AppliedTaxDto[]
+  paidAmountAsMoney: Money
+  paidAmountAsText: string
+  productInvoices: ProductInvoiceDto[]
+  payments: CustomerPaymentDto[]
+  recipient: CustomerDto
+  recipientName: string
+  remainingAmountAsMoney: Money
+  remainingAmountAsText: string
+  totalAsMoney: Money
+  totalAsText: string
+  totalDiscountAsMoney: Money
+  totalDiscountedAsMoney: Money
+  totalDiscountedAsText: string
+  totalDueAsMoney: Money
+  totalDueAsText: string
+  totalExcludedTaxAsMoney: Money
+  totalExcludedTaxAsText: string
+  totalIncludedTaxAsMoney: Money
+  totalIncludedTaxAsText: string
+  totalTaxAsMoney: Money
+  totalTaxAsText: string
+}
+
+CustomerPaymentDto {
+  activeCustomerInvoiceId: integer<int64>
+  amount: number
+  amountAsMoney: Money
+  amountAsText: string
+  authorizationCode: string
+  cardNumber: string
+  comment: string
+  currency: string
+  id: integer<int64>
+  paymentContractId: integer<int64>
+  paymentId: integer<int64>
+  paymentProviderType: string
+  paymentReferenceId: string
+  paymentType: PaymentTypeEnum
+  transactionDate: string<date-time>
+}
+
+DateRangeFilter {
+  from: string<date-time>
+  includeLower: boolean
+  includeUpper: boolean
+  to: string<date-time>
+}
+
+DerivedPhotoDto {
+  name: string
+  url: string
+  cleanUrl: string
+}
+
+DistanceUnitEnum = enum(METERS|KILOMETERS) {
+  
+}
+
+Duration {
+  minutes: integer<int32>
+  hours: integer<int32>
+  days: integer<int32>
+  weeks: integer<int32>
+}
+
+ErrorDto {
+  errorCode: string
+  errorDescription: string
+}
+
+ExtraAnswersDto {
+  extraId: integer<int64>
+  answers: AnswerDto[]
+  bookingId: integer<int64>
+}
+
+ExtraBookingAnswersDto {
+  answerGroups: BookingAnswerWithIdGroupDto[]
+  bookingId: integer<int64>
+  extraId: integer<int64>
+}
+
+ExtraBookingDetailsDto {
+  answers: BookingAnswerWithIdDto[]
+  bookableExtra: BookableExtraDto
+  extra: BookableExtraDto
+  groupedAnswers: BookingAnswerGroupDto[]
+  id: integer<int64>
+  unitCount: integer<int32>
+}
+
+ExtraBookingDto {
+  answers: BookingAnswerWithIdDto[]
+  description: string
+  extra: BookingItemInfoDto
+  free: boolean
+  id: integer<int64>
+  included: boolean
+  pricingType: string
+  pricingTypeLabel: string
+  unitCount: integer<int32>
+}
+
+ExtraBookingRequest {
+  extraId: integer<int64>
+  answers: AnswerDto[]
+  quantity: integer<int32>
+}
+
+ExtraBookingRequestDto {
+  answers: BookingAnswerWithIdGroupDto[]
+  extraId: integer<int64>
+  unitCount: integer<int32>
+}
+
+ExtraPriceDto {
+  extraId: integer<int64>
+  title: string
+  price: PriceDto
+}
+
+ExtraQuestionsDto {
+  bookingId: integer<int64>
+  extraId: integer<int64>
+  extraTitle: string
+  questions: QuestionSpecificationDto[]
+}
+
+ExtraSelectionType = enum(OPTIONAL|PRESELECTED) {
+  
+}
+
+ExtranetUserDto {
+  agent: agent
+  creationDate: string<date-time>
+  firstName: string
+  fullNameShort: string
+  id: integer<int64>
+  lastLoginDate: string<date-time>
+  lastName: string
+  password: string
+  role: ExtranetUserRoleEnum
+  termsOfServiceAgreedDate: string<date-time>
+  username: string
+  vendorRoles: VendorRoleEnum[]
+}
+
+ExtranetUserRoleEnum = enum(VENDOR|BOOKING_AGENT|ADMIN) {
+  
+}
+
+FacetFilter {
+  excluded: boolean
+  name: string
+  values: string[]
+}
+
+GeoBoundingBoxFilter {
+  bottomRight: GeoPoint
+  topLeft: GeoPoint
+}
+
+GeoDistanceFilter {
+  center: GeoPoint
+  distance: string
+}
+
+GeoDistanceRangeFilter {
+  center: GeoPoint
+  fromDistance: string
+  includeLower: boolean
+  includeUpper: boolean
+  toDistance: string
+}
+
+GeoPoint {
+  lat: number<double>
+  lng: number<double>
+}
+
+GeoPolygonFilter {
+  points: GeoPoint[]
+}
+
+Guidance {
+  id: integer<int64>
+  created: integer<int64>[]
+  guidanceType: GuidanceType
+  languages: string[]
+}
+
+GuidanceType = enum(GUIDED|HEADPHONES|READING_MATERIAL) {
+  
+}
+
+HarbourDto {
+  flags: string[]
+  id: integer<int64>
+  pickupPlace: PickupPlaceDto
+  productListId: integer<int64>
+  title: string
+}
+
+InclusionExclusionType = enum(ENTRY_OR_ADMISSION_FEE|FUEL_SURCHARGE|LANDING_AND_FACILITY_FEES|PARKING_FEES|ENTRY_TAX|DEPARTURE_TAX|NATIONAL_PARK_ENTRANCE_FEE|GOODS_AND_SERVICES_TAX|TIP_OR_GRATUITY|FOOD_AND_DRINKS|WIFI|BUS_FARE) {
+  
+}
+
+IntegratedSystemConfigDto {
+  id: integer<int64>
+  systemType: string
+  title: string
+}
+
+IntegratedSystemProductLinkDto {
+  externalProductId: string
+  externalProductTitle: string
+  flags: string[]
+  systemConfigId: integer<int64>
+}
+
+InvoiceDto {
+  currency: string
+  total: number
+  totalCommission: number
+  totalDiscount: number
+  totalSansCommission: number
+  totalSansDiscount: number
+}
+
+ItemAnswersDto {
+  itemTypeId: integer<int64>
+  answers: AnswerDto[]
+  people: PersonAnswersDto[]
+  bookingId: integer<int64>
+  extras: ExtraAnswersDto[]
+}
+
+ItemBookingRequest {
+  itemTypeId: integer<int64>
+  answers: AnswerDto[]
+  people: PersonAnswersDto[]
+  quantity: integer<int32>
+  extras: ExtraBookingRequest[]
+}
+
+ItemDto {
+  externalId: string
+  flags: string[]
+  id: integer<int64>
+  title: string
+}
+
+ItemQuestionsDto {
+  bookingId: integer<int64>
+  itemTypeId: integer<int64>
+  itemTypeTitle: string
+  questions: QuestionSpecificationDto[]
+  people: PersonQuestionsDto[]
+  extras: ExtraQuestionsDto[]
+}
+
+ItineraryBookingQuery {
+  confirmationCode: string
+  externalBookingReference: string
+  externalBookingEntityName: string
+  externalBookingEntityCode: string
+  bookingLabelIds: string
+  paymentId: string
+  textFilter: string
+  country: string
+  city: string
+  bookingStatuses: string[]
+  sortFields: SortField[]
+  bookingSource: string
+  bookingChannelId: integer<int64>
+  extranetUserId: integer<int64>
+  agentId: integer<int64>
+  sellerId: integer<int64>
+  supplierId: integer<int64>
+  promoCodeId: integer<int64>
+  conversationAwaitingVendorId: integer<int64>
+  modifiedAfterCreation: boolean
+  conversationOpen: boolean
+  affiliateHubOnly: boolean
+  excludeAffiliateHub: boolean
+  page: integer<int32>
+  pageSize: integer<int32>
+  creationDateRange: DateRangeFilter
+  startDateRange: DateRangeFilter
+  lastModifiedDateRange: DateRangeFilter
+  cancellationDateRange: DateRangeFilter
+}
+
+LightweightBookingChannelDto {
+  id: integer<int64>
+  title: string
+  channelType: enum(BACKEND|OTA|APP|OTHER)
+}
+
+LightweightRoomTypeDto {
+  capacity: integer<int32>
+  code: string
+  defaultRate: RoomRateDto
+  externalId: string
+  extras: BookableExtraDto[]
+  flags: string[]
+  id: integer<int64>
+  roomRates: RoomRateDto[]
+  title: string
+}
+
+LinkedExternalCustomerDto {
+  externalCustomerId: string
+  externalCustomerTitle: string
+  externalDepartmentId: string
+  flags: string[]
+  systemConfigId: integer<int64>
+  systemType: string
+}
+
+LocationCodeDto {
+  coordinates: string
+  country: string
+  date: integer<int32>
+  function: string
+  iata: string
+  id: integer<int64>
+  location: string
+  name: string
+  nameWoDiacritics: string
+  recentChange: string
+  remarks: string
+  status: string
+  subdivision: string
+}
+
+LocationDto {
+  address: string
+  city: string
+  countryCode: string
+  postCode: string
+  latitude: number<double>
+  longitude: number<double>
+  zoomLevel: integer<int32>
+  origin: LocationOriginEnum
+  originId: string
+  wholeAddress: string
+}
+
+LocationFilters {
+  geoBoundingBoxFilter: GeoBoundingBoxFilter
+  geoDistanceFilter: GeoDistanceFilter
+  geoDistanceRangeFilter: GeoDistanceRangeFilter
+  geoPolygonFilter: GeoPolygonFilter
+}
+
+LocationOriginEnum = enum(GOOGLE_PLACES|TRIPADVISOR_API|FREETEXT_LOCATION) {
+  
+}
+
+Money {
+  amount: number
+  amountMajor: number
+  amountMajorInt: integer<int32>
+  amountMajorLong: integer<int64>
+  amountMinor: number
+  amountMinorInt: integer<int32>
+  amountMinorLong: integer<int64>
+  currencyUnit: CurrencyUnit
+  minorPart: integer<int32>
+  negative: boolean
+  negativeOrZero: boolean
+  positive: boolean
+  positiveOrZero: boolean
+  scale: integer<int32>
+  zero: boolean
+}
+
+NameValuePairDto {
+  name: string
+  value: string
+}
+
+OldAccommodationBookingAnswersDto {
+  answerGroups: BookingAnswerGroupDto[]
+  bookingId: integer<int64>
+  roomBookings: RoomBookingAnswersDto[]
+}
+
+OldActivityBookingAnswersDto {
+  answerGroups: BookingAnswerGroupDto[]
+  bookingId: integer<int64>
+  dropoffPlaceDescription: string
+  dropoffPlaceId: integer<int64>
+  extraBookings: ExtraBookingAnswersDto[]
+  pickupPlaceDescription: string
+  pickupPlaceId: integer<int64>
+  pickupPlaceRoomNumber: string
+  pricingCategoryBookings: ActivityPricingCategoryBookingAnswersDto[]
+}
+
+OldBookingAnswersDto {
+  accommodationsBookings: OldAccommodationBookingAnswersDto[]
+  activityBookings: OldActivityBookingAnswersDto[]
+  answers: BookingAnswerDto[]
+  carRentalBookings: CarRentalBookingAnswersDto[]
+  routeBookings: RouteBookingAnswersDto[]
+}
+
+OpeningHours {
+  id: integer<int64>
+  created: integer<int64>[]
+  monday: OpeningHoursWeekday
+  tuesday: OpeningHoursWeekday
+  wednesday: OpeningHoursWeekday
+  thursday: OpeningHoursWeekday
+  friday: OpeningHoursWeekday
+  saturday: OpeningHoursWeekday
+  sunday: OpeningHoursWeekday
+}
+
+OpeningHoursTimeInterval {
+  openFrom: integer<int32>[]
+  openForHours: integer<int32>
+  openForMinutes: integer<int32>
+  frequency: Duration
+}
+
+OpeningHoursWeekday {
+  id: integer<int64>
+  created: integer<int64>[]
+  open24Hours: boolean
+  timeIntervals: OpeningHoursTimeInterval[]
+}
+
+PassExpiryType = enum(NEVER|FIXED_DATE|RELATIVE_DATE) {
+  
+}
+
+PassengerAnswersDto {
+  pricingCategoryId: integer<int64>
+  passengerDetails: AnswerDto[]
+  answers: AnswerDto[]
+  bookingId: integer<int64>
+  extras: ExtraAnswersDto[]
+}
+
+PassengerBookingRequest {
+  pricingCategoryId: integer<int64>
+  groupSize: integer<int32>
+  passengerDetails: AnswerDto[]
+  answers: AnswerDto[]
+  extras: ExtraBookingRequest[]
+}
+
+PassengerQuestionsDto {
+  bookingId: integer<int64>
+  pricingCategoryId: integer<int64>
+  pricingCategoryTitle: string
+  passengerDetails: QuestionSpecificationDto[]
+  questions: QuestionSpecificationDto[]
+  extras: ExtraQuestionsDto[]
+}
+
+PaymentLineItemDto {
+  description: string
+  price: number
+  quantity: integer<int32>
+}
+
+PaymentMethods {
+  allowedMethods: enum(CARD|CASH|VOUCHER|RESERVE_FOR_EXTERNAL_PAYMENT)[]
+  cardProvider: CardPaymentProvider
+}
+
+PaymentPaidTypeEnum = enum(PAID_IN_FULL|DEPOSIT|FREE|NOT_PAID|OVERPAID|REFUND|INVOICED|GIFT_CARD) {
+  
+}
+
+PaymentProviderDetailsDto {
+  url: string
+  supportedMethods: string[]
+  parameters: PaymentProviderParam[]
+}
+
+PaymentProviderParam {
+  name: string
+  value: string
+}
+
+PaymentTypeEnum = enum(WEB_PAYMENT|POINT_OF_SALE|CASH|VOUCHER) {
+  
+}
+
+PenaltyRule {
+  id: integer<int64>
+  created: integer<int64>[]
+  cutoffHours: integer<int32>
+  percentage: number
+}
+
+PenaltyRuleDto {
+  id: integer<int64>
+  cutoffHours: integer<int32>
+  charge: number<double>
+  chargeType: string
+}
+
+PersonAnswersDto {
+  details: AnswerDto[]
+}
+
+PersonQuestionsDto {
+  personId: integer<int64>
+  details: QuestionSpecificationDto[]
+}
+
+PhotoDto {
+  id: integer<int64>
+  originalUrl: string
+  description: string
+  alternateText: string
+  height: integer<int32>
+  width: integer<int32>
+  flags: string[]
+  derived: DerivedPhotoDto[]
+  fileName: string
+}
+
+PickupPlaceDto {
+  askForRoomNumber: boolean
+  externalId: string
+  flags: string[]
+  id: integer<int64>
+  location: LocationDto
+  title: string
+  type: PlaceTypeEnum
+}
+
+Place {
+  id: integer<int64>
+  created: integer<int64>[]
+  type: string
+  title: string
+  code: string
+  address: Address
+  pickupTicketDescription: string
+  dropoffTicketDescription: string
+  labels: string[]
+}
+
+PlaceDto {
+  id: integer<int64>
+  location: LocationDto
+  title: string
+}
+
+PlaceTypeEnum = enum(AIRPORT|PORT|STATION|ACCOMMODATION|OTHER) {
+  
+}
+
+PriceByItem {
+  id: integer<int64>
+  amount: SimpleMoney
+  minParticipantsRequired: integer<int32>
+  maxParticipantsRequired: integer<int32>
+  prices: PriceByItem[]
+}
+
+PriceDto {
+  currency: string
+  amount: number<double>
+  ofWhichTax: number<double>
+  priceNotFound: boolean
+}
+
+PricingCategoryDto {
+  id: integer<int64>
+  title: string
+  ticketCategory: TicketCategoryEnum
+  occupancy: integer<int32>
+  groupSize: integer<int32>
+  ageQualified: boolean
+  minAge: integer<int32>
+  maxAge: integer<int32>
+  dependent: boolean
+  masterCategoryId: integer<int64>
+  maxPerMaster: integer<int32>
+  sumDependentCategories: boolean
+  maxDependentSum: integer<int32>
+  internalUseOnly: boolean
+  flags: string[]
+  defaultCategory: boolean
+  fullTitle: string
+}
+
+PricingCategoryPassengerSpecificationDto {
+  categoryId: integer<int64>
+  passengers: integer<int32>
+}
+
+ProductBookingBasicsDto {
+  id: integer<int64>
+  product: ProductInfoDto
+  productConfirmationCode: string
+}
+
+ProductBookingQuery {
+  bookedExtrasIds: integer<int64>[]
+  bookingRole: BookingRoleEnum
+  bookingStatuses: string[]
+  confirmationCode: string
+  creationDateRange: DateRangeFilter
+  excludeComboBookings: boolean
+  fields: map<object>
+  noteQuery: string
+  page: integer<int32>
+  pageSize: integer<int32>
+  productExternalId: string
+  productIds: integer<int64>[]
+  productTitle: string
+  productType: string
+  sortFields: SortField[]
+  startDateRange: DateRangeFilter
+  textFilter: string
+}
+
+ProductBookingSearchResultItem {
+  affiliate: affiliate
+  affiliateCommission: number<double>
+  agent: AgentBookingDetailsDto
+  agentCommission: number<double>
+  agentUser: BookingAgentUserDto
+  assignedResources: ResourceDto[]
+  boxBooking: boolean
+  boxProduct: BookingItemInfoDto
+  boxSupplier: BookingItemInfoDto
+  cancelNote: string
+  cancellationDate: string<date-time>
+  cancelledBy: string
+  channel: BookingItemInfoDto
+  confirmationCode: string
+  contactDetailsHidden: boolean
+  contactDetailsHiddenUntil: string<date-time>
+  creationDate: string<date-time>
+  currency: string
+  customer: CustomerDto
+  customerInvoice: InvoiceDto
+  discountAmount: number<double>
+  discountPercentage: number<double>
+  endDate: string<date-time>
+  externalBookingReference: string
+  extranetUser: ExtranetUserDto
+  fields: map<object>
+  harbour: HarbourDto
+  hasNotes: boolean
+  id: integer<int64>
+  notes: bookingNote[]
+  paidAmount: number<double>
+  paidType: string
+  parentBookingId: integer<int64>
+  prepaid: boolean
+  product: BookingItemInfoDto
+  productCategory: ProductCategoryEnum
+  productConfirmationCode: string
+  productExternalId: string
+  productType: string
+  resellerInvoice: InvoiceDto
+  resellerPaidType: string
+  resold: boolean
+  saleSource: BookingItemInfoDto
+  seller: BookingItemInfoDto
+  sellerCommission: number<double>
+  startDate: string<date-time>
+  status: string
+  totalPrice: integer<int32>
+  unconfirmedPayments: boolean
+  vendor: BookingItemInfoDto
+  vessel: VesselDto
+}
+
+ProductBookingSearchResultsDto {
+  query: ProductBookingQuery
+  results: ProductBookingSearchResultItem[]
+  tookInMillis: integer<int64>
+  totalHits: integer<int64>
+}
+
+ProductCategoryEnum = enum(ACCOMMODATION|ACTIVITIES|CAR_RENTALS|TRANSPORT) {
+  
+}
+
+ProductInfoDto {
+  externalId: string
+  flags: string[]
+  id: integer<int64>
+  keyPhoto: PhotoDto
+  price: number
+  slug: string
+  title: string
+  vendor: VendorDto
+}
+
+ProductInvoiceDto {
+  currency: string
+  customLineItems: CustomLineItemDto[]
+  dates: string
+  excludedAppliedTaxes: AppliedTaxDto[]
+  excludedTaxes: boolean
+  free: boolean
+  id: integer<int64>
+  includedAppliedTaxes: AppliedTaxDto[]
+  includedTaxes: boolean
+  issueDate: string<date-time>
+  lineItems: ProductInvoiceLineItemDto[]
+  lodgingTax: AppliedTaxDto
+  product: ItemDto
+  productBookingId: integer<int64>
+  productCategory: ProductCategoryEnum
+  productConfirmationCode: string
+  totalAsMoney: Money
+  totalAsText: string
+  totalDiscountAsMoney: Money
+  totalDiscountedAsMoney: Money
+  totalDiscountedAsText: string
+  totalDueAsMoney: Money
+  totalDueAsText: string
+  totalExcludedTaxAsMoney: Money
+  totalExcludedTaxAsText: string
+  totalIncludedTaxAsMoney: Money
+  totalIncludedTaxAsText: string
+  totalTaxAsMoney: Money
+  totalTaxAsText: string
+}
+
+ProductInvoiceLineItemDto {
+  calculatedDiscount: number<double>
+  currency: string
+  customDiscount: number<double>
+  discount: number<double>
+  id: integer<int64>
+  itemBookingId: string
+  quantity: integer<int32>
+  tax: TaxDto
+  taxAmount: number
+  taxAsMoney: Money
+  taxAsText: string
+  title: string
+  total: number
+  totalAsMoney: Money
+  totalAsText: string
+  totalDiscounted: number
+  totalDiscountedAsMoney: Money
+  totalDiscountedAsText: string
+  totalDue: number
+  totalDueAsMoney: Money
+  totalDueAsText: string
+  unitPrice: number
+  unitPriceAsMoney: Money
+  unitPriceAsText: string
+  unitPriceDate: string<date-time>
+}
+
+ProductListDescriptionDto {
+  children: ProductListDescriptionDto[]
+  description: string
+  flags: string[]
+  id: integer<int64>
+  parent: ProductListDescriptionDto
+  size: integer<int32>
+  slug: string
+  title: string
+}
+
+ProductListDto {
+  children: ProductListDescriptionDto[]
+  description: string
+  flags: string[]
+  id: integer<int64>
+  items: ProductListItemDto[]
+  parent: ProductListDescriptionDto
+  size: integer<int32>
+  slug: string
+  title: string
+}
+
+ProductListItemDto {
+  accommodation: AccommodationDto
+  activity: ActivityDto
+  productCategory: ProductCategoryEnum
+  vehicle: CarTypeDto
+}
+
+ProductUpdateDetails {
+  productId: integer<int64>
+  updateTimestamp: string
+}
+
+PromoCodeDto {
+  id: integer<int64>
+  code: string
+  description: string
+}
+
+QuestionAnswerPairDto {
+  answer: BookingAnswerWithIdDto
+  answerAsString: string
+  question: QuestionDto
+  questionAsString: string
+}
+
+QuestionDto {
+  active: boolean
+  answerRequired: boolean
+  flags: string[]
+  id: integer<int64>
+  label: string
+  options: string
+  type: string
+}
+
+QuestionSpecificationDto {
+  questionId: string
+  questionCode: string
+  label: string
+  help: string
+  placeholder: string
+  required: boolean
+  defaultValue: string
+  dataType: AnswerDataType
+  dataFormat: enum(EMAIL_ADDRESS|URL|PHONE_NUMBER|COUNTRY|LANGUAGE|TIME|DAY_OF_MONTH|MONTH)
+  pattern: string
+  flags: string[]
+  selectFromOptions: boolean
+  selectMultiple: boolean
+  answerOptions: AnswerOptionDto[]
+  answers: string[]
+  originalQuestion: string
+}
+
+QuestionTriggerSelectionTypeEnum = enum(ANY|SELECTED_ONLY) {
+  
+}
+
+RatePriceReport {
+  rateId: integer<int64>
+  price: number
+  closed: boolean
+  closedForArrival: boolean
+  closedForDeparture: boolean
+}
+
+RedirectRequest {
+  url: string
+  method: string
+  parameters: NameValuePairDto[]
+}
+
+RegionDto {
+  flags: string[]
+  id: integer<int64>
+  title: string
+}
+
+RentalBookingAnswersDto {
+  rentalId: integer<int64>
+  answers: AnswerDto[]
+  bookingId: integer<int64>
+  items: ItemAnswersDto[]
+}
+
+RentalBookingQuestionsDto {
+  bookingId: integer<int64>
+  rentalId: integer<int64>
+  rentalTitle: string
+  questions: QuestionSpecificationDto[]
+  items: ItemQuestionsDto[]
+}
+
+RentalBookingRequest {
+  rentalId: integer<int64>
+  answers: AnswerDto[]
+  pickupDateAndTime: string
+  dropoffDateAndTime: string
+  pickupPlaceId: integer<int64>
+  dropoffPlaceId: integer<int64>
+  note: string
+  items: ItemBookingRequest[]
+}
+
+RentalPricingModeEnum = enum(USE_PRICE_OF_FIRST_UNIT_FOR_ALL|CALCULATE_EACH_UNIT) {
+  
+}
+
+ResourceDto {
+  id: integer<int64>
+  title: string
+  type: ResourceTypeEnum
+}
+
+ResourceTypeEnum = enum(DRIVER|VEHICLE|GUIDE|ROOM|EQUIPMENT) {
+  
+}
+
+RoomAnswersDto {
+  roomTypeId: integer<int64>
+  answers: AnswerDto[]
+  guests: PersonAnswersDto[]
+  bookingId: integer<int64>
+  extras: ExtraAnswersDto[]
+}
+
+RoomAvailabilityReport {
+  date: string
+  available: integer<int32>
+  price: number
+  ratePrices: RatePriceReport[]
+}
+
+RoomAvailabilityRequestDto {
+  accommodationId: integer<int64>
+  checkIn: string
+  checkOut: string
+}
+
+RoomAvailabilityResponseDto {
+  roomAvailabilities: SingleRoomStatusDto[]
+}
+
+RoomBookingAnswersDto {
+  answerGroups: BookingAnswerGroupDto[]
+  bookingId: integer<int64>
+  extraBookings: ExtraBookingAnswersDto[]
+  roomId: integer<int64>
+}
+
+RoomBookingDetailsDto {
+  adults: integer<int32>
+  children: integer<int32>
+  endDate: string<date-time>
+  extras: ExtraBookingDetailsDto[]
+  bookingFields: BookingFieldDto[]
+  guests: CustomerDto[]
+  id: integer<int64>
+  infants: integer<int32>
+  nightCount: integer<int32>
+  roomRate: RoomRateDto
+  roomType: LightweightRoomTypeDto
+  startDate: string<date-time>
+  status: RoomBookingStatusEnum
+}
+
+RoomBookingDto {
+  adults: integer<int32>
+  availabilityCount: integer<int32>
+  children: integer<int32>
+  endDate: string<date-time>
+  extraBookings: ExtraBookingDto[]
+  extrasPrice: number
+  id: integer<int64>
+  infants: integer<int32>
+  roomPrice: number
+  roomRate: RoomRateDto
+  roomType: BookingItemInfoDto
+  startDate: string<date-time>
+  status: RoomBookingStatusEnum
+  unavailable: boolean
+}
+
+RoomBookingRequest {
+  roomTypeId: integer<int64>
+  answers: AnswerDto[]
+  guests: PersonAnswersDto[]
+  roomRateId: integer<int64>
+  roomId: integer<int64>
+  externalReference: string
+  checkInDate: string
+  checkOutDate: string
+  adults: integer<int32>
+  children: integer<int32>
+  infants: integer<int32>
+  extras: ExtraBookingRequest[]
+}
+
+RoomBookingRequestDto {
+  roomTypeId: integer<int64>
+  roomRateId: integer<int64>
+  roomId: integer<int64>
+  guests: CustomerDto[]
+  extras: ExtraBookingRequestDto[]
+  answers: RoomBookingAnswersDto[]
+  externalReference: string
+  checkinDate: string
+  checkoutDate: string
+  adults: number<int32>
+  children: number<int32>
+  infants: number<int32>
+}
+
+RoomBookingStatusEnum = enum(RESERVED|CHECKED_IN|CHECKED_OUT|NO_SHOW) {
+  
+}
+
+RoomInfo {
+  id: integer<int64>
+  title: string
+}
+
+RoomQuery {
+  adults: integer<int32>
+  children: integer<int32>[]
+}
+
+RoomQuestionsDto {
+  bookingId: integer<int64>
+  roomTypeId: integer<int64>
+  roomTypeTitle: string
+  roomRateTitle: string
+  startDate: string
+  endDate: string
+  questions: QuestionSpecificationDto[]
+  guests: PersonQuestionsDto[]
+  extras: ExtraQuestionsDto[]
+}
+
+RoomRateDto {
+  id: integer<int64>
+  maxNightsStay: integer<int32>
+  maxOccupants: integer<int32>
+  minNightsStay: integer<int32>
+  stayRestrictions: boolean
+  stayRestrictionsAllMonths: boolean
+  stayRestrictionsAllWeekdays: boolean
+  stayRestrictionsMonths: integer<int32>[]
+  stayRestrictionsWeekdays: integer<int32>[]
+  title: string
+  cancellationPolicy: CancellationPolicyDto
+}
+
+RoomReport {
+  room: RoomTypeDto
+  availabilities: RoomAvailabilityReport[]
+  minimumAvailability: integer<int32>
+}
+
+RoomTypeDto {
+  accommodationId: integer<int64>
+  accommodationTitle: string
+  bunkBedCount: integer<int32>
+  capacity: integer<int32>
+  categories: CategoryDto[]
+  code: string
+  defaultRateId: integer<int64>
+  description: string
+  doubleBedCount: integer<int32>
+  excerpt: string
+  externalId: string
+  extraLargeDoubleBedCount: integer<int32>
+  extras: BookableExtraDto[]
+  flags: string[]
+  futonMatCount: integer<int32>
+  id: integer<int64>
+  internalUseOnly: boolean
+  keyPhoto: PhotoDto
+  largeDoubleBedCount: integer<int32>
+  photos: PhotoDto[]
+  roomCount: integer<int32>
+  roomRates: RoomRateDto[]
+  shared: boolean
+  singleBedCount: integer<int32>
+  sofaBedCount: integer<int32>
+  tags: TagGroupDto[]
+  title: string
+  vendorId: integer<int64>
+}
+
+RoomTypeRooms {
+  roomType: LightweightRoomTypeDto
+  rooms: RoomInfo[]
+}
+
+RoomsGroupedByTypeContainer {
+  roomsGroupedByType: RoomTypeRooms[]
+}
+
+RoundingMode = enum(UP|DOWN|CEILING|FLOOR|HALF_UP|HALF_DOWN|EVEN) {
+  
+}
+
+RouteBookingAnswersDto {
+  answerGroups: BookingAnswerGroupDto[]
+  bookingId: integer<int64>
+}
+
+RouteBookingDetailsDto {
+  affiliateCommission: number<double>
+  agent: BookingAgentWithLinksDto
+  agentCommission: number<double>
+  answers: BookingAnswerDto[]
+  barcode: BarcodeValueDto
+  boxBooking: boolean
+  boxProduct: ProductInfoDto
+  cancelNote: string
+  cancellationDate: string<date-time>
+  cancelledBy: string
+  confirmationCode: string
+  date: string<date-time>
+  discountAmount: number
+  discountPercentage: number<double>
+  linksToExternalProducts: IntegratedSystemProductLinkDto[]
+  supplierContractFlags: string[]
+  sellerContractFlags: string[]
+  flexible: boolean
+  id: integer<int64>
+  includedOnCustomerInvoice: boolean
+  invoice: ProductInvoiceDto
+  legBookings: RouteLegBookingDto[]
+  notes: bookingNote[]
+  paidType: PaymentPaidTypeEnum
+  parentBooking: BookingDetailsDto
+  parentBookingId: integer<int64>
+  passengerBookings: RoutePassengerBookingDto[]
+  passengerSpecifications: RouteBookingLineItemSpecDto[]
+  priceWithDiscount: number
+  product: ProductInfoDto
+  productConfirmationCode: string
+  returnBooking: RouteBookingDetailsDto
+  route: RouteDto
+  savedAmount: number
+  seller: VendorWithLinksDto
+  sellerCommission: number<double>
+  status: BookingStatusEnum
+  supplier: VendorWithLinksDto
+  totalPrice: number
+}
+
+RouteBookingDto {
+  bookingStatus: string
+  creationDate: string<date-time>
+  customerUuid: string
+  date: string<date-time>
+  flexible: boolean
+  id: integer<int64>
+  includedOnCustomerInvoice: boolean
+  lastModifiedDate: string<date-time>
+  legBookings: RouteLegBookingDto[]
+  lineItemSpecs: RouteBookingLineItemSpecDto[]
+  passengerBookings: RoutePassengerBookingDto[]
+  productCategory: string
+  productConfirmationCode: string
+  returnBooking: RouteBookingDto
+  route: ProductInfoDto
+  totalPrice: number
+  vendor: VendorDto
+}
+
+RouteBookingLineItemSpecDto {
+  pricePerPassenger: number
+  pricingCategory: PricingCategoryDto
+  quantity: integer<int32>
+  totalPrice: number
+}
+
+RouteDto {
+  actualVendor: VendorDto
+  availabilityExpressions: availabilityExpression[]
+  baseLanguage: string
+  box: boolean
+  boxedVendor: VendorDto
+  categories: CategoryDto[]
+  closures: availabilityClosure[]
+  paymentCurrencies: string[]
+  customFields: CustomFieldDto[]
+  defaultDestStationId: integer<int64>
+  defaultSourceStationId: integer<int64>
+  description: string
+  endStationIds: integer<int64>[]
+  excerpt: string
+  externalId: string
+  flag: string[]
+  flexibleTickets: boolean
+  id: integer<int64>
+  keyPhoto: PhotoDto
+  keywords: string[]
+  languages: string[]
+  lastPublished: string
+  legs: RouteLegDto[]
+  peakPricing: boolean
+  photos: PhotoDto[]
+  pricingCategories: PricingCategoryDto[]
+  productCategory: string
+  productGroupId: integer<int64>
+  returnPricing: boolean
+  slug: string
+  stationGroups: string
+  tagGroups: TagGroupDto[]
+  timeSelectionRequired: boolean
+  title: string
+  vendor: VendorDto
+  videos: VideoDto[]
+  cancellationPolicy: CancellationPolicyDto
+  barcodeType: BarcodeTypeEnum
+  timeZone: string
+  storedExternally: boolean
+}
+
+RouteLegBookingDto {
+  date: string<date-time>
+  departure: RouteScheduleDto
+  dropoffPlaceId: integer<int64>
+  dropoffPlaceTitle: string
+  id: integer<int64>
+  leg: RouteLegDto
+  peak: boolean
+  pickupPlaceId: integer<int64>
+  pickupPlaceTitle: string
+}
+
+RouteLegDto {
+  distance: integer<int32>
+  distanceUnit: DistanceUnitEnum
+  externalId: string
+  flags: string[]
+  flexibleSchedule: boolean
+  from: RouteStationDto
+  id: integer<int64>
+  schedules: RouteScheduleDto[]
+  to: RouteStationDto
+}
+
+RoutePassengerBookingDto {
+  id: integer<int64>
+  pricingCategory: PricingCategoryDto
+  barcode: BarcodeValueDto
+}
+
+RoutePathSegmentBookingRequest {
+  departureSchedules: RouteScheduleBookingRequestDto[]
+  passengerSpecification: SegmentPassengerSpecificationDto
+  returnSchedules: RouteScheduleBookingRequestDto[]
+  returning: boolean
+  routeId: integer<int64>
+}
+
+RouteScheduleBookingRequestDto {
+  dropoffPlaceId: integer<int64>
+  pickupPlaceId: integer<int64>
+  routeLegId: integer<int64>
+  scheduleId: integer<int64>
+}
+
+RouteScheduleDto {
+  arrivalHour: integer<int32>
+  arrivalMinute: integer<int32>
+  arrivalTimeStr: string
+  departureHour: integer<int32>
+  departureMinute: integer<int32>
+  departureTimeStr: string
+  flags: string[]
+  id: integer<int64>
+  peak: boolean
+}
+
+RouteStationDto {
+  airportStation: boolean
+  flags: string[]
+  id: integer<int64>
+  location: LocationDto
+  pickupFlags: string[]
+  pickupPlaceId: integer<int64>
+  pickupStation: boolean
+  regions: RegionDto[]
+  shortOrLongTitle: string
+  shortTitle: string
+  title: string
+}
+
+SearchResultItem {
+  baseLanguage: string
+  box: boolean
+  boxedProductId: integer<int64>
+  boxedSupplierId: integer<int64>
+  customFields: CustomFieldDto[]
+  excerpt: string
+  externalId: string
+  fields: map<object>
+  flags: string[]
+  id: string
+  keyPhoto: PhotoDto
+  keywords: string[]
+  languages: string[]
+  location: LocationDto
+  locationCode: LocationCodeDto
+  paymentCurrencies: string[]
+  photos: PhotoDto[]
+  places: PlaceDto[]
+  price: number
+  productGroupId: integer<int64>
+  slug: string
+  summary: string
+  title: string
+  vendor: ItemDto
+  videos: VideoDto[]
+}
+
+SearchResultsDto {
+  items: SearchResultItem[]
+  tagFacets: TermsFacetDto[]
+  tagFilters: TermFilter[]
+  termFacets: map<TermsFacetDto>
+  tookInMillis: integer<int64>
+  totalHits: integer<int64>
+}
+
+SeasonalOpeningHours {
+  id: integer<int64>
+  created: integer<int64>[]
+  monday: OpeningHoursWeekday
+  tuesday: OpeningHoursWeekday
+  wednesday: OpeningHoursWeekday
+  thursday: OpeningHoursWeekday
+  friday: OpeningHoursWeekday
+  saturday: OpeningHoursWeekday
+  sunday: OpeningHoursWeekday
+  startYear: integer<int32>
+  endYear: integer<int32>
+  startMonth: integer<int32>
+  startDay: integer<int32>
+  endMonth: integer<int32>
+  endDay: integer<int32>
+}
+
+SegmentPassengerSpecificationDto {
+  passengerSpecifications: PricingCategoryPassengerSpecificationDto[]
+}
+
+SellableActivities {
+  suppliers: ActivitiesBySupplier[]
+}
+
+ShoppingCart {
+  accommodationBookings: AccommodationBookingDto[]
+  activityBookings: ActivityBookingDto[]
+  carRentalBookings: CarRentalBookingDto[]
+  customerUUID: string
+  harbour: HarbourDto
+  lastAccessDate: string<date-time>
+  routeBookings: RouteBookingDto[]
+  sessionId: string
+  size: integer<int32>
+  totalPrice: number
+  totalPriceInInvoiceCurrency: number
+  vessel: VesselDto
+}
+
+ShoppingCartCheckout {
+  uuid: string
+  externalBookingReference: string
+  externalBookingEntityName: string
+  externalBookingEntityCode: string
+  bookingAnswers: BookingAnswersDto
+}
+
+SimpleMoney {
+  amount: number
+  currency: string
+}
+
+SingleAccommodationBookingRequestDto {
+  accommodationRequest: AccommodationBookingRequestDto
+  chargeRequest: ChargeRequest
+  customer: CustomerDto
+  discountPercentage: number<double>
+  externalBookingReference: string
+  harbourId: integer<int64>
+  manualPayment: CustomerPaymentDto
+  note: string
+  paymentOption: BookingPaymentOption
+  roomBookingStatus: RoomBookingStatusEnum
+  sendCustomerNotification: boolean
+  tokenChargeRequest: TokenChargeRequest
+  vesselId: integer<int64>
+}
+
+SingleActivityBookingRequestDto {
+  activityRequest: ActivityBookingRequestDto
+  chargeRequest: ChargeRequest
+  customer: CustomerDto
+  discountPercentage: number<double>
+  externalBookingReference: string
+  harbourId: integer<int64>
+  manualPayment: CustomerPaymentDto
+  note: string
+  paymentOption: BookingPaymentOption
+  sendCustomerNotification: boolean
+  tokenChargeRequest: TokenChargeRequest
+  vesselId: integer<int64>
+}
+
+SingleRoomStatusDto {
+  roomId: integer<int64>
+  roomTitle: string
+  roomAvailable: boolean
+}
+
+SingleTransportBookingRequestDto {
+  routeRequest: TransportBookingRequestDto
+  chargeRequest: ChargeRequest
+  customer: CustomerDto
+  discountPercentage: number<double>
+  externalBookingReference: string
+  harbourId: integer<int64>
+  manualPayment: CustomerPaymentDto
+  note: string
+  paymentOption: BookingPaymentOption
+  sendCustomerNotification: boolean
+  tokenChargeRequest: TokenChargeRequest
+  vesselId: integer<int64>
+}
+
+SortField {
+  name: string
+  order: SortOrder
+}
+
+SortOrder = enum(ASC|DESC) {
+  
+}
+
+StartTimeDto {
+  id: integer<int64>
+  label: string
+  hour: integer<int32>
+  minute: integer<int32>
+  overrideTimeWhenPickup: boolean
+  pickupHour: integer<int32>
+  pickupMinute: integer<int32>
+  durationType: string
+  voucherPickupMsg: string
+  externalId: string
+  duration: integer<int32>
+  durationMinutes: integer<int32>
+  durationHours: integer<int32>
+  durationDays: integer<int32>
+  durationWeeks: integer<int32>
+  flags: string[]
+}
+
+Status = enum(NEW|FINISHED|FAILED|NOT_FOUND|ERROR) {
+  
+}
+
+StopoverDto {
+  arrivalDate: string<date-time>
+  departureDate: string<date-time>
+  harbourId: integer<int64>
+  id: integer<int64>
+}
+
+TagDto {
+  exclusive: boolean
+  facetName: string
+  flags: string[]
+  groupId: integer<int64>
+  id: integer<int64>
+  ownerId: integer<int64>
+  parentTagId: integer<int64>
+  title: string
+}
+
+TagGroupDto {
+  exclusive: boolean
+  externalId: string
+  facetName: string
+  flags: string[]
+  group: boolean
+  id: integer<int64>
+  ownerId: integer<int64>
+  productCategory: ProductCategoryEnum
+  sharedWithSuppliers: boolean
+  subCategory: TagGroupSubcategoryEnum
+  tags: TagDto[]
+  title: string
+}
+
+TagGroupSubcategoryEnum = enum(NONE|ITEM) {
+  
+}
+
+Tax {
+  id: integer<int64>
+  created: integer<int64>[]
+  title: string
+  included: boolean
+  roundingMode: RoundingMode
+  currency: string
+  percentages: object[]
+}
+
+TaxDto {
+  id: integer<int64>
+  included: boolean
+  percentage: number<double>
+  title: string
+}
+
+TermFilter {
+  excluded: boolean
+  facetName: string
+  groupTitle: string
+  title: string
+  value: string
+}
+
+TermsFacetDto {
+  entries: TermsFacetEntryDto[]
+  flags: string[]
+  name: string
+  sortedEntries: TermsFacetEntryDto[]
+  title: string
+}
+
+TermsFacetEntryDto {
+  count: integer<int64>
+  flags: string[]
+  term: string
+  title: string
+}
+
+TextFilter {
+  operator: string
+  searchExternalId: boolean
+  searchFullText: boolean
+  searchKeywords: boolean
+  searchTitle: boolean
+  text: string
+  wildcard: boolean
+}
+
+TicketCategoryEnum = enum(ADULT|CHILD|TEENAGER|INFANT|SENIOR|STUDENT|MILITARY|OTHER) {
+  
+}
+
+TicketReference {
+  bookingId: integer<int64>
+  productTitle: string
+  productConfirmationCode: string
+  ticket: string
+}
+
+TieredPriceDto {
+  minPassengersRequired*: integer<int32>
+  maxPassengersRequired: integer<int32>
+  currency*: string
+  amount*: number<double>
+  ofWhichTax*: number<double>
+  priceNotFound: boolean
+}
+
+TokenCharge {
+  token: string
+}
+
+TokenChargeRequest {
+  amount: number
+  currency: string
+  lineItems: PaymentLineItemDto[]
+  paymentToken: string
+  providerPaymentParameters: map<string>
+  uti: string
+}
+
+TransactionDetails {
+  transactionDate: string
+  transactionId: string
+  cardBrand: string
+  last4: string
+}
+
+TransportBookingAnswersDto {
+  bookingId: integer<int64>
+  routeId: integer<int64>
+  answers: AnswerDto[]
+  pickupAnswers: AnswerDto[]
+  dropoffAnswers: AnswerDto[]
+  passengers: PassengerAnswersDto[]
+}
+
+TransportBookingQuestionsDto {
+  bookingId: integer<int64>
+  routeId: integer<int64>
+  routeTitle: string
+  questions: QuestionSpecificationDto[]
+  passengers: PassengerQuestionsDto[]
+  pickupQuestions: QuestionSpecificationDto[]
+  dropoffQuestions: QuestionSpecificationDto[]
+}
+
+TransportBookingRequestDto {
+  departureDate: string
+  pathSegments: RoutePathSegmentBookingRequest[]
+  returnDate: string
+}
+
+TravelDocuments {
+  invoice: string
+  activityTickets: TicketReference[]
+  accommodationTickets: TicketReference[]
+  rentalTickets: TicketReference[]
+  transportTickets: TicketReference[]
+}
+
+TravelTypeEnum = enum(BUSINESS|LEISURE|CONFERENCE) {
+  
+}
+
+UnLocode {
+  city: string
+  country: string
+}
+
+UpdatedProductsResponse {
+  updatedProducts: ProductUpdateDetails[]
+}
+
+VendorDto {
+  id: integer<int64>
+  title: string
+  currencyCode: string
+  showInvoiceIdOnTicket: boolean
+  showAgentDetailsOnTicket: boolean
+  showPaymentsOnInvoice: boolean
+  companyEmailIsDefault: boolean
+}
+
+VendorRoleEnum = enum(CONTENT_EDITOR|INVENTORY|PRICING|CONTRACTS|USER_MANAGER|FINANCE|DISTRIBUTION|SALES|SALES_MANAGER|INTEGRATION_MANAGER|SUPPLIER_MANAGER|TRANSLATOR|DRIVER|GUIDE) {
+  
+}
+
+VendorWithLinksDto {
+  currencyCode: string
+  emailAddress: string
+  id: integer<int64>
+  invoiceIdNumber: string
+  linkedExternalCustomers: LinkedExternalCustomerDto[]
+  logo: PhotoDto
+  logoStyle: string
+  phoneNumber: string
+  showAgentDetailsOnTicket: boolean
+  showInvoiceIdOnTicket: boolean
+  showPaymentsOnInvoice: boolean
+  title: string
+  website: string
+}
+
+VesselDto {
+  affiliate: affiliate
+  flags: string[]
+  id: integer<int64>
+  stopovers: StopoverDto[]
+  title: string
+}
+
+VideoDto {
+  id: integer<int64>
+  title: string
+  sourceUrl: string
+  thumbnailUrl: string
+  previewUrl: string
+  html: string
+  providerName: string
+  cleanPreviewUrl: string
+  cleanThumbnailUrl: string
+}
+
+affiliate {
+  externalId: string
+  flags: string[]
+  id: integer<int64>
+  idNumber: string
+  title: string
+  trackingCode: string
+}
+
+agent {
+  id: integer<int64>
+  idNumber: string
+  referenceCode: string
+  title: string
+}
+
+availabilityClosure {
+  closedItems: availabilityItemClosure[]
+  comment: string
+  cron: string
+  cronConditionActive: boolean
+  dateRangeConditionActive: boolean
+  endDate: string<date-time>
+  flags: string[]
+  flagConditionActive: boolean
+  id: integer<int64>
+  recurringDateRange: boolean
+  recurringEndDay: integer<int32>
+  recurringEndMonth: integer<int32>
+  recurringStartDay: integer<int32>
+  recurringStartMonth: integer<int32>
+  startDate: string<date-time>
+}
+
+availabilityExpression {
+  capacities: availabilityItemCapacity[]
+  comment: string
+  cron: string
+  cronConditionActive: boolean
+  dateRangeConditionActive: boolean
+  endDate: string<date-time>
+  flags: string[]
+  flagConditionActive: boolean
+  id: integer<int64>
+  recurringDateRange: boolean
+  recurringEndDay: integer<int32>
+  recurringEndMonth: integer<int32>
+  recurringStartDay: integer<int32>
+  recurringStartMonth: integer<int32>
+  startDate: string<date-time>
+}
+
+availabilityItemCapacity {
+  availabilityItemId: string
+  capacity: integer<int32>
+  capacityType: CapacityTypeEnum
+  id: integer<int64>
+}
+
+availabilityItemClosure {
+  id: integer<int64>
+  item: string
+}
+
+bookingNote {
+  author: string
+  body: string
+  created: string<date-time>
+  ownerId: integer<int64>
+  recipient: string
+  sentAsEmail: boolean
+  subject: string
+  type: BookingNoteTypeEnum
+  voucherAttached: boolean
+  voucherPricesShown: boolean
+}
+
+cancelBooking {
+  note*: string
+  notify*: boolean
+  refund*: boolean
+}
+
+cancelProductBooking {
+  note*: string
+  notify*: boolean
+  refund*: boolean
+  refundAmount*: number
+  remainInvoiced: boolean
+}
