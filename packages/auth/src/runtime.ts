@@ -34,4 +34,4 @@ export function createAuth() {
 	});
 }
 
-export const auth = createAuth();
+export type Auth = ReturnType<typeof createAuth>;

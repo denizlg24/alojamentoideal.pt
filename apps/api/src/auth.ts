@@ -22,15 +22,15 @@ export const betterAuth = new Elysia({ name: "better-auth" })
 			allowedHeaders: ["Content-Type", "Authorization"],
 		}),
 	)
-	.all("/api/auth/*", async ({ request }) => {
-		const auth = await getAuth();
+	.all("/api/auth/*", ({ request }) => {
+		const auth = getAuth();
 
 		return auth.handler(request);
 	})
 	.macro({
 		auth: {
 			async resolve({ status, request: { headers } }) {
-				const auth = await getAuth();
+				const auth = getAuth();
 				const session = await auth.api.getSession({ headers });
 
 				if (!session) {

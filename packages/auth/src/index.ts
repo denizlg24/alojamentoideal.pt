@@ -1,7 +1,6 @@
 export {
 	type Auth,
 	type AuthUser,
-	auth,
 	getAuth,
 	type Session,
 } from "./auth.js";
