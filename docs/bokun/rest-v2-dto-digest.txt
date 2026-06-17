@@ -1,0 +1,898 @@
+ActiveHistoricSellerInvoicesDto {
+  activeSellerInvoice: SellerInvoiceDto
+  historicSellerInvoices*: SellerInvoiceDto[]
+}
+
+AddonPricingTypeDto = enum(INCLUDED_IN_PRICE|PRICED_SEPARATELY) {
+  
+}
+
+AddonSelectionTypeDto = enum(OPTIONAL|PRESELECTED|UNAVAILABLE) {
+  
+}
+
+AddressDto {
+  id: integer<int64>
+  addressLine1: string
+  addressLine2: string
+  addressLine3: string
+  city: string
+  state: string
+  postalCode: string
+  countryCode: string
+  latitude: number<double>
+  longitude: number<double>
+  googlePlaceId: string
+}
+
+AffiliateInvoiceDto extends CommonInvoiceDto {
+  recipientVendorId*: integer<int64>
+  issuerAffiliateId: integer<int64>
+  issuerVendorId: integer<int64>
+  issuerAgentId: integer<int64>
+}
+
+AgentInvoiceDto extends CommonInvoiceDto {
+  issuerVendorId*: integer<int64>
+  recipientAgentId: integer<int64>
+}
+
+BarcodeFormatDto = enum(QR_CODE|CODE_128|PDF_417|DATA_MATRIX|AZTEC|NONE) {
+  
+}
+
+BaseExperienceBookingNoteDto {
+  text*: string
+}
+
+BookingAuditRecordDto {
+  id*: integer<int64>
+  bookingId*: integer<int64>
+  productBookingId: integer<int64>
+  date*: TimestampDto
+  bookingChannelId: integer<int64>
+  extranetUsername: string
+  status: BookingStatusDto
+  action: string
+  location: string
+  referer: string
+  errorOccurred*: boolean
+}
+
+BookingInvoicesDto {
+  bookingId*: integer<int64>
+  activeCustomerInvoice: CustomerInvoiceDto
+  historicCustomerInvoices*: CustomerInvoiceDto[]
+  activeAffiliateInvoice: AffiliateInvoiceDto
+  historicAffiliateInvoices*: AffiliateInvoiceDto[]
+  activeAgentInvoice: AgentInvoiceDto
+  historicAgentInvoices*: AgentInvoiceDto[]
+  sellerInvoices*: map<ActiveHistoricSellerInvoicesDto>
+}
+
+BookingStatusDto = enum(CART|REQUESTED|RESERVED|CONFIRMED|TIMEOUT|ABORTED|CANCELLED|ERROR|ARRIVED|NO_SHOW|REJECTED) {
+  
+}
+
+CancellationPoliciesPagedListDto extends PagedListDto {
+  items*: CancellationPolicyDto[]
+}
+
+CommonInvoiceDto {
+  id*: integer<int64>
+  issued*: TimestampDto
+  currency*: string
+  lineItems*: InvoiceLineItemDto[]
+  total*: string<number>
+  issuerTimeZone*: string
+  recipientTimeZone: string
+}
+
+CommonPriceRuleDto {
+  id: integer<int64>
+  rate*: IdExternalIdDto
+  created: TimestampDto
+  priceCatalogId*: integer<int64>
+  currency*: string
+  amount*: string<number>
+  priceScheduleId: integer<int64>
+  pricingCategoryId: integer<int64>
+}
+
+ContactInformationDto {
+  type*: ContactInformationTypeDto
+  required*: boolean
+  requiredBeforeDeparture: boolean
+}
+
+ContactInformationTypeDto = enum(TITLE|FIRST_NAME|LAST_NAME|PERSONAL_ID_NUMBER|EMAIL|PHONE_NUMBER|NATIONALITY|GENDER|ORGANIZATION|PASSPORT_ID|PASSPORT_EXPIRY|ADDRESS|DATE_OF_BIRTH|LANGUAGE) {
+  
+}
+
+CustomInputFieldValueDto {
+  customInputFieldId*: integer<int64>
+  value: string
+}
+
+CustomerDto {
+  id: integer<int64>
+  email: string
+  title: string
+  firstName: string
+  lastName: string
+  address: string
+  postCode: string
+  state: string
+  city: string
+  country: string
+  nationality: string
+  language: string
+  phoneNumber: string
+  organization: string
+  sex: string
+  passportId: string
+  dateOfBirth: string<date>
+}
+
+CustomerInvoiceDto extends CommonInvoiceDto {
+  issuerVendorId*: integer<int64>
+  promoCodeId: integer<int64>
+  customerId*: integer<int64>
+  fees*: FeeDto[]
+}
+
+CustomerPaymentDto {
+  id*: integer<int64>
+  currency*: string
+  amount*: string<number>
+  comment: string
+  creationDate: TimestampDto
+  paymentType*: PaymentTypeDto
+  paymentProviderType: string
+  giftCardId: integer<int64>
+  externalCardId: integer<int64>
+  paymentReferenceId: string
+}
+
+DayOfWeekDto = enum(MONDAY|TUESDAY|WEDNESDAY|THURSDAY|FRIDAY|SATURDAY|SUNDAY) {
+  
+}
+
+DropoffPriceRuleDto extends CommonPriceRuleDto {
+  
+}
+
+DurationDto {
+  minutes*: integer<int32>
+  hours*: integer<int32>
+  days*: integer<int32>
+  weeks*: integer<int32>
+}
+
+EarlyBookingLimitType = enum(UNLIMITED|SPECIFIC_DATE_TIME|RELATIVE_TO_TRAVEL_DATE_SPECIFIC_TIME|MONTHS_BEFORE_TRAVEL_DATE_SPECIFIC_TIME) {
+  
+}
+
+ExperienceActivationSettingsDto {
+  activated*: boolean
+  lastActivationDate: TimestampDto
+}
+
+ExperienceAllocationDto {
+  id: integer<int64>
+  title*: string
+  start: string<date>
+  end: string<date>
+  deadline*: integer<int32>
+  resellerIds*: integer<int64>[]
+  supplierBookingChannelIds*: integer<int64>[]
+  startTimeIds*: integer<int64>[]
+  guaranteedSeatPercentage: integer<int32>
+  guaranteedSeatCount: integer<int32>
+  seatLimitPercentage: integer<int32>
+  seatLimitCount: integer<int32>
+}
+
+ExperienceAllocationsPagedListDto extends PagedListDto {
+  items*: ExperienceAllocationDto[]
+}
+
+ExperienceAvailabilityDto {
+  id: string
+  date*: string<yyyy-MM-dd>
+  startTimeId*: integer<int64>
+  time: string<time in 24 hour format, e.g. "16:30" or "05:15". This field only appears for `DATE_AND_TIME` products; never appears for `DATE` nor `PASS` products.>
+  remainingPax*: integer<int32>
+  remainingPickups: integer<int32>
+  minPax*: integer<int32>
+  guidedLanguages: string[]
+}
+
+ExperienceAvailabilityStatisticsDto extends ExperienceAvailabilityDto {
+  closed*: boolean
+  unlimited*: boolean
+  pastCutoff*: boolean
+  tooEarly*: boolean
+  initialPax: integer<int32>
+  initialPickups: integer<int32>
+  paxBooked*: integer<int32>
+  pickupsBooked: integer<int32>
+  remainingResources: integer<int32>
+  recurrenceRuleId: integer<int64>
+}
+
+ExperienceBookingNoteRequestDto extends BaseExperienceBookingNoteDto {
+  type*: ExperienceBookingNoteTypeDto
+}
+
+ExperienceBookingNoteResponseDto extends BaseExperienceBookingNoteDto {
+  id*: integer<int64>
+  owner_id*: integer<int64>
+  type*: ExperienceBookingNoteTypeDto
+}
+
+ExperienceBookingQuestionContextDto = enum(BOOKING|PASSENGER|EXTRA) {
+  
+}
+
+ExperienceBookingQuestionDataTypeDto = enum(SHORT_TEXT|LONG_TEXT|INT|DOUBLE|BOOLEAN|CHECKBOX_TOGGLE|DATE|DATE_AND_TIME|OPTIONS) {
+  
+}
+
+ExperienceBookingQuestionDto {
+  id: integer<int64>
+  created: TimestampDto
+  lastModified: TimestampDto
+  label*: string
+  personalData*: boolean
+  required*: boolean
+  requiredBeforeDeparture: boolean
+  help: string
+  placeholder: string
+  dataType*: ExperienceBookingQuestionDataTypeDto
+  defaultValue: string
+  context*: ExperienceBookingQuestionContextDto
+  pricingCategoryTriggerSelection*: ExperienceBookingQuestionTriggerSelectionDto
+  pricingCategoryTriggers: integer<int64>[]
+  rateTriggerSelection*: ExperienceBookingQuestionTriggerSelectionDto
+  rateTriggers: IdExternalIdDto[]
+  extraTriggerSelection*: ExperienceBookingQuestionTriggerSelectionDto
+  extraTriggers: IdExternalIdDto[]
+  options: ExperienceBookingQuestionOptionDto[]
+}
+
+ExperienceBookingQuestionOptionDto {
+  id: integer<int64>
+  label*: string
+  value*: string
+}
+
+ExperienceBookingQuestionTriggerSelectionDto = enum(ANY|SELECTED_ONLY) {
+  
+}
+
+ExperienceBookingTypeDto = enum(PASS|DATE|DATE_AND_TIME) {
+  
+}
+
+ExperienceBoxSettingsDto {
+  isBox*: boolean
+  boxedProductId: integer<int64>
+  overridePhotosVideos: boolean
+  overrideCustomInputFieldValues: boolean
+  overrideItinerary: boolean
+}
+
+ExperienceCapacityTypeDto = enum(FREE_SALE|LIMITED|ON_REQUEST) {
+  
+}
+
+ExperienceCategoryDto = enum(WALKING_TOUR|BUS_OR_MINIVAN_TOUR|AIR_OR_HELICOPTER_TOUR|SAILING_OR_BOAT_TOUR|PRIVATE_CAR_TOUR|SEAT_IN_COACH_TOUR|SEGWAY_TOUR|SNOWMOBILE_TOUR|ATV_OR_QUAD_TOUR|BIKE_TOUR|HOP_ON_HOP_OFF_TOUR|TOURIST_PASS|RAIL_PASS|AMUSEMENT_PARK|AIRPORT_LOUNGE|SHOWS_AND_MUSICALS|SPECTATOR_SPORTS|FESTIVAL|MUSEUMS_AND_EXHIBITIONS|SIGHTSEEING_ATTRACTION|ZOOS_AND_AQUARIUMS|SIGHTSEEING|ARTS_AND_CULTURE|CLASSES_AND_WORKSHOPS|CULINARY|NIGHTLIFE|SHOPPING|PHOTOGRAPHY|TV_AND_MOVIES|ESCAPE_GAME|SPA_AND_WELLNESS|ADVENTURE|WATER|NATURE|SAFARI_AND_WILDLIFE|BIRDWATCHING|DOLPHIN_OR_WHALEWATCHING|SURFING|CANOEING|CAVING|CLIMBING|DIVING|GLACIER_HIKING|HIKING|HORSEBACK_RIDING|ICE_CLIMBING|KAYAKING|RAFTING|SEA_ANGLING|HUNTING|FISHING|SKIING|SNORKELING|SELF_DRIVE_TOUR|PRIVATE_ROUNDRIP|MINI_CRUISE|CITY_BREAK|SHORT_BREAK|SUN_AND_BEACH|PILGRIMAGE_OR_RELIGION|MOTORCYCLE_TOURS|MOUNTAIN_BIKE|GOLF|MULTISPORT|EDUCATIONAL_TOUR|LANGUAGE_TOUR|MEDICAL_TOUR|CULTURAL_AND_THEME_TOURS|DAY_TRIPS_AND_EXCURSIONS|HOLIDAY_AND_SEASONAL_TOURS|LUXURY_AND_SPECIAL_OCCASIONS|OBSTACLE_COURSES|ADRENALINE_AND_EXTREME|PAINTBALL|PARAGLIDING|RUNNING|SHORE_EXCURSIONS|THEME_PARKS|TROLLEY_TOURS|LAYOVER_TOURS|CLASSIC_CAR_TOURS|UNDERGROUND_TOURS|PLANTATION_TOURS|HORSE_CARRIAGE_RIDE|SKIP_THE_LINE|CITY_TOURS|TRANSFERS_AND_GROUND_TRANSPORT|VIP_AND_EXCLUSIVE|WEDDING_AND_HONEYMOON|EBIKE_TOUR|BUS_TOUR|MINIVAN_TOUR|JET_SKI_TOUR) {
+  
+}
+
+ExperienceCloseoutDto {
+  date*: string<date>
+  startTimeIds*: integer<int64>[]
+}
+
+ExperienceComboPricingCategoryMappingDto {
+  comboParentPricingCategoryId*: integer<int64>
+  comboChildPricingCategoryId*: integer<int64>
+}
+
+ExperienceComboRateMappingDto {
+  comboParentRate*: IdExternalIdDto
+  comboChildRateId*: integer<int64>
+}
+
+ExperienceComboSettingsDto {
+  isCombo*: boolean
+  ticketPerComboComponent: boolean
+  ticketComboComponents: integer<int64>[]
+}
+
+ExperienceComboStartTimeMappingDto {
+  id: integer<int64>
+  comboChildStartTimeId*: integer<int64>
+  inheritPickupFromParent*: boolean
+  pickupPlace: string
+  dropoffPlace: string
+  rateMappings*: ExperienceComboRateMappingDto[]
+  pricingCategoryMappings*: ExperienceComboPricingCategoryMappingDto[]
+}
+
+ExperienceComponentsDto {
+  lastModified: TimestampDto
+  created: TimestampDto
+  externalId: string
+  title: string
+  shortDescription: string
+  description: string
+  keywords: string[]
+  type: ExperienceTypeDto
+  privateExperience: boolean
+  timeZone: string
+  categories: ExperienceCategoryDto[]
+  themes: ExperienceThemeDto[]
+  difficultyLevel: ExperienceDifficultyDto
+  minAge: integer<int32>
+  duration: DurationDto
+  onRequestDeadline: DurationDto
+  location: GooglePlaceDto
+  itinerary: ExperienceItineraryDto[]
+  photos: PhotoDto[]
+  videos: VideoDto[]
+  guidanceTypes: ExperienceGuidedLanguagesDto
+  inclusions: ExperienceInclusionExclusionTypeDto[]
+  included: string
+  exclusions: ExperienceInclusionExclusionTypeDto[]
+  excluded: string
+  knowBeforeYouGo: ExperienceKnowBeforeYouGoTypeDto[]
+  attention: string
+  requirements: string
+  extras: ExtraDto[]
+  bookingType: ExperienceBookingTypeDto
+  defaultOpeningHours: OpeningHoursDto
+  seasonalOpeningHours: SeasonalOpeningHoursDto[]
+  cutoff: ExperienceCutoffDto
+  capacityType: ExperienceCapacityTypeDto
+  startTimes: ExperienceStartTimeDto[]
+  availabilityRules: ExperienceRecurrenceRuleDto[]
+  passSettings: ExperiencePassSettingsDto
+  pricingCategories: ExperiencePricingCategoriesDto
+  rates: ExperienceRatesDto
+  pricing: ExperiencePricingDto
+  mainPaxInfo: ContactInformationDto[]
+  otherPaxInfo: ContactInformationDto[]
+  bookingQuestions: ExperienceBookingQuestionDto[]
+  returnProductId: integer<int64>
+  combo: ExperienceComboSettingsDto
+  ticket: ExperienceTicketDto
+  bookingLabels: integer<int64>[]
+  flags: string[]
+  customInputFieldValues: CustomInputFieldValueDto[]
+  commissionGroupId: integer<int64>
+  inventorySettings: ExperienceInventorySettingsDto
+  allowCustomizedBookings: boolean
+  boxSettings: ExperienceBoxSettingsDto
+  activation: ExperienceActivationSettingsDto
+  meetingType: ExperienceMeetingSettingsDto
+  marketplaceVisibilityType: MarketplaceVisibilityTypeDto
+  id: integer<int64>
+  earlyBookingLimit: ExperienceEarlyBookingLimitDto
+  reservationTimeout: integer<int32>
+}
+
+ExperienceCutoffDto {
+  type*: ExperienceCutoffTypeDto
+  referenceHour: integer
+  referenceMinute: integer
+  minutes*: integer
+  hours*: integer
+  days*: integer
+  weeks*: integer
+}
+
+ExperienceCutoffTypeDto = enum(RELATIVE_TO_START_TIME|RELATIVE_TO_WORKING_HOURS_OPEN|RELATIVE_TO_WORKING_HOURS_CLOSE|RELATIVE_TO_ONE_SET_TIME) {
+  
+}
+
+ExperienceDifficultyDto = enum(VERY_EASY|EASY|MODERATE|CHALLENGING|DEMANDING|EXTREME) {
+  
+}
+
+ExperienceEarlyBookingLimitDto {
+  limitType*: EarlyBookingLimitType
+  specificDateTime: LocalDateTimeDto
+  daysBefore: integer<int32>
+  monthsBefore: integer<int32>
+  time: LocalTimeDto
+}
+
+ExperienceExtraSelectionTypeDto = enum(OPTIONAL|PRESELECTED) {
+  
+}
+
+ExperienceGuidanceTypeDto = enum(GUIDED|HEADPHONES|READING_MATERIAL) {
+  
+}
+
+ExperienceGuidedLanguagesDto {
+  keyType: ExperienceGuidanceTypeDto
+}
+
+ExperienceInclusionExclusionTypeDto = enum(ENTRY_OR_ADMISSION_FEE|FUEL_SURCHARGE|LANDING_AND_FACILITY_FEES|PARKING_FEES|ENTRY_TAX|DEPARTURE_TAX|NATIONAL_PARK_ENTRANCE_FEE|GOODS_AND_SERVICES_TAX|TIP_OR_GRATUITY|FOOD_AND_DRINKS|WIFI|BUS_FARE) {
+  
+}
+
+ExperienceInventoryExtraMappingDto {
+  platformExtra*: IdExternalIdDto
+  remoteExtraId*: string
+}
+
+ExperienceInventoryPricingCategoryMappingDto {
+  platformPricingCategoryId*: integer<int64>
+  remotePricingCategoryId*: string
+}
+
+ExperienceInventoryRateMappingDto {
+  platformRate*: IdExternalIdDto
+  remoteRateId*: string
+}
+
+ExperienceInventorySettingsDto {
+  enabled*: boolean
+  inventoryPluginId: string
+  remoteProductId: string
+  rateMappings: ExperienceInventoryRateMappingDto[]
+  pricingCategoryMappings: ExperienceInventoryPricingCategoryMappingDto[]
+  extraMappings: ExperienceInventoryExtraMappingDto[]
+}
+
+ExperienceItineraryDto {
+  id: integer<int64>
+  title*: string
+  excerpt: string
+  description: string
+  address: AddressDto
+  photos*: integer<int64>[]
+}
+
+ExperienceKnowBeforeYouGoTypeDto = enum(STROLLER_OR_PRAM_ACCESSIBLE|WHEELCHAIR_ACCESSIBLE|LIMITED_MOBILITY_ACCESSIBLE|LIMITED_SIGHT_ACCESSIBLE|ANIMALS_OR_PETS_ALLOWED|PUBLIC_TRANSPORTATION_NEARBY|INFANT_SEATS_AVAILABLE|INFANTS_MUST_SIT_ON_LAPS|PASSPORT_REQUIRED|DRESS_CODE) {
+  
+}
+
+ExperienceMeetingPointDto {
+  id: integer<int64>
+  title*: string
+  address*: AddressDto
+}
+
+ExperienceMeetingSettingsDto {
+  type*: ExperienceMeetingTypeDto
+  meetingPointPlaceGroupId: integer<int64>
+  meetingPointAddresses: ExperienceMeetingPointDto[]
+  allPickupPlaceGroups: boolean
+  pickupPlaceGroupIds: integer<int64>[]
+  pickupMinutesBefore: integer<int32>
+  pickupTimeWindow: integer
+  pickupTimeLocationBased: boolean
+  pickupTimeByLocation: ExperiencePickupTimeByLocationDto[]
+  pickupAllotment: boolean
+  customPickupAllowed: boolean
+  showPickupMessageOnTicket: boolean
+  showNoPickupMessageOnTicket: boolean
+  noPickupMessage: string
+  dropoffService*: boolean
+  customDropoffAllowed: boolean
+  dropoffPlacesSameAsPickup: boolean
+  allDropoffPlaceGroups: boolean
+  dropoffPlaceGroupIds: integer<int64>[]
+}
+
+ExperienceMeetingTypeDto = enum(MEET_ON_LOCATION|PICK_UP|MEET_ON_LOCATION_OR_PICK_UP) {
+  
+}
+
+ExperiencePassSettingsDto {
+  expiryType*: PassExpiryTypeDto
+  capacity: integer<int32>
+  expiryDate: string<date>
+  validForDays: integer<int32>
+}
+
+ExperiencePickupTimeByLocationDto {
+  placeId*: integer<int64>
+  minBeforeStart*: integer<int32>
+}
+
+ExperiencePriceCatalogCurrenciesDto {
+  priceCatalogId*: integer<int64>
+  currencies*: string[]
+  defaultCurrency*: string
+}
+
+ExperiencePriceRuleDto extends CommonPriceRuleDto {
+  tierId: integer<int64>
+}
+
+ExperiencePricingCategoriesDto {
+  defaultId*: integer<int64>
+  ids*: integer<int64>[]
+  replacements: ExperiencePricingCategoryReplacementDto[]
+}
+
+ExperiencePricingCategoryReplacementDto {
+  removedId*: integer<int64>
+  replacementId*: integer<int64>
+}
+
+ExperiencePricingDto {
+  experiencePriceRules*: ExperiencePriceRuleDto[]
+  extraPriceRules*: ExtraPriceRuleDto[]
+  pickupPriceRules*: PickupPriceRuleDto[]
+  dropoffPriceRules*: DropoffPriceRuleDto[]
+  priceCatalogCurrencies*: ExperiencePriceCatalogCurrenciesDto[]
+}
+
+ExperienceRateDto {
+  id: integer<int64>
+  externalId: string
+  title*: string
+  description: string
+  created: TimestampDto
+  lastModified: TimestampDto
+  minPerBooking: integer<int32>
+  maxPerBooking: integer<int32>
+  pickupSelectionType*: AddonSelectionTypeDto
+  pickupPricingType: AddonPricingTypeDto
+  pickupPricedPerPerson: boolean
+  dropoffSelectionType*: AddonSelectionTypeDto
+  dropoffPricingType: AddonPricingTypeDto
+  dropoffPricedPerPerson: boolean
+  cancellationPolicyId*: integer<int64>
+  pricedPerPerson*: boolean
+  tieredPricingEnabled: boolean
+  tiers: ExperienceRateTierDto[]
+  extraConfigs: ExperienceRateExtraConfigDto[]
+  allStartTimes: boolean
+  startTimes: IdExternalIdDto[]
+  allPricingCategories*: boolean
+  pricingCategoryIds: integer<int64>[]
+}
+
+ExperienceRateExtraConfigDto {
+  id: integer<int64>
+  extra*: IdExternalIdDto
+  selectionType*: ExperienceExtraSelectionTypeDto
+  pricingType*: AddonPricingTypeDto
+  pricedPerPerson*: boolean
+}
+
+ExperienceRateTierDto {
+  id: integer<int64>
+  minPassengersRequired*: integer<int32>
+  maxPassengersRequired: integer<int32>
+  pricingCategoryId*: integer<int64>
+}
+
+ExperienceRatesDto {
+  defaultRate*: IdExternalIdDto
+  rates*: ExperienceRateDto[]
+}
+
+ExperienceRecurrenceRuleDto {
+  id: integer<int64>
+  recurrenceRule*: RecurrenceRuleDto
+  maxCapacity*: integer<int32>
+  maxCapacityForPickup: integer<int32>
+  minTotalPax: integer<int32>
+  allStartTimes: boolean
+  startTimes: IdExternalIdDto[]
+  guidedLanguages: string[]
+}
+
+ExperienceStartTimeDto {
+  id: integer<int64>
+  externalId: string
+  label: string
+  externalLabel: string
+  hour: integer<int32>
+  minute: integer<int32>
+  overrideTimeWhenPickup: boolean
+  pickupHour: integer<int32>
+  pickupMinute: integer<int32>
+  voucherPickupMsg: string
+  durationMinutes: integer<int32>
+  durationHours: integer<int32>
+  durationDays: integer<int32>
+  durationWeeks: integer<int32>
+  comboStartTimeMappings: ExperienceComboStartTimeMappingDto[]
+}
+
+ExperienceThemeDto = enum(FAMILY_FRIENDLY|ECO_FRIENDLY|ROMANTIC|LUXURY|RAINY_DAY|SKIP_THE_LINE|GROUP_FRIENDLY|INDOOR|OUTDOOR|PRIVATE_ACTIVITY|TAILOR_MADE|BEACH|ADULTS_ONLY|COUPLES|SENIOR|YOUTH|VOLUNTEERS) {
+  
+}
+
+ExperienceTicketDto {
+  barcodeFormat: BarcodeFormatDto
+  ticketPerPerson*: boolean
+  ticketMsg: string
+}
+
+ExperienceTypeDto = enum(DAY_TOUR_OR_ACTIVITY|ATTRACTION|EVENT|TRANSPORT|MULTI_DAY_TOUR) {
+  
+}
+
+ExtraDto {
+  id: integer<int64>
+  externalId: string
+  title*: string
+  description: string
+  maxPerBooking*: integer<int32>
+  photo: PhotoDto
+  type: ExtraTypeDto
+  limitByPax*: boolean
+  commissionGroupId: integer<int64>
+}
+
+ExtraPriceRuleDto extends CommonPriceRuleDto {
+  extra: IdExternalIdDto
+}
+
+ExtraTypeDto = enum(FOOD|DRINKS|SAFETY|TRANSPORT|DONATION|OTHERS) {
+  
+}
+
+GooglePlaceDto {
+  id: integer<int64>
+  countryCode: string
+  city: string
+  state: string
+  name: string
+  placeId: string
+  latitude: number<double>
+  longitude: number<double>
+  lookupLang: string
+}
+
+IdExternalIdDto {
+  id: integer<int64>
+  externalId: string
+}
+
+InvoiceLineItemDto {
+  ref*: string
+  title*: string
+  quantity*: integer<int32>
+  unitPrice*: string<number>
+  discountPercentage: string<number>
+  discountAmount: string<number>
+  taxId: integer<int64>
+  taxPercentage: string<number>
+  taxAmount: string<number>
+  taxIncluded: boolean
+  total: string<number>
+  pricingCategoryId: integer<int64>
+  extraId: integer<int64>
+  pickup: boolean
+  dropoff: boolean
+  rateId: integer<int64>
+  commissionPercentage: string<number>
+  commissionAmount: string<number>
+  experienceId: integer<int64>
+  experienceExternalId: string
+  giftCardId: integer<int64>
+  experienceBookingId: integer<int64>
+}
+
+LocalDateDto {
+  year*: integer<int32>
+  month*: MonthDto
+  dayOfMonth*: integer<int32>
+}
+
+LocalDateTimeDto {
+  date*: LocalDateDto
+  time*: LocalTimeDto
+}
+
+LocalTimeDto {
+  hour*: integer<int32>
+  minute*: integer<int32>
+  second*: integer<int32>
+}
+
+MarketplaceVisibilityTypeDto = enum(PUBLIC|PRIVATE|UNLISTED) {
+  
+}
+
+MonthDto = enum(JANUARY|FEBRUARY|MARCH|APRIL|MAY|JUNE|JULY|AUGUST|SEPTEMBER|OCTOBER|NOVEMBER|DECEMBER) {
+  
+}
+
+OpeningHoursDto {
+  id: integer<int64>
+  monday*: OpeningHoursWeekdayDto
+  tuesday*: OpeningHoursWeekdayDto
+  wednesday*: OpeningHoursWeekdayDto
+  thursday*: OpeningHoursWeekdayDto
+  friday*: OpeningHoursWeekdayDto
+  saturday*: OpeningHoursWeekdayDto
+  sunday*: OpeningHoursWeekdayDto
+}
+
+OpeningHoursTimeIntervalDto {
+  id: integer<int64>
+  openFrom*: LocalTimeDto
+  openForHours*: integer<int32>
+  openForMinutes*: integer<int32>
+}
+
+OpeningHoursWeekdayDto {
+  open24Hours*: boolean
+  timeIntervals: OpeningHoursTimeIntervalDto[]
+}
+
+PagedListDto {
+  pageNo*: integer<int32>
+  pageSize*: integer<int32>
+  totalPageCount*: integer<int32>
+  totalCount*: integer<int32>
+}
+
+PassExpiryTypeDto = enum(NEVER|FIXED_DATE|RELATIVE_DATE) {
+  
+}
+
+PaymentTypeDto = enum(WEB_PAYMENT|POINT_OF_SALE|CASH|VOUCHER|GIFT_CARD|ROOM_CHARGE|BANK_TRANSFER|POS_TERMINAL) {
+  
+}
+
+PhotoDto {
+  id: integer<int64>
+  originalUrl: string
+  url: string
+  caption: string
+  alternateText: string
+  height: integer<int32>
+  width: integer<int32>
+}
+
+PickupPriceRuleDto extends CommonPriceRuleDto {
+  
+}
+
+PriceCatalogsPagedListDto extends PagedListDto {
+  items*: PriceCatalogDto[]
+}
+
+PriceScheduleDto {
+  id*: integer<int64>
+  title*: string
+  creationDate*: TimestampDto
+  lastModifiedDate: TimestampDto
+  recurrenceRule*: RecurrenceRuleDto
+}
+
+PriceSchedulesPagedListDto extends PagedListDto {
+  items*: PriceScheduleDto[]
+}
+
+PriceSchedulesReorderRequestDto {
+  priceScheduleIds*: integer<int64>[]
+}
+
+PricingCategoriesPagedListDto extends PagedListDto {
+  items*: PricingCategoryDto[]
+}
+
+PricingCategoryDto {
+  id*: integer<int64>
+  title*: string
+  ticketCategory*: TicketCategoryDto
+  occupancy*: integer<int32>
+  groupSize: integer<int32>
+  ageQualified*: boolean
+  minAge: integer<int32>
+  maxAge: integer<int32>
+  dependent*: boolean
+  masterCategoryId: integer<int64>
+  maxPerMaster: integer<int32>
+  sumDependentCategories*: boolean
+  maxDependentSum: integer<int32>
+  internalUseOnly*: boolean
+}
+
+PromoCodeDto {
+  id*: integer<int64>
+  code*: string
+  description: string
+  discountPercentage: number<double>
+  discountPercentageAppliesToExtras: boolean
+  discountPercentageAppliesToPickupAndDropoff: boolean
+  discountAmount: number<double>
+  discountAmountCurrency: string
+  discountAmountPerPerson: boolean
+  bookingValidFrom: string<date>
+  bookingValidTo: string<date>
+  travelValidFrom: string<date>
+  travelValidTo: string<date>
+  travelValidDaysOfWeek: DayOfWeekDto[]
+  travelValidMonths: MonthDto[]
+  maxUsages: integer<int32>
+  validForAllProducts*: boolean
+  validForProducts: integer<int64>[]
+}
+
+PromoCodesPagedListDto extends PagedListDto {
+  items*: PromoCodeDto[]
+}
+
+RecurrenceRuleDto {
+  startDate: string<date>
+  endDate: string<date>
+  byWeekday: DayOfWeekDto[]
+  byMonth: MonthDto[]
+}
+
+RoundingModeDto = enum(UP|DOWN|CEILING|FLOOR|HALF_UP|HALF_DOWN|HALF_EVEN|UNNECESSARY) {
+  
+}
+
+SeasonalOpeningHoursDto extends OpeningHoursDto {
+  startYear: integer<int32>
+  startMonth*: integer<int32>
+  startDay*: integer<int32>
+  endYear: integer<int32>
+  endMonth*: integer<int32>
+  endDay*: integer<int32>
+}
+
+SellerInvoiceDto extends CommonInvoiceDto {
+  reconciledAt: TimestampDto
+  issuerVendorId*: integer<int64>
+  recipientVendorId*: integer<int64>
+}
+
+StandardErrorDto {
+  error*: string
+}
+
+TaxDto {
+  id*: integer<int64>
+  title*: string
+  included*: boolean
+  roundingMode*: RoundingModeDto
+  percentage*: string<number>
+  components*: TaxDtoComponents[]
+}
+
+TaxDtoComponents {
+  id*: integer<int64>
+  title*: string
+  percentage*: string<number>
+  compounding*: boolean
+}
+
+TaxesPagedListDto extends PagedListDto {
+  items*: TaxDto[]
+}
+
+TicketCategoryDto = enum(ADULT|CHILD|TEENAGER|INFANT|SENIOR|STUDENT|MILITARY|GROUP|OTHER) {
+  
+}
+
+TimestampDto {
+  
+}
+
+UpdateExperienceBookingNoteRequestDto extends BaseExperienceBookingNoteDto {
+  
+}
+
+VideoDto {
+  id*: integer<int64>
+  sourceUrl*: string
+}
