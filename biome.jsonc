@@ -6,7 +6,8 @@
 		"useIgnoreFile": true
 	},
 	"files": {
-		"ignoreUnknown": false
+		"ignoreUnknown": false,
+		"includes": ["**", "!!docs/hostify", "!!packages/db/drizzle"]
 	},
 	"formatter": {
 		"enabled": true,

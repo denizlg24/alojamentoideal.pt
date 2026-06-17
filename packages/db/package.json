@@ -1,0 +1,35 @@
+{
+	"name": "@workspace/db",
+	"version": "0.0.0",
+	"type": "module",
+	"private": true,
+	"exports": {
+		".": {
+			"types": "./src/index.ts",
+			"default": "./src/index.ts"
+		},
+		"./schema": {
+			"types": "./src/schema.ts",
+			"default": "./src/schema.ts"
+		}
+	},
+	"scripts": {
+		"typecheck": "tsc --noEmit",
+		"test": "bun test --pass-with-no-tests",
+		"db:generate": "drizzle-kit generate",
+		"db:migrate": "drizzle-kit migrate",
+		"db:push": "drizzle-kit push",
+		"db:studio": "drizzle-kit studio"
+	},
+	"dependencies": {
+		"drizzle-orm": "^0.44.7",
+		"pg": "^8.16.4"
+	},
+	"devDependencies": {
+		"@types/node": "^25",
+		"@types/pg": "^8.16.4",
+		"@workspace/typescript-config": "workspace:*",
+		"drizzle-kit": "^0.31.6",
+		"typescript": "^6"
+	}
+}
