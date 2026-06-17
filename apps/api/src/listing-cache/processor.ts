@@ -2,7 +2,7 @@ import type {
 	AccommodationListingNormalizedContent,
 	AccommodationListingProcessedContent,
 } from "@workspace/db";
-import OpenAI from "openai";
+import { OpenAI } from "openai";
 import { zodTextFormat } from "openai/helpers/zod";
 import { z } from "zod";
 import { AMENITY_ICON_NAMES, AMENITY_ICON_SET } from "./amenity-icons.js";
