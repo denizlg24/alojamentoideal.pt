@@ -16,4 +16,25 @@ describe("API app", () => {
 			status: "ok",
 		});
 	});
+
+	it("rejects Hostify listing cron requests without the cron secret", async () => {
+		const originalSecret = process.env.HOSTIFY_SYNC_CRON_SECRET;
+		process.env.HOSTIFY_SYNC_CRON_SECRET = "test-secret";
+
+		try {
+			const response = await app.handle(
+				new Request("http://localhost/cron/hostify/listings", {
+					method: "POST",
+				}),
+			);
+
+			expect(response.status).toBe(401);
+		} finally {
+			if (originalSecret === undefined) {
+				delete process.env.HOSTIFY_SYNC_CRON_SECRET;
+			} else {
+				process.env.HOSTIFY_SYNC_CRON_SECRET = originalSecret;
+			}
+		}
+	});
 });

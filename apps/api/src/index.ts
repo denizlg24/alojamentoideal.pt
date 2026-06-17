@@ -1,5 +1,6 @@
 import { Elysia, t } from "elysia";
 import { betterAuth } from "./auth.js";
+import { listingCacheRoutes } from "./listing-cache/routes.js";
 
 const healthResponse = t.Object({
 	service: t.Literal("api"),
@@ -9,6 +10,7 @@ const healthResponse = t.Object({
 export function createApp() {
 	return new Elysia({ name: "api" })
 		.use(betterAuth)
+		.use(listingCacheRoutes())
 		.get("/", () => "Hello Elysia")
 		.get(
 			"/health",

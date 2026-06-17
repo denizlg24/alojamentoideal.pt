@@ -8,6 +8,13 @@
       "when": 1781713518473,
       "tag": "0000_init_auth",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1781718185504,
+      "tag": "0001_natural_shriek",
+      "breakpoints": true
     }
   ]
 }
