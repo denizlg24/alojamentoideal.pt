@@ -3,11 +3,7 @@ import { createAuthClient } from "better-auth/react";
 
 function resolveBaseURL(): string | undefined {
 	if (typeof process !== "undefined") {
-		return (
-			process.env.NEXT_PUBLIC_AUTH_URL ??
-			process.env.NEXT_PUBLIC_API_URL ??
-			undefined
-		);
+		return process.env.NEXT_PUBLIC_AUTH_URL ?? undefined;
 	}
 
 	return undefined;

@@ -15,6 +15,13 @@
       "when": 1781718185504,
       "tag": "0001_natural_shriek",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1781774170491,
+      "tag": "0002_provider_sync_state",
+      "breakpoints": true
     }
   ]
 }

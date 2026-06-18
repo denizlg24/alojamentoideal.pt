@@ -188,10 +188,23 @@ export const hostifyListingPhotoSchema = entitySchema.extend({
 });
 
 export const hostifyListingTranslationSchema = z.looseObject({
-	description: nullableStringSchema,
+	access: nullableStringSchema,
+	arrival_info: nullableStringSchema,
+	checkin_instructions_rtf: nullableStringSchema,
+	checkin_place: nullableStringSchema,
+	directions_rtf: nullableStringSchema,
+	emergency_instructions_rtf: nullableStringSchema,
+	house_manual_rtf: nullableStringSchema,
+	house_rules: nullableStringSchema,
+	interaction: nullableStringSchema,
 	language: z.string(),
+	listing_id: nullableIdSchema,
 	name: nullableStringSchema,
+	neighborhood_overview: nullableStringSchema,
 	notes: nullableStringSchema,
+	space: nullableStringSchema,
+	summary: nullableStringSchema,
+	transit: nullableStringSchema,
 });
 
 export const hostifyBookingRestrictionSchema = z.looseObject({
@@ -421,10 +434,11 @@ export const hostifySchemas = {
 		price: hostifyListingPriceSchema,
 	}),
 	listingStatus: hostifySuccessSchema.extend({
-		status: z.looseObject({}),
+		listing_id: nullableIdSchema,
+		listing_status: nullableStringSchema,
 	}),
 	listingTranslations: hostifySuccessSchema.extend({
-		translations: z.array(hostifyListingTranslationSchema),
+		translation: z.array(hostifyListingTranslationSchema),
 	}),
 	listings: hostifySuccessSchema.extend({
 		listings: z.array(hostifyListingSchema),

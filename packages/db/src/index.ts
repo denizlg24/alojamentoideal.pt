@@ -12,6 +12,7 @@ export {
 	accommodationListing,
 	account,
 	providerSyncRun,
+	providerSyncState,
 	schema,
 	session,
 	user,

@@ -4,9 +4,6 @@ import {
 	isAuthorizedCronRequest,
 } from "@workspace/core/listing-cache";
 
-export const maxDuration = 300;
-
-// Vercel Cron invokes this with a GET request carrying
 // `Authorization: Bearer $CRON_SECRET`.
 export async function GET(request: Request): Promise<Response> {
 	const config = getListingCacheConfig();
@@ -24,7 +21,7 @@ export async function GET(request: Request): Promise<Response> {
 
 	try {
 		const sync = createHostifyListingCacheSyncFromEnv();
-		const result = await sync.syncListings("cron");
+		const result = await sync.pollListings("poll");
 
 		return Response.json({ data: result, success: true });
 	} catch (error) {

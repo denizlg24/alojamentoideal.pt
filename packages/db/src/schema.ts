@@ -155,6 +155,35 @@ export const providerSyncRun = pgTable(
 	],
 );
 
+export const providerSyncState = pgTable(
+	"provider_sync_state",
+	{
+		id: text("id").primaryKey(),
+		activeRunId: text("active_run_id"),
+		createdAt: timestampWithTimezone("created_at").notNull().defaultNow(),
+		error: text("error"),
+		externalAccountId: text("external_account_id").notNull(),
+		lastCompletedAt: timestampWithTimezone("last_completed_at"),
+		lastStartedAt: timestampWithTimezone("last_started_at"),
+		leaseExpiresAt: timestampWithTimezone("lease_expires_at"),
+		nextPage: integer("next_page").notNull().default(1),
+		nextRunAt: timestampWithTimezone("next_run_at").notNull().defaultNow(),
+		provider: text("provider").notNull(),
+		status: text("status").notNull().default("idle"),
+		syncType: text("sync_type").notNull(),
+		updatedAt: timestampWithTimezone("updated_at").notNull().defaultNow(),
+	},
+	(table) => [
+		uniqueIndex("provider_sync_state_scope_uidx").on(
+			table.provider,
+			table.externalAccountId,
+			table.syncType,
+		),
+		index("provider_sync_state_next_run_at_idx").on(table.nextRunAt),
+		index("provider_sync_state_lease_expires_at_idx").on(table.leaseExpiresAt),
+	],
+);
+
 export const accommodationListing = pgTable(
 	"accommodation_listing",
 	{
@@ -219,5 +248,6 @@ export const schema = {
 	account,
 	verification,
 	providerSyncRun,
+	providerSyncState,
 	accommodationListing,
 };
