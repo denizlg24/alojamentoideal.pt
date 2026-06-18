@@ -36,8 +36,7 @@ export const onRequestError: Instrumentation.onRequestError = async (
 			typeof error === "object" && error !== null && "digest" in error
 				? (error as { digest?: unknown }).digest
 				: undefined;
-		const digest =
-			rawDigest != null ? String(rawDigest) : undefined;
+		const digest = rawDigest != null ? String(rawDigest) : undefined;
 
 		await recordEvent({
 			metadata: {
