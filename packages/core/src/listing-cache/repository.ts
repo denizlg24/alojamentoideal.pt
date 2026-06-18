@@ -6,8 +6,9 @@ import {
 	type Database,
 	type ListingSectionHashes,
 	providerSyncRun,
+	providerSyncState,
 } from "@workspace/db";
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import type { ListingProcessingStatus } from "./processor";
 
 export interface ListingState {
@@ -66,6 +67,62 @@ export interface CompleteSyncRunInput {
 	status: "completed" | "completed_with_errors" | "failed";
 }
 
+export interface ClaimedSyncState {
+	activeRunId: string;
+	nextPage: number;
+	startedNewCycle: boolean;
+}
+
+export interface ClaimSyncStateInput {
+	accountId: string;
+	leaseExpiresAt: Date;
+	newRunId: string;
+	now: Date;
+	provider: string;
+	syncType: string;
+}
+
+export interface AdvanceSyncStateInput {
+	activeRunId: string;
+	nextPage: number;
+	now: Date;
+	provider: string;
+}
+
+export interface CompleteSyncStateInput {
+	activeRunId: string;
+	error?: string;
+	nextRunAt: Date;
+	now: Date;
+	provider: string;
+}
+
+export interface FailSyncStateInput {
+	activeRunId: string;
+	error: string;
+	nextRunAt: Date;
+	now: Date;
+	provider: string;
+}
+
+export interface IncrementSyncRunStatsInput {
+	listingsCreated: number;
+	listingsFailed: number;
+	listingsSeen: number;
+	listingsUnchanged: number;
+	listingsUpdated: number;
+}
+
+export interface SyncRunStatsTotals {
+	listingsFailed: number;
+}
+
+export interface FinishSyncRunInput {
+	error?: string;
+	finishedAt: Date;
+	status: "completed" | "completed_with_errors" | "failed";
+}
+
 export class ListingCacheRepository {
 	readonly #db: Database;
 
@@ -74,7 +131,77 @@ export class ListingCacheRepository {
 	}
 
 	async createSyncRun(input: SyncRunInput): Promise<void> {
-		await this.#db.insert(providerSyncRun).values(input);
+		await this.#db.insert(providerSyncRun).values(input).onConflictDoNothing();
+	}
+
+	async claimSyncState(
+		input: ClaimSyncStateInput,
+	): Promise<ClaimedSyncState | null> {
+		const stateId = syncStateId(
+			input.provider,
+			input.accountId,
+			input.syncType,
+		);
+
+		await this.#db
+			.insert(providerSyncState)
+			.values({
+				externalAccountId: input.accountId,
+				id: stateId,
+				nextRunAt: input.now,
+				provider: input.provider,
+				syncType: input.syncType,
+			})
+			.onConflictDoNothing();
+
+		const [row] = await this.#db
+			.update(providerSyncState)
+			.set({
+				activeRunId: sql<string>`case
+					when ${providerSyncState.status} in ('idle', 'complete', 'failed')
+						then ${input.newRunId}
+					else ${providerSyncState.activeRunId}
+				end`,
+				error: null,
+				lastStartedAt: sql<Date>`case
+					when ${providerSyncState.status} in ('idle', 'complete', 'failed')
+						then ${input.now}
+					else ${providerSyncState.lastStartedAt}
+				end`,
+				leaseExpiresAt: input.leaseExpiresAt,
+				nextPage: sql<number>`case
+					when ${providerSyncState.status} in ('idle', 'complete', 'failed')
+						then 1
+					else ${providerSyncState.nextPage}
+				end`,
+				status: "running",
+				updatedAt: input.now,
+			})
+			.where(sql`
+				${providerSyncState.id} = ${stateId}
+				and ${providerSyncState.nextRunAt} <= ${input.now}
+				and (
+					${providerSyncState.leaseExpiresAt} is null
+					or ${providerSyncState.leaseExpiresAt} <= ${input.now}
+				)
+			`)
+			.returning({
+				activeRunId: providerSyncState.activeRunId,
+				nextPage: providerSyncState.nextPage,
+				startedNewCycle: sql<boolean>`
+					${providerSyncState.activeRunId} = ${input.newRunId}
+				`,
+			});
+
+		if (!row?.activeRunId) {
+			return null;
+		}
+
+		return {
+			activeRunId: row.activeRunId,
+			nextPage: row.nextPage,
+			startedNewCycle: row.startedNewCycle,
+		};
 	}
 
 	async completeSyncRun(
@@ -85,6 +212,91 @@ export class ListingCacheRepository {
 			.update(providerSyncRun)
 			.set(input)
 			.where(eq(providerSyncRun.id, id));
+	}
+
+	async incrementSyncRunStats(
+		id: string,
+		input: IncrementSyncRunStatsInput,
+	): Promise<SyncRunStatsTotals> {
+		const [row] = await this.#db
+			.update(providerSyncRun)
+			.set({
+				listingsCreated: sql`${providerSyncRun.listingsCreated} + ${input.listingsCreated}`,
+				listingsFailed: sql`${providerSyncRun.listingsFailed} + ${input.listingsFailed}`,
+				listingsSeen: sql`${providerSyncRun.listingsSeen} + ${input.listingsSeen}`,
+				listingsUnchanged: sql`${providerSyncRun.listingsUnchanged} + ${input.listingsUnchanged}`,
+				listingsUpdated: sql`${providerSyncRun.listingsUpdated} + ${input.listingsUpdated}`,
+			})
+			.where(eq(providerSyncRun.id, id))
+			.returning({
+				listingsFailed: providerSyncRun.listingsFailed,
+			});
+
+		return { listingsFailed: row?.listingsFailed ?? input.listingsFailed };
+	}
+
+	async finishSyncRun(id: string, input: FinishSyncRunInput): Promise<void> {
+		await this.#db
+			.update(providerSyncRun)
+			.set(input)
+			.where(eq(providerSyncRun.id, id));
+	}
+
+	async advanceSyncState(input: AdvanceSyncStateInput): Promise<void> {
+		await this.#db
+			.update(providerSyncState)
+			.set({
+				leaseExpiresAt: null,
+				nextPage: input.nextPage,
+				nextRunAt: input.now,
+				status: "running",
+				updatedAt: input.now,
+			})
+			.where(
+				and(
+					eq(providerSyncState.provider, input.provider),
+					eq(providerSyncState.activeRunId, input.activeRunId),
+				),
+			);
+	}
+
+	async completeSyncState(input: CompleteSyncStateInput): Promise<void> {
+		await this.#db
+			.update(providerSyncState)
+			.set({
+				activeRunId: null,
+				error: input.error,
+				lastCompletedAt: input.now,
+				leaseExpiresAt: null,
+				nextPage: 1,
+				nextRunAt: input.nextRunAt,
+				status: input.error ? "failed" : "complete",
+				updatedAt: input.now,
+			})
+			.where(
+				and(
+					eq(providerSyncState.provider, input.provider),
+					eq(providerSyncState.activeRunId, input.activeRunId),
+				),
+			);
+	}
+
+	async failSyncState(input: FailSyncStateInput): Promise<void> {
+		await this.#db
+			.update(providerSyncState)
+			.set({
+				error: input.error,
+				leaseExpiresAt: null,
+				nextRunAt: input.nextRunAt,
+				status: "failed",
+				updatedAt: input.now,
+			})
+			.where(
+				and(
+					eq(providerSyncState.provider, input.provider),
+					eq(providerSyncState.activeRunId, input.activeRunId),
+				),
+			);
 	}
 
 	async findListingState(
@@ -193,4 +405,12 @@ export function listingCacheId(
 	externalId: string,
 ): string {
 	return `${provider}:${accountId}:${externalId}`;
+}
+
+export function syncStateId(
+	provider: string,
+	accountId: string,
+	syncType: string,
+): string {
+	return `${provider}:${accountId}:${syncType}`;
 }

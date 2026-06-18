@@ -18,7 +18,9 @@ import {
 import { ListingCacheRepository } from "./repository";
 
 const HOSTIFY_PROVIDER = "hostify";
+const LISTING_CACHE_SYNC_TYPE = "listing_cache";
 const MILLISECONDS_PER_HOUR = 60 * 60 * 1000;
+const MILLISECONDS_PER_MINUTE = 60 * 1000;
 
 export interface HostifyListingSyncStats {
 	errors: SyncListingError[];
@@ -29,6 +31,14 @@ export interface HostifyListingSyncStats {
 	listingsUpdated: number;
 	runId: string;
 	status: "completed" | "completed_with_errors" | "failed";
+}
+
+export interface HostifyListingPollResult {
+	data: HostifyListingSyncStats | null;
+	nextPage: number | null;
+	nextRunAt: string | null;
+	page: number | null;
+	status: "advanced" | "completed" | "failed" | "skipped";
 }
 
 export interface SyncListingError {
@@ -91,7 +101,7 @@ export class HostifyListingCacheSync {
 			id: runId,
 			provider: HOSTIFY_PROVIDER,
 			status: "running",
-			syncType: "listing_cache",
+			syncType: LISTING_CACHE_SYNC_TYPE,
 			trigger,
 		});
 
@@ -104,6 +114,135 @@ export class HostifyListingCacheSync {
 		} catch (error) {
 			stats.status = "failed";
 			await this.completeRun(runId, stats, normalizeError(error));
+			throw error;
+		}
+	}
+
+	async pollListings(trigger = "poll"): Promise<HostifyListingPollResult> {
+		const now = this.#now();
+		const newRunId = crypto.randomUUID();
+		const claim = await this.#repository.claimSyncState({
+			accountId: this.#config.hostifyAccountId,
+			leaseExpiresAt: new Date(
+				now.getTime() +
+					this.#config.incrementalLeaseMinutes * MILLISECONDS_PER_MINUTE,
+			),
+			newRunId,
+			now,
+			provider: HOSTIFY_PROVIDER,
+			syncType: LISTING_CACHE_SYNC_TYPE,
+		});
+
+		if (!claim) {
+			return {
+				data: null,
+				nextPage: null,
+				nextRunAt: null,
+				page: null,
+				status: "skipped",
+			};
+		}
+
+		const runId = claim.activeRunId;
+		await this.#repository.createSyncRun({
+			id: runId,
+			provider: HOSTIFY_PROVIDER,
+			status: "running",
+			syncType: LISTING_CACHE_SYNC_TYPE,
+			trigger,
+		});
+
+		const stats = emptyStats(runId);
+
+		try {
+			const response = await this.#client.listings.list({
+				include_related_objects: 1,
+				page: claim.nextPage,
+				per_page: this.#config.incrementalBatchSize,
+			});
+
+			for (const listing of response.listings) {
+				stats.listingsSeen += 1;
+				await this.syncListing(runId, stats, listing);
+			}
+
+			const totals = await this.#repository.incrementSyncRunStats(runId, stats);
+
+			const finished =
+				response.listings.length === 0 ||
+				response.listings.length < this.#config.incrementalBatchSize ||
+				claim.nextPage >= this.#config.syncMaxPages;
+			const finishedAt = this.#now();
+
+			if (finished) {
+				stats.status =
+					totals.listingsFailed > 0 ? "completed_with_errors" : "completed";
+				await this.#repository.finishSyncRun(runId, {
+					finishedAt,
+					status: stats.status,
+				});
+				const nextRunAt = new Date(
+					finishedAt.getTime() +
+						this.#config.incrementalSyncIntervalHours * MILLISECONDS_PER_HOUR,
+				);
+				await this.#repository.completeSyncState({
+					activeRunId: runId,
+					error:
+						stats.status === "completed_with_errors"
+							? `${stats.listingsFailed} listing(s) failed`
+							: undefined,
+					nextRunAt,
+					now: finishedAt,
+					provider: HOSTIFY_PROVIDER,
+				});
+
+				return {
+					data: stats,
+					nextPage: null,
+					nextRunAt: nextRunAt.toISOString(),
+					page: claim.nextPage,
+					status: "completed",
+				};
+			}
+
+			const nextPage = claim.nextPage + 1;
+			await this.#repository.advanceSyncState({
+				activeRunId: runId,
+				nextPage,
+				now: finishedAt,
+				provider: HOSTIFY_PROVIDER,
+			});
+
+			stats.status =
+				stats.listingsFailed > 0 ? "completed_with_errors" : "completed";
+
+			return {
+				data: stats,
+				nextPage,
+				nextRunAt: finishedAt.toISOString(),
+				page: claim.nextPage,
+				status: "advanced",
+			};
+		} catch (error) {
+			stats.status = "failed";
+			const failedAt = this.#now();
+			const message = normalizeError(error);
+			await this.#repository.finishSyncRun(runId, {
+				error: message,
+				finishedAt: failedAt,
+				status: stats.status,
+			});
+			await this.#repository.failSyncState({
+				activeRunId: runId,
+				error: message,
+				nextRunAt: new Date(
+					failedAt.getTime() +
+						this.#config.incrementalLeaseMinutes * MILLISECONDS_PER_MINUTE,
+				),
+				now: failedAt,
+				provider: HOSTIFY_PROVIDER,
+			});
+
 			throw error;
 		}
 	}
@@ -234,8 +373,8 @@ export class HostifyListingCacheSync {
 			guestGuide,
 			listing: readField(detail, "listing") ?? listingSummary,
 			photos: readField(photos, "photos"),
-			status: readField(status, "status"),
-			translations: readField(translations, "translations"),
+			status: readField(status, "listing_status"),
+			translations: readField(translations, "translation"),
 		};
 	}
 
@@ -267,6 +406,19 @@ export class HostifyListingCacheSync {
 			status: stats.status,
 		});
 	}
+}
+
+function emptyStats(runId: string): HostifyListingSyncStats {
+	return {
+		errors: [],
+		listingsCreated: 0,
+		listingsFailed: 0,
+		listingsSeen: 0,
+		listingsUnchanged: 0,
+		listingsUpdated: 0,
+		runId,
+		status: "completed",
+	};
 }
 
 function readListingId(value: unknown): string {

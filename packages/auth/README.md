@@ -16,10 +16,9 @@
 
 ## Architecture
 
-The **Elysia API is the single auth origin**: it mounts `auth.handler` at
-`/api/auth/*` and exposes an `auth` macro to protect routes (see
-`apps/api/src/auth.ts`). The Next.js web app talks to that origin through the
-React client.
+The **Next.js web app is the single auth origin**: it mounts `auth.handler` at
+`/api/auth/*` and the browser talks to it through the React client
+(`./client`).
 
 ## Exports
 
@@ -33,14 +32,13 @@ React client.
 
 ## Environment
 
-Server (API):
+Server:
 
 | Variable                | Required             | Notes                                                |
 | ----------------------- | -------------------- | ---------------------------------------------------- |
 | `BETTER_AUTH_SECRET`    | yes in production    | ≥32 chars. Dev falls back to an insecure placeholder |
 | `BETTER_AUTH_URL`       | recommended          | Auth base URL, defaults to `http://localhost:3000`   |
 | `AUTH_TRUSTED_ORIGINS`  | for cross-origin web | Comma-separated list of allowed origins              |
-| `WEB_ORIGIN`            | for CORS             | Web origin(s) allowed to call the API with creds     |
 | `DATABASE_URL`          | yes                  | See `@workspace/db`                                  |
 | `GOOGLE_CLIENT_ID`      | for Google           | Enables Google provider when set with the secret     |
 | `GOOGLE_CLIENT_SECRET`  | for Google           |                                                      |
