@@ -1,10 +1,6 @@
 import { randomUUID } from "node:crypto";
 import * as Sentry from "@sentry/nextjs";
-import {
-	hashIdentifier,
-	logger,
-	trackEvent,
-} from "@workspace/core/observability";
+import { hashIdentifier, logger } from "@workspace/core/observability";
 import {
 	enforceRateLimit,
 	getClientIp,
@@ -12,6 +8,7 @@ import {
 	rateLimitHeaders,
 	tooManyRequestsResponse,
 } from "@workspace/core/rate-limit";
+import { describeError, scheduleEvent } from "./observability";
 
 interface RateLimitRouteOptions {
 	bucket?: RateLimitBucket;
@@ -67,7 +64,7 @@ export function withApiRoute<Ctx = unknown>(
 
 		if (rateLimitResult && !rateLimitResult.ok) {
 			if (analyticsEnabled) {
-				trackEvent({
+				scheduleEvent({
 					durationMs: elapsed(),
 					ipHash,
 					method,
@@ -88,13 +85,13 @@ export function withApiRoute<Ctx = unknown>(
 		} catch (error) {
 			Sentry.captureException(error);
 			logger.error("api route failed", {
-				error: error instanceof Error ? error.message : String(error),
 				method,
 				name: options.name,
 				requestId,
 				route,
+				...describeError(error),
 			});
-			trackEvent({
+			scheduleEvent({
 				durationMs: elapsed(),
 				ipHash,
 				method,
@@ -121,7 +118,7 @@ export function withApiRoute<Ctx = unknown>(
 		response.headers.set("x-request-id", requestId);
 
 		if (analyticsEnabled) {
-			trackEvent({
+			scheduleEvent({
 				durationMs: elapsed(),
 				ipHash,
 				method,

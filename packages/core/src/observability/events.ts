@@ -86,7 +86,10 @@ export async function recordEvent(
  */
 export function trackEvent(event: ObservabilityEventInput): void {
 	void recordEvent(event).catch((error) => {
+		const cause =
+			error instanceof Error ? (error as { cause?: unknown }).cause : undefined;
 		logger.error("failed to record observability event", {
+			cause: cause instanceof Error ? cause.message : cause,
 			error: error instanceof Error ? error.message : String(error),
 			name: event.name,
 			type: event.type,
