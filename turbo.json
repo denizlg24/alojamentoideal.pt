@@ -4,7 +4,13 @@
 	"remoteCache": {
 		"signature": true
 	},
-	"globalEnv": ["NODE_ENV", "NEXT_PUBLIC_AUTH_URL"],
+	"globalEnv": [
+		"NODE_ENV",
+		"NEXT_PUBLIC_AUTH_URL",
+		"NEXT_PUBLIC_SENTRY_DSN",
+		"NEXT_PUBLIC_SENTRY_ENVIRONMENT",
+		"NEXT_PUBLIC_SENTRY_TRACES_SAMPLE_RATE"
+	],
 	"globalPassThroughEnv": [
 		"DATABASE_URL",
 		"BETTER_AUTH_SECRET",
@@ -35,13 +41,34 @@
 		"BOKUN_TIMEOUT_MS",
 		"BOKUN_MAX_READ_RETRIES",
 		"BOKUN_RETRY_DELAY_MS",
+		"REDIS_URL",
+		"REDIS_KEY_PREFIX",
+		"REDIS_CONNECT_TIMEOUT_MS",
+		"REDIS_COMMAND_TIMEOUT_MS",
+		"REDIS_MAX_RETRIES_PER_REQUEST",
+		"RATE_LIMIT_ENABLED",
+		"RATE_LIMIT_DEFAULT_POINTS",
+		"RATE_LIMIT_DEFAULT_WINDOW_SECONDS",
+		"RATE_LIMIT_AUTH_POINTS",
+		"RATE_LIMIT_AUTH_WINDOW_SECONDS",
+		"RATE_LIMIT_CRON_POINTS",
+		"RATE_LIMIT_CRON_WINDOW_SECONDS",
+		"RATE_LIMIT_MUTATION_POINTS",
+		"RATE_LIMIT_MUTATION_WINDOW_SECONDS",
+		"OBSERVABILITY_ENABLED",
+		"OBSERVABILITY_IP_SALT",
+		"LOG_LEVEL",
+		"SENTRY_DSN",
+		"SENTRY_ENVIRONMENT",
+		"SENTRY_TRACES_SAMPLE_RATE",
 		"TURBO_REMOTE_CACHE_SIGNATURE_KEY"
 	],
 	"tasks": {
 		"build": {
 			"dependsOn": ["^build"],
 			"inputs": ["$TURBO_DEFAULT$", ".env*"],
-			"outputs": [".next/**", "!.next/cache/**"]
+			"outputs": [".next/**", "!.next/cache/**"],
+			"passThroughEnv": ["SENTRY_AUTH_TOKEN", "SENTRY_ORG", "SENTRY_PROJECT"]
 		},
 		"typecheck": {
 			"dependsOn": ["^typecheck"]

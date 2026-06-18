@@ -12,6 +12,18 @@
 			"types": "./src/listing-cache/index.ts",
 			"default": "./src/listing-cache/index.ts"
 		},
+		"./redis": {
+			"types": "./src/redis/index.ts",
+			"default": "./src/redis/index.ts"
+		},
+		"./rate-limit": {
+			"types": "./src/rate-limit/index.ts",
+			"default": "./src/rate-limit/index.ts"
+		},
+		"./observability": {
+			"types": "./src/observability/index.ts",
+			"default": "./src/observability/index.ts"
+		},
 		"./integrations/hostify": {
 			"types": "./src/integrations/hostify/index.ts",
 			"default": "./src/integrations/hostify/index.ts"
@@ -28,6 +40,8 @@
 	"dependencies": {
 		"@workspace/db": "workspace:*",
 		"drizzle-orm": "^0.45.2",
+		"ioredis": "^5.11.1",
+		"rate-limiter-flexible": "^11.2.0",
 		"zod": "^4.4.3"
 	},
 	"devDependencies": {

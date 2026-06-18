@@ -11,6 +11,7 @@ export * as schemaTables from "./schema";
 export {
 	accommodationListing,
 	account,
+	observabilityEvent,
 	providerSyncRun,
 	providerSyncState,
 	schema,

@@ -16,7 +16,10 @@
 		"db:push": "dotenv -- bun run --filter @workspace/db db:push",
 		"db:studio": "dotenv -- bun run --filter @workspace/db db:studio",
 		"db:up": "docker compose up -d postgres",
-		"db:down": "docker compose down"
+		"db:down": "docker compose stop postgres",
+		"redis:up": "docker compose up -d redis",
+		"services:up": "docker compose up -d",
+		"services:down": "docker compose down"
 	},
 	"devDependencies": {
 		"@biomejs/biome": "2.5.0",

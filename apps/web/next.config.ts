@@ -1,3 +1,4 @@
+import { withSentryConfig } from "@sentry/nextjs";
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
@@ -9,4 +10,14 @@ const nextConfig: NextConfig = {
 	],
 };
 
-export default nextConfig;
+// Source-map upload is a no-op without SENTRY_AUTH_TOKEN, so this is safe to
+// apply unconditionally; runtime error capture is gated by the DSN in the
+// sentry.*.config files.
+export default withSentryConfig(nextConfig, {
+	authToken: process.env.SENTRY_AUTH_TOKEN,
+	disableLogger: true,
+	org: process.env.SENTRY_ORG,
+	project: process.env.SENTRY_PROJECT,
+	silent: !process.env.CI,
+	widenClientFileUpload: true,
+});

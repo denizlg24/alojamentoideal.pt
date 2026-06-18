@@ -242,6 +242,44 @@ export const accommodationListing = pgTable(
 	],
 );
 
+/**
+ * Append-only observability event log powering analytics and the future admin
+ * dashboard. Rows are written best-effort from the application and must never
+ * block the request path. Technical error telemetry lives in Sentry; this table
+ * is the durable, queryable source for product/usage analytics.
+ */
+export const observabilityEvent = pgTable(
+	"observability_event",
+	{
+		id: text("id").primaryKey(),
+		createdAt: timestampWithTimezone("created_at").notNull().defaultNow(),
+		durationMs: integer("duration_ms"),
+		ipHash: text("ip_hash"),
+		metadata: jsonb("metadata").$type<Record<string, unknown>>(),
+		method: text("method"),
+		name: text("name").notNull(),
+		occurredAt: timestampWithTimezone("occurred_at").notNull().defaultNow(),
+		provider: text("provider"),
+		requestId: text("request_id"),
+		route: text("route"),
+		severity: text("severity").notNull().default("info"),
+		source: text("source"),
+		statusCode: integer("status_code"),
+		type: text("type").notNull(),
+		userId: text("user_id"),
+	},
+	(table) => [
+		index("observability_event_type_occurred_at_idx").on(
+			table.type,
+			table.occurredAt,
+		),
+		index("observability_event_occurred_at_idx").on(table.occurredAt),
+		index("observability_event_name_idx").on(table.name),
+		index("observability_event_route_idx").on(table.route),
+		index("observability_event_status_code_idx").on(table.statusCode),
+	],
+);
+
 export const schema = {
 	user,
 	session,
@@ -250,4 +288,5 @@ export const schema = {
 	providerSyncRun,
 	providerSyncState,
 	accommodationListing,
+	observabilityEvent,
 };
