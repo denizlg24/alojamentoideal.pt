@@ -11,6 +11,7 @@
 		"test": "bun test --pass-with-no-tests"
 	},
 	"dependencies": {
+		"@sentry/nextjs": "^10.58.0",
 		"@workspace/auth": "workspace:*",
 		"@workspace/core": "workspace:*",
 		"@workspace/db": "workspace:*",

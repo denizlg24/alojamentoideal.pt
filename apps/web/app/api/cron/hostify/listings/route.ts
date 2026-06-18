@@ -3,32 +3,28 @@ import {
 	getListingCacheConfig,
 	isAuthorizedCronRequest,
 } from "@workspace/core/listing-cache";
+import { withApiRoute } from "@/lib/api";
 
 // `Authorization: Bearer $CRON_SECRET`.
-export async function GET(request: Request): Promise<Response> {
-	const config = getListingCacheConfig();
+export const GET = withApiRoute(
+	{ name: "cron.hostify.listings", rateLimit: { bucket: "cron" } },
+	async (request: Request): Promise<Response> => {
+		const config = getListingCacheConfig();
 
-	if (!config.cronSecret) {
-		return Response.json(
-			{ error: "Cron secret is not configured" },
-			{ status: 503 },
-		);
-	}
+		if (!config.cronSecret) {
+			return Response.json(
+				{ error: "Cron secret is not configured" },
+				{ status: 503 },
+			);
+		}
 
-	if (!isAuthorizedCronRequest(request, config.cronSecret)) {
-		return Response.json({ error: "Unauthorized" }, { status: 401 });
-	}
+		if (!isAuthorizedCronRequest(request, config.cronSecret)) {
+			return Response.json({ error: "Unauthorized" }, { status: 401 });
+		}
 
-	try {
 		const sync = createHostifyListingCacheSyncFromEnv();
 		const result = await sync.pollListings("poll");
 
 		return Response.json({ data: result, success: true });
-	} catch (error) {
-		console.error("Hostify listing sync failed", error);
-		return Response.json(
-			{ error: "Hostify listing sync failed" },
-			{ status: 500 },
-		);
-	}
-}
+	},
+);
