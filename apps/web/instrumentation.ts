@@ -32,10 +32,12 @@ export const onRequestError: Instrumentation.onRequestError = async (
 		// `onRequestError` is awaited by Next.js, so awaiting the insert here is
 		// safe and guarantees completion before the function is torn down.
 		const { recordEvent } = await import("@workspace/core/observability");
-		const digest =
+		const rawDigest =
 			typeof error === "object" && error !== null && "digest" in error
-				? String((error as { digest?: unknown }).digest)
+				? (error as { digest?: unknown }).digest
 				: undefined;
+		const digest =
+			rawDigest != null ? String(rawDigest) : undefined;
 
 		await recordEvent({
 			metadata: {

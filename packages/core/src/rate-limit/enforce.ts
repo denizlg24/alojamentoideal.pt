@@ -20,6 +20,14 @@ export interface EnforceRateLimitOptions {
 	identifier?: string;
 }
 
+/**
+ * Extracts the client IP from request headers.
+ *
+ * IMPORTANT: This function trusts x-forwarded-for and x-real-ip headers without
+ * validation. It is designed for deployments behind trusted proxies (e.g.,
+ * Vercel, Cloudflare) that guarantee these headers reflect the true client IP.
+ * Do NOT use in environments where clients can set these headers directly.
+ */
 export function getClientIp(request: Request): string {
 	const forwarded = request.headers.get("x-forwarded-for");
 	if (forwarded) {
@@ -70,7 +78,11 @@ export async function enforceRateLimit(
 		return allow(limit);
 	}
 
-	const key = options.identifier ?? getClientIp(request);
+	// Guard against empty string identifiers to prevent unrelated traffic from
+	// being collapsed into a single bucket. Fall back to IP-based rate limiting.
+	const identifier = options.identifier?.trim();
+	const key =
+		identifier && identifier.length > 0 ? identifier : getClientIp(request);
 
 	try {
 		const response = await getRateLimiter(bucket).consume(
