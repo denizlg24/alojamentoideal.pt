@@ -7,7 +7,12 @@
 	},
 	"files": {
 		"ignoreUnknown": false,
-		"includes": ["**", "!!docs/hostify", "!!packages/db/drizzle"]
+		"includes": [
+			"**",
+			"!!docs/hostify",
+			"!!packages/db/drizzle",
+			"!!apps/web/public"
+		]
 	},
 	"formatter": {
 		"enabled": true,

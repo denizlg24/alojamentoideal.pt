@@ -16,9 +16,11 @@
 		"@workspace/core": "workspace:*",
 		"@workspace/db": "workspace:*",
 		"@workspace/ui": "workspace:*",
+		"date-fns": "^4.4.0",
 		"lucide-react": "^1.18.0",
 		"next": "16.2.9",
 		"react": "19.2.7",
+		"react-day-picker": "^10.0.1",
 		"react-dom": "19.2.7",
 		"react-icons": "^5.6.0"
 	},
