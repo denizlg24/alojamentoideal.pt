@@ -8,7 +8,7 @@ import {
 	rateLimitHeaders,
 	tooManyRequestsResponse,
 } from "@workspace/core/rate-limit";
-import { describeError, scheduleEvent } from "./observability";
+import { describeError, scheduleEvent } from "../observability/events";
 
 interface RateLimitRouteOptions {
 	bucket?: RateLimitBucket;

@@ -1,5 +1,5 @@
 import { getAuth } from "@workspace/auth";
-import { withApiRoute } from "@/lib/api";
+import { withApiRoute } from "@/lib/api/route";
 
 export const GET = withApiRoute(
 	{ name: "me", rateLimit: { bucket: "auth" } },

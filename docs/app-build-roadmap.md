@@ -4,6 +4,28 @@ This is the recommended build order for Alojamento Ideal as an end-to-end app.
 The goal is to move from backend foundations to a usable customer booking flow,
 then into operations, automation, and polish.
 
+## Status (as of 2026-06-19)
+
+Legend: ✅ done · 🟡 in progress / partial · ⬜ not started
+
+| # | Milestone | Status | Notes |
+|---|---|---|---|
+| 0 | Foundations (cache, sync, platform) | ✅ | Hostify incremental sync cron, content processing, and the `accommodation_listing` projection with FTS + trigram + geo search index. Rate limiting (Redis) and observability (Sentry errors + PostgreSQL analytics) wired through `withApiRoute`. |
+| 1 | Catalog Browsing | 🟡 | Catalog read API done: `GET /api/catalog/listings` (filter/sort/paginate) and `/api/catalog/listings/[externalId]` (localized detail), with Next.js `use cache` + cron-driven `revalidateTag` invalidation. Visitor-facing frontend (listing grid, filters, detail page) **not built**. |
+| 2 | Live Availability and Quote | ⬜ | Needs live Hostify price/availability revalidation and short-lived quote storage. |
+| 3 | Cart and Checkout Shell | ⬜ | Draft order from quote; no provider side effects yet. |
+| 4 | Payment Foundation | ⬜ | Stripe PaymentIntent from server-side order total; payment attempts + idempotency. |
+| 5 | Provider Reservation Saga | ⬜ | Durable Hostify reservation confirm/compensate workflow. |
+| 6 | Customer Order Experience | ⬜ | Confirmation page + email from durable state. |
+| 7 | Admin Operations | ⬜ | Order/recovery dashboard, sync health. |
+| 8 | Guest Registration and Compliance | ⬜ | Encrypted guest data + Hostkit/SIBA submission. |
+| 9 | Activities and Mixed Cart | ⬜ | Bokun browse/quote/reserve + mixed-cart allocation. |
+| 10 | Fiscal Documents, Messaging, Post-Stay | ⬜ | Invoices/credit notes, messaging, reconciliation. |
+| 11 | Analytics and Optimization | 🟡 | Per-request analytics events persisted to PostgreSQL and errors to Sentry. Commercial funnel events (search → view → quote → checkout → payment → confirm) **not built**. |
+
+Current focus: finish milestone 1 by building the catalog browsing frontend on
+top of the stable catalog read API.
+
 ## 1. Catalog Browsing
 
 Build this first because it turns the existing listing cache into something the
