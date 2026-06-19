@@ -20,6 +20,7 @@ export interface ListingState {
 export interface UpsertListingInput {
 	accountId: string;
 	active: boolean;
+	amenityKeys: string[];
 	bathrooms: number | null;
 	bedrooms: number | null;
 	city: string | null;
@@ -41,6 +42,9 @@ export interface UpsertListingInput {
 	provider: string;
 	providerUpdatedAt: Date | null;
 	raw: AccommodationListingRawContent;
+	searchBody: string;
+	searchLocation: string;
+	searchTitle: string;
 	sectionHashes: ListingSectionHashes;
 	sourceHash: string;
 	staleAfter: Date;
@@ -327,6 +331,7 @@ export class ListingCacheRepository {
 		const now = new Date();
 		const values: typeof accommodationListing.$inferInsert = {
 			active: input.active,
+			amenityKeys: input.amenityKeys,
 			bathrooms: input.bathrooms,
 			bedrooms: input.bedrooms,
 			city: input.city,
@@ -350,6 +355,9 @@ export class ListingCacheRepository {
 			provider: input.provider,
 			providerUpdatedAt: input.providerUpdatedAt,
 			raw: input.raw,
+			searchBody: input.searchBody,
+			searchLocation: input.searchLocation,
+			searchTitle: input.searchTitle,
 			sectionHashes: input.sectionHashes,
 			sourceHash: input.sourceHash,
 			staleAfter: input.staleAfter,
@@ -364,6 +372,7 @@ export class ListingCacheRepository {
 			.onConflictDoUpdate({
 				set: {
 					active: values.active,
+					amenityKeys: values.amenityKeys,
 					bathrooms: values.bathrooms,
 					bedrooms: values.bedrooms,
 					city: values.city,
@@ -383,6 +392,9 @@ export class ListingCacheRepository {
 					propertyType: values.propertyType,
 					providerUpdatedAt: values.providerUpdatedAt,
 					raw: values.raw,
+					searchBody: values.searchBody,
+					searchLocation: values.searchLocation,
+					searchTitle: values.searchTitle,
 					sectionHashes: values.sectionHashes,
 					sourceHash: values.sourceHash,
 					staleAfter: values.staleAfter,

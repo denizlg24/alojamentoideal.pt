@@ -1,26 +1,37 @@
 # Alojamento Ideal Data Architecture
 
-Status: proposed target architecture  
+Status: target architecture, partially implemented  
 Last researched: 2026-06-14  
-Scope: new `apps/api` and `apps/web` rewrite, using the legacy repository as the behavioral baseline
+Last updated: 2026-06-19  
+Scope: `apps/web` rewrite, using the legacy repository as the behavioral baseline
+
+> **Reading this document.** Sections marked _(as built)_ describe decisions already
+> implemented in the codebase. The remaining sections are the **proposed target** for
+> features not yet built; where a target section has been superseded by an implementation
+> decision, it carries a **Superseded** note pointing to the relevant _(as built)_ section.
+> Legacy sections (§2.x, §16) describe the old MongoDB application and are historical
+> reference for migration only.
 
 ## 1. Executive Decision
 
-Use three data layers with strict ownership boundaries:
+Two data layers carry the system, with a third for coordination:
 
-1. **PostgreSQL is the system of record for commerce and operations.**
+1. **PostgreSQL is the system of record for commerce and operations, and the durable
+   read model for provider catalog content.**
    It owns orders, order items, customers, provider bookings, payment state, refunds,
    invoices, guest registration data, conversations, integration events, jobs, and audit
-   history.
-2. **MongoDB is the durable read model for flexible provider catalog content.**
-   It owns cached Hostify accommodation documents and cached Bokun activity documents,
-   including provider-shaped nested data and a sanitized provider payload.
-3. **Redis/Valkey is the recommended ephemeral cache and coordination layer.**
-   It owns short-lived availability and price responses, distributed locks, rate-limit
-   counters, and deduplication hints. It is never a system of record.
+   history — and the cached Hostify/Bokun catalog projections. The original plan put the
+   catalog in MongoDB; that was dropped in favor of a single PostgreSQL store (see §1A).
+2. **Redis is the ephemeral coordination layer.**
+   It owns rate-limit counters and (later) short-lived availability/price responses,
+   distributed locks, and deduplication hints. It is never a system of record. Catalog
+   read responses are cached in Next.js's data cache, not Redis (see §1A).
+3. **Sentry owns error capture; PostgreSQL owns analytics.** Observability is split:
+   exceptions go to Sentry, per-request analytics events are persisted to PostgreSQL,
+   and Redis is reserved for rate limiting.
 
-The browser must only call `apps/api`. The web application must not call Hostify, Bokun,
-Stripe, or Hostkit directly.
+The browser must only call the `apps/web` route handlers. The web application must not call
+Hostify, Bokun, Stripe, or Hostkit directly from the client.
 
 At checkout, cached data is advisory. Availability, prices, fees, booking questions, and
 provider configuration must be revalidated against the relevant provider before creating
@@ -28,20 +39,76 @@ or confirming a booking.
 
 ```mermaid
 flowchart LR
-    WEB[Next.js web app] --> API[Elysia API]
-    API --> PG[(PostgreSQL)]
-    API --> MONGO[(MongoDB catalog cache)]
-    API --> CACHE[(Redis or Valkey)]
+    BROWSER[Browser] --> WEB[Next.js app: pages + /api route handlers]
+    WEB --> PG[(PostgreSQL: commerce + catalog projection)]
+    WEB --> CACHE[(Redis: rate limit)]
+    WEB --> NEXTCACHE[(Next.js data cache: catalog reads)]
+    WEB --> SENTRY[(Sentry: errors)]
 
-    HOSTIFY[Hostify] -->|webhooks| API
-    BOKUN[Bokun] -->|webhooks| API
-    STRIPE[Stripe] -->|webhooks| API
+    HOSTIFY[Hostify] -->|webhooks / cron poll| WEB
+    BOKUN[Bokun] -->|webhooks| WEB
+    STRIPE[Stripe] -->|webhooks| WEB
 
-    API -->|catalog sync, live quote, reservation| HOSTIFY
-    API -->|catalog sync, live availability, booking| BOKUN
-    API -->|payment and refund| STRIPE
-    API -->|guest registration and fiscal docs| HOSTKIT[Hostkit]
+    WEB -->|catalog sync, live quote, reservation| HOSTIFY
+    WEB -->|catalog sync, live availability, booking| BOKUN
+    WEB -->|payment and refund| STRIPE
+    WEB -->|guest registration and fiscal docs| HOSTKIT[Hostkit]
 ```
+
+## 1A. Current Implementation (as built)
+
+The decisions below are implemented and supersede the corresponding proposals later in
+this document.
+
+### Application shape
+
+- **One deployable: `apps/web`** (Next.js 16, App Router). There is no separate
+  `apps/api`/Elysia service. The API boundary is Next.js **route handlers** under
+  `apps/web/app/api/*`. Shared domain logic lives in `@workspace/core`; the Drizzle schema
+  and client live in `@workspace/db`.
+- Every API route is wrapped by `withApiRoute` (`apps/web/lib/api.ts`), which applies
+  rate limiting, structured logging, Sentry capture, and per-request analytics.
+
+### Catalog store and read API
+
+- The catalog projection is a single PostgreSQL table, `accommodation_listing`, not a
+  MongoDB collection. Search uses PostgreSQL full-text (`tsvector` + `websearch_to_tsquery`
+  over an accent-folded `immutable_unaccent` vector), trigram similarity for typo-tolerant
+  place matching, and a haversine bounding-box + distance filter for radius search.
+- Read endpoints: `GET /api/catalog/listings` (filter/sort/paginate) and
+  `GET /api/catalog/listings/[externalId]` (localized detail). Query parsing and the
+  `CatalogRepository` live in `@workspace/core/catalog`.
+
+### Catalog read caching and invalidation
+
+- Caching uses **Next.js Cache Components** (`cacheComponents: true`). The repository reads
+  are wrapped in `use cache` functions in `apps/web/lib/catalog-cache.ts` with
+  `cacheLife('max')` as a safety TTL.
+- Invalidation is **event-driven from the sync cron**, since the cron is the only writer
+  and knows exactly which listings changed:
+  - **Detail** entries are tagged per listing (`catalog:listing:{provider}:{account}:{externalId}`)
+    and revalidated precisely.
+  - **List** entries share one collection tag (`catalog:listings`) that is dropped whenever
+    any listing changes — a created or newly-qualifying listing is not referenced by any
+    existing list entry, so per-item tags alone cannot catch it.
+  - The Hostify sync reports `changedExternalIds`; the cron route calls `revalidateTag` for
+    the collection tag and each changed listing.
+- Deployment is single-instance, so Next.js's in-memory data cache persists across requests
+  and `revalidateTag` reaches the one cache. A multi-instance deployment would require a
+  shared cache handler (`cacheHandlers`, e.g. Redis-backed).
+
+### Listing sync
+
+- A lease-based incremental cron poll (`GET /api/cron/hostify/listings`, bearer
+  `CRON_SECRET`) advances page-by-page using `provider_sync_state`, records each run in
+  `provider_sync_run`, and upserts changed listings by source hash. Implementation lives in
+  `@workspace/core/listing-cache`.
+
+### Observability and rate limiting
+
+- Errors → Sentry. Per-request analytics events → PostgreSQL. Redis → rate-limit counters
+  only (per-route buckets, with an in-memory insurance limiter so a Redis outage degrades
+  gracefully rather than failing requests).
 
 ## 2. Why This Boundary
 
@@ -636,8 +703,8 @@ systems:
 - The older webhook endpoint documentation uses `X-Bokun-HMAC`, calculated from sorted
   `X-Bokun-*` headers with HMAC-SHA256, and documents a five-second response timeout.
 
-Select one Bokun webhook system during Phase 0, record its exact contract, and build
-signature fixtures from Bokun-delivered test events. In either system:
+Select one Bokun webhook system during provider contract validation, record its exact
+contract, and build signature fixtures from Bokun-delivered test events. In either system:
 
 - expect duplicate delivery and make processing idempotent;
 - use product events to refresh/disable activity cache documents;
@@ -675,13 +742,13 @@ new application stores a local copy for reads, joins, workflow, or audit.
 
 | Data | Authority | Local storage | Notes |
 |---|---|---|---|
-| Hostify accommodation content | Hostify | MongoDB projection | Serve stale content during short provider outages |
-| App-owned slugs, publishing, SEO, and merchandising | Alojamento Ideal | MongoDB authoritative fields | Provider refresh must not overwrite |
+| Hostify accommodation content | Hostify | PostgreSQL projection (`accommodation_listing`) | Serve stale content during short provider outages |
+| App-owned slugs, publishing, SEO, and merchandising | Alojamento Ideal | PostgreSQL authoritative fields | Provider refresh must not overwrite |
 | Hostify live availability | Hostify | Redis short TTL only | Never trust cache at checkout |
 | Hostify live quote and fees | Hostify | Redis short TTL + PostgreSQL accepted snapshot | Revalidate before reservation |
 | Hostify reservation status | Hostify | PostgreSQL projection | Webhook plus reconciliation |
 | Hostify inbox messages | Hostify for provider messages | PostgreSQL projection | Local messages may also originate in app |
-| Bokun activity content | Bokun | MongoDB projection | Product events refresh cache |
+| Bokun activity content | Bokun | PostgreSQL projection | Product events refresh cache |
 | Bokun live availability/pricing | Bokun | Redis short TTL only | Never trust cache at checkout |
 | Bokun booking status | Bokun | PostgreSQL projection | Webhook plus reconciliation |
 | Order and item state | Alojamento Ideal | PostgreSQL authoritative | Never derive only from provider arrays |
@@ -727,7 +794,8 @@ new application stores a local copy for reads, joins, workflow, or audit.
 - Keep typed columns for fields used in constraints, joins, filtering, state machines, or
   reporting.
 - Keep `raw_payload jsonb` in PostgreSQL only for operational provider records/events.
-- Keep provider-shaped catalog documents and sanitized raw catalog payloads in MongoDB.
+- Keep provider-shaped catalog content and the sanitized raw catalog payload in the
+  PostgreSQL catalog projection (`accommodation_listing` typed columns plus JSONB).
 - Never persist a full raw payload when it can contain access codes, credentials, private
   owner details, or unnecessary personal data.
 - Add `schema_version` to application-owned JSON documents.
@@ -1141,342 +1209,6 @@ or fiscal-document state.
 Core fields: `id`, `actor_type`, `actor_id`, `action`, `entity_type`, `entity_id`,
 `before jsonb`, `after jsonb`, `request_id`, `created_at`.
 
-## 7. MongoDB Collections
-
-MongoDB is a provider-content projection. It is not the source of truth for bookings,
-payments, orders, refunds, or invoices.
-
-### 7.1 `accommodation_listings`
-
-Recommended shape:
-
-```json
-{
-  "_id": "hostify:<account-id>:<listing-id>",
-  "provider": "hostify",
-  "externalAccountId": "<account-id>",
-  "externalId": "<listing-id>",
-  "active": true,
-  "site": {
-    "published": true,
-    "slug": "...",
-    "featured": false,
-    "sortWeight": 0,
-    "seo": {},
-    "overrides": {}
-  },
-  "name": "...",
-  "nickname": "...",
-  "propertyType": { "id": "...", "label": "..." },
-  "listingType": { "id": "...", "label": "..." },
-  "location": {
-    "address": "...",
-    "city": "...",
-    "countryCode": "PT",
-    "postalCode": "...",
-    "timezone": "Europe/Lisbon",
-    "geo": { "type": "Point", "coordinates": [-8.0, 41.0] }
-  },
-  "capacity": {
-    "people": 4,
-    "bedrooms": 2,
-    "bathrooms": 1,
-    "beds": 3
-  },
-  "rules": {},
-  "amenities": [],
-  "rooms": [],
-  "photos": [],
-  "descriptions": {},
-  "reviewsSummary": {},
-  "providerUpdatedAt": "2026-06-14T00:00:00Z",
-  "fetchedAt": "2026-06-14T00:00:00Z",
-  "staleAfter": "2026-06-15T00:00:00Z",
-  "schemaVersion": 1,
-  "rawSanitized": {}
-}
-```
-
-Required indexes:
-
-- unique `{ provider: 1, externalAccountId: 1, externalId: 1 }`;
-- `{ active: 1, "location.city": 1 }`;
-- `2dsphere` on `location.geo`;
-- `{ providerUpdatedAt: 1 }`;
-- text/search index chosen for supported accommodation search.
-
-Do not copy access codes, Wi-Fi passwords, private owner contacts, or other operational
-secrets from Hostify's full listing response into MongoDB or the public catalog projection.
-Provider sync owns provider-derived fields; editors own the `site` namespace. A sync must
-never replace `site` wholesale.
-
-### 7.2 `activity_products`
-
-Recommended shape:
-
-```json
-{
-  "_id": "bokun:<account-id>:<experience-id>",
-  "provider": "bokun",
-  "externalAccountId": "<account-id>",
-  "externalId": "<experience-id>",
-  "active": true,
-  "site": {
-    "published": true,
-    "slug": "...",
-    "featured": false,
-    "sortWeight": 0,
-    "seo": {},
-    "overrides": {}
-  },
-  "baseLanguage": "en",
-  "title": "...",
-  "shortDescription": "...",
-  "description": "...",
-  "vendor": {},
-  "location": {},
-  "duration": {},
-  "bookingType": "DATE_AND_TIME",
-  "capacityType": "...",
-  "meeting": {},
-  "photos": [],
-  "videos": [],
-  "categories": [],
-  "themes": [],
-  "inclusions": [],
-  "exclusions": [],
-  "knowBeforeYouGo": [],
-  "rates": [],
-  "pricingCategories": {},
-  "startTimes": [],
-  "bookingQuestions": [],
-  "cancellationPolicies": [],
-  "providerUpdatedAt": "2026-06-14T00:00:00Z",
-  "fetchedAt": "2026-06-14T00:00:00Z",
-  "staleAfter": "2026-06-15T00:00:00Z",
-  "schemaVersion": 1,
-  "rawSanitized": {}
-}
-```
-
-Required indexes:
-
-- unique `{ provider: 1, externalAccountId: 1, externalId: 1 }`;
-- `{ active: 1, "location.city": 1 }`;
-- `2dsphere` on the normalized location;
-- `{ providerUpdatedAt: 1 }`;
-- text/search index chosen for activity search.
-
-Rates, questions, and start-time configuration may be cached here for display, but must be
-revalidated before booking.
-
-Provider sync owns provider-derived fields; editors own the `site` namespace. A sync must
-never replace `site` wholesale.
-
-### 7.3 Optional `provider_catalog_snapshots`
-
-Use only if raw historical provider payloads are needed for connector debugging. Add a TTL
-index and retain for a short operational period such as 30 days. Do not retain high-risk
-personal data in this collection.
-
-## 8. Cache Policy
-
-Redis/Valkey is recommended because MongoDB TTL deletion is not immediate and MongoDB is
-not suitable for distributed locks or hard-expiry availability data.
-
-| Cache key family | Suggested TTL | On stale/error |
-|---|---:|---|
-| Hostify listing search results | 5 minutes | Rebuild from MongoDB |
-| Hostify listing detail projection | 15 minutes | Serve MongoDB content and revalidate async |
-| Hostify calendar/availability | 30-60 seconds | Fail closed for checkout; UI may show unknown |
-| Hostify live price quote | 30-60 seconds | Fail closed; never serve expired quote |
-| Bokun activity search/detail | 15 minutes | Serve MongoDB content and revalidate async |
-| Bokun availability/pricing | 30-60 seconds | Fail closed for checkout |
-| Provider rate-limit counters | rolling window | Enforce provider-specific limit |
-| Checkout/order lock | short bounded TTL | PostgreSQL remains final lock/authority |
-
-Rules:
-
-- Catalog pages can use stale-while-revalidate.
-- Checkout cannot use stale-while-revalidate.
-- A cached quote must include a hash of all quote inputs and an explicit `expiresAt`.
-- Webhooks invalidate relevant cache keys immediately, then queue a projection refresh.
-- Cron reconciliation repairs missed webhook updates.
-
-An ephemeral checkout quote should contain: `quoteId`, normalized input hash, item-level
-provider quote references, full accepted charge breakdown, currency, provider fetch
-timestamps, `expiresAt`, and a server signature/version. It can live in Redis until accepted.
-Once accepted, its commercial values are copied into PostgreSQL order/item/charge rows.
-
-## 9. Synchronization Design
-
-### 9.1 Webhook Intake Pattern
-
-Every provider webhook endpoint follows the same sequence:
-
-1. Read the raw body.
-2. Verify the provider signature/authentication before parsing or processing.
-3. Insert an `integration_events` row using the provider event ID or fallback dedupe hash.
-4. Return success quickly after durable insertion.
-5. Process asynchronously and idempotently.
-6. Update normalized PostgreSQL projections and/or MongoDB catalog projections.
-7. Invalidate relevant Redis keys.
-8. Mark the event processed or schedule retry/dead-letter handling.
-
-Never perform the full provider sync or checkout compensation inside the webhook request.
-
-### 9.2 Hostify Sync
-
-Because detailed Hostify webhook contracts are not publicly available, use a hybrid model:
-
-| Trigger | Action |
-|---|---|
-| Listing/content webhook | Refresh the affected `accommodation_listings` document |
-| Reservation webhook | Upsert `provider_bookings`; invalidate listing/date availability |
-| Price/calendar webhook, if available | Invalidate affected quote/calendar keys |
-| `message_new` webhook | Fetch thread delta and upsert conversation/messages |
-| Scheduled incremental sync | Repair missed listing, reservation, and message events |
-| Scheduled full reconciliation | Compare all active listings and recent/future reservations |
-
-Initial suggested reconciliation cadence, to be adjusted after rate-limit confirmation:
-
-- active listing content: daily full reconciliation;
-- recent/future reservations: every 15 minutes;
-- messages for open conversations: every 5 minutes if webhook coverage is incomplete;
-- cache invalidation: immediate on webhook.
-
-### 9.3 Bokun Sync
-
-| Bokun event | Action |
-|---|---|
-| `PRODUCT_PUBLISHED` / `PRODUCT_UPDATED` / `EXPERIENCE_UPDATED` | Fetch and upsert activity document |
-| `PRODUCT_DEACTIVATED` / `PRODUCT_DELETED` | Mark activity inactive; do not hard-delete immediately |
-| `BOOKING_CREATED` / `BOOKING_CONFIRMED` / `BOOKING_UPDATED` | Upsert provider booking and invalidate availability |
-| `BOOKING_CANCELLED` / `BOOKING_ABORTED` / `BOOKING_REJECTED` | Update status and invalidate availability |
-| `AVAILABILITY_UPDATED` | Invalidate relevant availability keys |
-| Scheduled paginated activity search | Discover missed/new/deactivated products |
-| Scheduled booking reconciliation | Repair missed booking events |
-
-Throttle according to authentication method. The current legacy API-key method should be
-designed around the documented 5 requests/second limit.
-
-### 9.4 Stripe Sync
-
-Process at least:
-
-- `payment_intent.succeeded`;
-- `payment_intent.payment_failed`;
-- `payment_intent.canceled`;
-- refund events;
-- dispute events;
-- transfer events when Stripe Connect is used.
-
-Store every Stripe event before processing. A repeated event must produce no repeated
-provider confirmation, refund, email, or transfer action.
-
-## 10. Checkout and Booking Saga
-
-A mixed accommodation/activity basket cannot be committed in one database transaction
-because Hostify, Bokun, and Stripe are independent systems. Use an explicit saga with
-durable steps and compensating actions.
-
-```mermaid
-stateDiagram-v2
-    [*] --> draft
-    draft --> validating
-    validating --> reserving
-    reserving --> awaiting_payment
-    awaiting_payment --> paid_confirming: Stripe payment succeeded
-    awaiting_payment --> payment_failed: payment failed/expired
-    paid_confirming --> confirmed: all providers confirmed
-    paid_confirming --> partially_confirmed: some providers failed
-    paid_confirming --> compensation_required: automatic compensation failed
-    payment_failed --> cancelled: provider holds released
-    partially_confirmed --> compensation_required
-    confirmed --> partially_refunded
-    confirmed --> refunded
-```
-
-Required flow:
-
-1. **Create server-side quote**
-   - Load catalog projection for display data.
-   - Fetch live Hostify quote/fees and live Bokun availability/pricing.
-   - Validate guest counts, activity rates/start times, questions, currency, and discounts.
-   - Return a short-lived signed quote ID.
-2. **Create order idempotently**
-   - Persist order, contact snapshot, items, and accepted charge breakdown.
-   - The client supplies an idempotency key. Retrying returns the same order.
-3. **Reserve provider inventory**
-   - Create Hostify pending reservations only after confirming pending-reservation semantics.
-   - Submit Bokun checkout using `RESERVE_FOR_EXTERNAL_PAYMENT`.
-   - Persist each provider response immediately in `provider_bookings`.
-   - Set order expiry to the earliest provider hold expiry.
-4. **Create Stripe PaymentIntent**
-   - Use one PaymentIntent for the order.
-   - Use an idempotency key derived from the internal order/payment-attempt ID.
-   - Store item/provider allocation before payment.
-5. **Confirm asynchronously after payment**
-   - Stripe webhook stores the event and queues confirmation.
-   - Lock the order row.
-   - Confirm Hostify reservation/transaction state.
-   - Confirm the Bokun reserved booking with payment transaction details.
-   - Mark each item independently.
-6. **Compensate partial failure**
-   - Cancel any still-held/confirmed provider bookings that should not remain.
-   - Refund the failed item's allocation, or the whole order according to product policy.
-   - Record every attempt and result.
-   - Move unresolved cases to `compensation_required` for staff action.
-7. **Expire failed checkout**
-   - Cancel provider holds when payment fails or the order expires.
-   - Never delete the order; retain the failed workflow for reconciliation and support.
-
-The API must not send a final confirmation email until the order has reached `confirmed`
-or the email clearly identifies partial confirmation.
-
-## 11. Read and Write Paths
-
-### 11.1 Catalog Read
-
-`web -> API -> Redis search cache -> MongoDB catalog projection`
-
-The API may queue background refresh when a document is stale. Provider outages should not
-take down catalog pages.
-
-### 11.2 Availability and Quote Read
-
-`web -> API -> Redis short-lived cache -> Hostify/Bokun`
-
-The API must indicate quote expiry and provider freshness. It must not persist a commercial
-order from an expired quote without revalidation.
-
-### 11.3 Order Read
-
-`web/admin -> API -> PostgreSQL`
-
-Order pages should not require provider calls. Background sync updates provider projections.
-An explicit admin "refresh from provider" action may queue a high-priority sync.
-
-### 11.4 Suggested API Surface
-
-Initial resource-oriented endpoints:
-
-- `GET /v1/accommodations`
-- `GET /v1/accommodations/:id`
-- `POST /v1/accommodations/:id/quote`
-- `GET /v1/activities`
-- `GET /v1/activities/:id`
-- `POST /v1/activities/:id/quote`
-- `POST /v1/checkout/quotes`
-- `POST /v1/orders`
-- `GET /v1/orders/:publicReference`
-- `POST /v1/orders/:id/cancel`
-- `POST /v1/orders/:id/guest-details`
-- `POST /v1/analytics/events`
-- provider webhook endpoints under `/v1/webhooks/:provider`
-
-All public write endpoints need request idempotency keys.
-
 ## 12. Security, Privacy, and Retention
 
 - Put provider credentials and encryption keys in a managed secrets service.
@@ -1493,7 +1225,7 @@ All public write endpoints need request idempotency keys.
   retention policy.
 - Store PDFs in provider/object storage; PostgreSQL stores immutable references, hashes, and
   metadata.
-- Back up PostgreSQL and MongoDB independently and test restore procedures.
+- Back up PostgreSQL and object storage independently and test restore procedures.
 
 Recommended starting operational retention, pending legal approval:
 
@@ -1521,13 +1253,14 @@ PostgreSQL:
 - index booking date ranges used by operations;
 - enforce non-negative monetary totals and valid date ranges with check constraints.
 
-MongoDB:
+Catalog projection (`accommodation_listing`):
 
-- unique provider/account/external ID;
-- geo indexes for map search;
+- unique `(provider, external_account_id, external_id)`;
+- GiST/trigram indexes for typo-tolerant place matching and a GIN index on the full-text
+  `search_vector`;
+- indexes on latitude/longitude for the haversine bounding-box radius filter;
 - active/city and provider-update indexes;
-- search indexes based on actual product filters;
-- TTL only for optional historical snapshots, never for the current catalog projection.
+- index `amenity_keys` for amenity containment filters.
 
 ## 14. Observability and Operations
 
@@ -1813,59 +1546,6 @@ The migration must report:
 - invoice references without matching items;
 - guest records without matching reservations.
 
-## 17. Implementation Sequence
-
-### Phase 0: Provider contract validation
-
-- Obtain Hostify's detailed API/webhook documentation and sandbox access.
-- Confirm Hostify pending reservation behavior and idempotency options.
-- Register Bokun webhook subscriptions and validate signatures in a non-production app.
-- Confirm Hostkit's role in the rewrite and move credentials to a secrets manager.
-
-### Phase 1: Data foundation
-
-- Add PostgreSQL, migrations, connection pooling, and the core order/integration schema.
-- Add MongoDB catalog collections and indexes.
-- Add Redis/Valkey.
-- Implement shared provider connector interfaces, idempotency, event inbox, outbox, and
-  worker runtime.
-- Define versioned analytics event schemas and add server-side commercial events to the
-  transactional outbox.
-
-### Phase 2: Read-only catalog cache
-
-- Implement Hostify and Bokun initial imports.
-- Serve accommodation/activity pages from MongoDB.
-- Add provider webhooks, cache invalidation, incremental sync, and full reconciliation.
-- Measure freshness before replacing legacy provider-direct reads.
-- Add consent-aware discovery and product-view events.
-
-### Phase 3: Live quote service
-
-- Implement short-lived Hostify and Bokun quote/availability cache.
-- Return signed expiring quotes.
-- Add rate limiting, timeouts, circuit breakers, and provider error normalization.
-
-### Phase 4: PostgreSQL checkout saga
-
-- Implement normalized orders/items/charges/bookings/payments.
-- Implement provider reservation, Stripe payment, confirmation, and compensation workers.
-- Add reconciliation dashboards and manual recovery actions before accepting production
-  traffic.
-- Add cart, quote, checkout, payment, and confirmation funnel dashboards reconciled against
-  PostgreSQL operational facts.
-
-### Phase 5: Guest, messaging, and fiscal workflows
-
-- Migrate guest registration, conversation/message projections, invoices, and credit notes.
-- Add encryption, audit, retention, and role-based access.
-
-### Phase 6: Legacy migration and cutover
-
-- Transform and reconcile old MongoDB data.
-- Run shadow reads and reconciliation.
-- Freeze legacy checkout writes, complete final delta migration, and cut over.
-
 ## 18. Decisions Still Required
 
 These are blockers or material design decisions, not implementation details:
@@ -1875,7 +1555,7 @@ These are blockers or material design decisions, not implementation details:
 3. Confirm whether Hostify supports idempotent reservation creation/external references.
 4. Decide whether Bokun remains on API-key authentication or moves to OAuth.
 5. Confirm whether Hostkit remains the fiscal/guest-registration integration.
-6. Select managed PostgreSQL, MongoDB, Redis/Valkey, object storage, and secrets services.
+6. Select managed PostgreSQL, Redis, object storage, and secrets services.
 7. Approve guest-data and fiscal-record retention with Portuguese legal/accounting advice.
 8. Decide whether customer accounts exist or checkout remains guest-first.
 9. Select the analytics sink/warehouse and approve analytics consent and retention policy.
@@ -1889,7 +1569,7 @@ These are blockers or material design decisions, not implementation details:
 Legacy paths below are relative to
 `E:\Ocean Informatix\AlojamentoIdeal.pt\alojamentoideal`.
 
-- New API scaffold: `apps/api/src/index.ts`
+- New app (current): `apps/web/app/api/*` route handlers, `packages/core/`, `packages/db/`
 - Legacy MongoDB models: `models/Order.ts`, `models/GuestData.ts`, `models/Chat.ts`,
   `models/HostkitApiKey.ts`
 - Legacy Hostify connector and schemas: `utils/hostify-request.ts`, `schemas/listing.schema.ts`,

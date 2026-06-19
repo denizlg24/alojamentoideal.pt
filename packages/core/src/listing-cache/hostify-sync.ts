@@ -1,4 +1,5 @@
 import { getDb } from "@workspace/db";
+import { buildListingSearchIndex } from "../catalog/search-index";
 import type { HostifyClient } from "../integrations/hostify/index";
 import {
 	createHostifyClientFromEnv,
@@ -23,6 +24,11 @@ const MILLISECONDS_PER_HOUR = 60 * 60 * 1000;
 const MILLISECONDS_PER_MINUTE = 60 * 1000;
 
 export interface HostifyListingSyncStats {
+	/**
+	 * External IDs of listings created or updated during the run. Consumers use
+	 * this to invalidate exactly the catalog cache entries that changed.
+	 */
+	changedExternalIds: string[];
 	errors: SyncListingError[];
 	listingsCreated: number;
 	listingsFailed: number;
@@ -87,6 +93,7 @@ export class HostifyListingCacheSync {
 	async syncListings(trigger = "cron"): Promise<HostifyListingSyncStats> {
 		const runId = crypto.randomUUID();
 		const stats: HostifyListingSyncStats = {
+			changedExternalIds: [],
 			errors: [],
 			listingsCreated: 0,
 			listingsFailed: 0,
@@ -304,10 +311,19 @@ export class HostifyListingCacheSync {
 				listingProcessingInput(projection),
 			);
 			const fetchedAt = this.#now();
+			const searchIndex = buildListingSearchIndex({
+				city: projection.city,
+				country: projection.country,
+				name: projection.name,
+				nickname: projection.nickname,
+				processed: processing.content,
+				propertyType: projection.propertyType,
+			});
 
 			await this.#repository.upsertListing({
 				accountId: this.#config.hostifyAccountId,
 				active: projection.active,
+				amenityKeys: searchIndex.amenityKeys,
 				bathrooms: projection.bathrooms,
 				bedrooms: projection.bedrooms,
 				city: projection.city,
@@ -329,6 +345,9 @@ export class HostifyListingCacheSync {
 				provider: HOSTIFY_PROVIDER,
 				providerUpdatedAt: projection.providerUpdatedAt,
 				raw: projection.raw,
+				searchBody: searchIndex.searchBody,
+				searchLocation: searchIndex.searchLocation,
+				searchTitle: searchIndex.searchTitle,
 				sectionHashes: projection.sectionHashes,
 				sourceHash: projection.sourceHash,
 				staleAfter: new Date(
@@ -339,6 +358,7 @@ export class HostifyListingCacheSync {
 				timezone: projection.timezone,
 			});
 
+			stats.changedExternalIds.push(projection.externalId);
 			if (existing) {
 				stats.listingsUpdated += 1;
 			} else {
@@ -410,6 +430,7 @@ export class HostifyListingCacheSync {
 
 function emptyStats(runId: string): HostifyListingSyncStats {
 	return {
+		changedExternalIds: [],
 		errors: [],
 		listingsCreated: 0,
 		listingsFailed: 0,

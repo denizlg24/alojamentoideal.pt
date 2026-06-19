@@ -3,7 +3,11 @@ import {
 	getListingCacheConfig,
 	isAuthorizedCronRequest,
 } from "@workspace/core/listing-cache";
+import { revalidateTag } from "next/cache";
 import { withApiRoute } from "@/lib/api";
+import { CATALOG_LISTINGS_TAG, catalogListingTag } from "@/lib/catalog-cache";
+
+const PROVIDER = "hostify";
 
 // `Authorization: Bearer $CRON_SECRET`.
 export const GET = withApiRoute(
@@ -24,6 +28,21 @@ export const GET = withApiRoute(
 
 		const sync = createHostifyListingCacheSyncFromEnv();
 		const result = await sync.pollListings("poll");
+
+		const changedExternalIds = result.data?.changedExternalIds ?? [];
+		if (changedExternalIds.length > 0) {
+			const scope = {
+				accountId: config.hostifyAccountId,
+				provider: PROVIDER,
+			};
+			// Drop all list pages: a created or newly-qualifying listing is not
+			// referenced by any existing list cache entry, so per-listing tags
+			// alone cannot catch it.
+			revalidateTag(CATALOG_LISTINGS_TAG, "max");
+			for (const externalId of changedExternalIds) {
+				revalidateTag(catalogListingTag(scope, externalId), "max");
+			}
+		}
 
 		return Response.json({ data: result, success: true });
 	},

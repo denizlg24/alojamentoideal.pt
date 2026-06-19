@@ -1,5 +1,7 @@
+import { sql } from "drizzle-orm";
 import {
 	boolean,
+	customType,
 	doublePrecision,
 	index,
 	integer,
@@ -9,6 +11,16 @@ import {
 	timestamp,
 	uniqueIndex,
 } from "drizzle-orm/pg-core";
+
+/**
+ * Postgres full-text search vector. Modeled so Drizzle owns the column and its
+ * GIN index; the value is database-generated from `search_text`.
+ */
+const tsvector = customType<{ data: string; driverData: string }>({
+	dataType() {
+		return "tsvector";
+	},
+});
 
 export interface ListingSectionHashes {
 	amenities: string;
@@ -189,6 +201,10 @@ export const accommodationListing = pgTable(
 	{
 		id: text("id").primaryKey(),
 		active: boolean("active").notNull().default(true),
+		amenityKeys: text("amenity_keys")
+			.array()
+			.notNull()
+			.default(sql`'{}'::text[]`),
 		bathrooms: doublePrecision("bathrooms"),
 		bedrooms: doublePrecision("bedrooms"),
 		city: text("city"),
@@ -216,6 +232,16 @@ export const accommodationListing = pgTable(
 		provider: text("provider").notNull(),
 		providerUpdatedAt: timestampWithTimezone("provider_updated_at"),
 		raw: jsonb("raw").$type<AccommodationListingRawContent>().notNull(),
+		// DB column kept as `search_text` (repurposed as the body/low-weight tier)
+		// to avoid a destructive rename in the migration diff.
+		searchBody: text("search_text"),
+		searchLocation: text("search_location"),
+		searchTitle: text("search_title"),
+		searchVector: tsvector("search_vector").generatedAlwaysAs(
+			sql`setweight(to_tsvector('simple', immutable_unaccent(coalesce(search_title, ''))), 'A')
+				|| setweight(to_tsvector('simple', immutable_unaccent(coalesce(search_location, ''))), 'B')
+				|| setweight(to_tsvector('simple', immutable_unaccent(coalesce(search_text, ''))), 'C')`,
+		),
 		sectionHashes: jsonb("section_hashes")
 			.$type<ListingSectionHashes>()
 			.notNull(),
@@ -239,6 +265,18 @@ export const accommodationListing = pgTable(
 			table.providerUpdatedAt,
 		),
 		index("accommodation_listing_stale_after_idx").on(table.staleAfter),
+		index("accommodation_listing_lat_lng_idx").on(
+			table.latitude,
+			table.longitude,
+		),
+		index("accommodation_listing_search_vector_idx").using(
+			"gin",
+			table.searchVector,
+		),
+		index("accommodation_listing_amenity_keys_idx").using(
+			"gin",
+			table.amenityKeys,
+		),
 	],
 );
 
