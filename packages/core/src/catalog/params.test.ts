@@ -69,7 +69,7 @@ describe("parseCatalogListQuery", () => {
 		expect(result.success).toBe(false);
 	});
 
-	test("clamps limit above maximum", () => {
+	test("rejects limit above maximum", () => {
 		const result = parse("limit=500");
 		expect(result.success).toBe(false);
 	});

@@ -113,6 +113,7 @@ export class CatalogRepository {
 					eq(accommodationListing.provider, scope.provider),
 					eq(accommodationListing.externalAccountId, scope.accountId),
 					eq(accommodationListing.externalId, externalId),
+					eq(accommodationListing.active, true),
 				),
 			)
 			.limit(1);
@@ -179,18 +180,38 @@ export class CatalogRepository {
 		switch (query.sort) {
 			case "distance":
 				return distance
-					? [sql`${distance} asc`]
-					: [desc(accommodationListing.fetchedAt)];
+					? [
+							sql`${distance} asc`,
+							desc(accommodationListing.providerUpdatedAt),
+							desc(accommodationListing.fetchedAt),
+						]
+					: [
+							desc(accommodationListing.fetchedAt),
+							desc(accommodationListing.providerUpdatedAt),
+						];
 			case "relevance":
 				return query.text
 					? [
 							sql`ts_rank(${accommodationListing.searchVector}, ${tsQuery(query.text)}) desc`,
+							desc(accommodationListing.providerUpdatedAt),
+							desc(accommodationListing.fetchedAt),
 						]
-					: [desc(accommodationListing.providerUpdatedAt)];
+					: [
+							desc(accommodationListing.providerUpdatedAt),
+							desc(accommodationListing.fetchedAt),
+						];
 			case "capacity":
-				return [sql`${accommodationListing.personCapacity} desc nulls last`];
+				return [
+					sql`${accommodationListing.personCapacity} desc nulls last`,
+					desc(accommodationListing.providerUpdatedAt),
+					desc(accommodationListing.fetchedAt),
+				];
 			case "name":
-				return [asc(accommodationListing.name)];
+				return [
+					asc(accommodationListing.name),
+					desc(accommodationListing.providerUpdatedAt),
+					desc(accommodationListing.fetchedAt),
+				];
 			default:
 				return [
 					sql`${accommodationListing.providerUpdatedAt} desc nulls last`,

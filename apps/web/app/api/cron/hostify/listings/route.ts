@@ -6,8 +6,7 @@ import {
 import { revalidateTag } from "next/cache";
 import { withApiRoute } from "@/lib/api";
 import { CATALOG_LISTINGS_TAG, catalogListingTag } from "@/lib/catalog-cache";
-
-const PROVIDER = "hostify";
+import { HOSTIFY_PROVIDER } from "@/lib/catalog-constants";
 
 // `Authorization: Bearer $CRON_SECRET`.
 export const GET = withApiRoute(
@@ -33,7 +32,7 @@ export const GET = withApiRoute(
 		if (changedExternalIds.length > 0) {
 			const scope = {
 				accountId: config.hostifyAccountId,
-				provider: PROVIDER,
+				provider: HOSTIFY_PROVIDER,
 			};
 			// Drop all list pages: a created or newly-qualifying listing is not
 			// referenced by any existing list cache entry, so per-listing tags

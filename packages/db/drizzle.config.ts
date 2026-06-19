@@ -10,4 +10,11 @@ export default defineConfig({
 	dbCredentials: {
 		url: process.env.DATABASE_URL ?? DEFAULT_DATABASE_URL,
 	},
+	migrations: {
+		schema: "public",
+		table: "drizzle_migrations",
+	},
+	schemaFilter: ["public"],
+	breakpoints: true,
+	strict: true,
 });

@@ -50,7 +50,7 @@ const longitude = z.coerce.number().min(-180).max(180);
 const radiusKm = z.coerce.number().positive().max(20_000);
 
 const baseSchema = z.object({
-	amenities: z.array(z.string().trim().min(1)).default([]),
+	amenities: z.array(z.string().trim().min(1)).max(50).default([]),
 	bathroomsMin: z.coerce.number().min(0).optional(),
 	bedroomsMin: z.coerce.number().min(0).optional(),
 	city: optionalText,
@@ -73,12 +73,12 @@ const baseSchema = z.object({
 
 const listQuerySchema = baseSchema
 	.refine(
-		(value) =>
-			[value.lat, value.lng, value.radiusKm].filter(
+		(value) => {
+			const definedCount = [value.lat, value.lng, value.radiusKm].filter(
 				(part) => part !== undefined,
-			).length %
-				3 ===
-			0,
+			).length;
+			return definedCount === 0 || definedCount === 3;
+		},
 		{
 			message:
 				"lat, lng and radiusKm must be provided together for radius search",

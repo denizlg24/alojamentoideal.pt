@@ -45,6 +45,22 @@ describe("buildListingSearchIndex", () => {
 		expect(result.amenityKeys.sort()).toEqual(["12", "Pool"]);
 	});
 
+	test("keys with empty-string IDs fall back to sourceLabel", () => {
+		const result = buildListingSearchIndex({
+			city: "Porto",
+			country: "PT",
+			name: "Loft",
+			nickname: null,
+			processed: processed([
+				amenity("", "Parking", "Parking"),
+				amenity("12", "Wifi", "Wifi"),
+			]),
+			propertyType: "apartment",
+		});
+
+		expect(result.amenityKeys.sort()).toEqual(["12", "Parking"]);
+	});
+
 	test("title column carries name and localized titles", () => {
 		const result = buildListingSearchIndex({
 			city: "Porto",

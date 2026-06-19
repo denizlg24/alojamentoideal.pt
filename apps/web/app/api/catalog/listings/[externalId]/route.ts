@@ -2,8 +2,7 @@ import { parseCatalogLocale } from "@workspace/core/catalog";
 import { getListingCacheConfig } from "@workspace/core/listing-cache";
 import { withApiRoute } from "@/lib/api";
 import { getCachedCatalogDetail } from "@/lib/catalog-cache";
-
-const PROVIDER = "hostify";
+import { HOSTIFY_PROVIDER } from "@/lib/catalog-constants";
 
 interface DetailRouteContext {
 	params: Promise<{ externalId: string }>;
@@ -20,7 +19,7 @@ export const GET = withApiRoute<DetailRouteContext>(
 		const config = getListingCacheConfig();
 		const listing = await getCachedCatalogDetail(
 			externalId,
-			{ accountId: config.hostifyAccountId, provider: PROVIDER },
+			{ accountId: config.hostifyAccountId, provider: HOSTIFY_PROVIDER },
 			locale,
 		);
 
