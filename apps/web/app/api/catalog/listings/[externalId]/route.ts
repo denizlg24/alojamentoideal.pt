@@ -1,8 +1,8 @@
 import { parseCatalogLocale } from "@workspace/core/catalog";
 import { getListingCacheConfig } from "@workspace/core/listing-cache";
-import { withApiRoute } from "@/lib/api";
-import { getCachedCatalogDetail } from "@/lib/catalog-cache";
-import { HOSTIFY_PROVIDER } from "@/lib/catalog-constants";
+import { withApiRoute } from "@/lib/api/route";
+import { getCachedCatalogDetail } from "@/lib/catalog/cache";
+import { HOSTIFY_PROVIDER } from "@/lib/catalog/constants";
 
 interface DetailRouteContext {
 	params: Promise<{ externalId: string }>;

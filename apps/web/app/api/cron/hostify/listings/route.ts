@@ -4,9 +4,9 @@ import {
 	isAuthorizedCronRequest,
 } from "@workspace/core/listing-cache";
 import { revalidateTag } from "next/cache";
-import { withApiRoute } from "@/lib/api";
-import { CATALOG_LISTINGS_TAG, catalogListingTag } from "@/lib/catalog-cache";
-import { HOSTIFY_PROVIDER } from "@/lib/catalog-constants";
+import { withApiRoute } from "@/lib/api/route";
+import { CATALOG_LISTINGS_TAG, catalogListingTag } from "@/lib/catalog/cache";
+import { HOSTIFY_PROVIDER } from "@/lib/catalog/constants";
 
 // `Authorization: Bearer $CRON_SECRET`.
 export const GET = withApiRoute(

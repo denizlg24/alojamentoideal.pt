@@ -17,15 +17,11 @@ ALTER TABLE "accommodation_listing" ADD COLUMN "search_vector" "tsvector" GENERA
 	|| setweight(to_tsvector('simple', immutable_unaccent(coalesce(search_location, ''))), 'B')
 	|| setweight(to_tsvector('simple', immutable_unaccent(coalesce(search_text, ''))), 'C')
 ) STORED;--> statement-breakpoint
-COMMIT;--> statement-breakpoint
-CREATE INDEX CONCURRENTLY "accommodation_listing_search_vector_idx" ON "accommodation_listing" USING gin ("search_vector");--> statement-breakpoint
+CREATE INDEX "accommodation_listing_search_vector_idx" ON "accommodation_listing" USING gin ("search_vector");--> statement-breakpoint
 -- Trigram indexes backing typo-tolerant, accent/case-insensitive place filters.
-COMMIT;--> statement-breakpoint
-CREATE INDEX CONCURRENTLY "accommodation_listing_city_trgm_idx" ON "accommodation_listing" USING gin (immutable_unaccent(lower("city")) gin_trgm_ops);--> statement-breakpoint
-COMMIT;--> statement-breakpoint
-CREATE INDEX CONCURRENTLY "accommodation_listing_country_trgm_idx" ON "accommodation_listing" USING gin (immutable_unaccent(lower("country")) gin_trgm_ops);--> statement-breakpoint
-COMMIT;--> statement-breakpoint
-CREATE INDEX CONCURRENTLY "accommodation_listing_property_type_trgm_idx" ON "accommodation_listing" USING gin (immutable_unaccent(lower("property_type")) gin_trgm_ops);--> statement-breakpoint
+CREATE INDEX "accommodation_listing_city_trgm_idx" ON "accommodation_listing" USING gin (immutable_unaccent(lower("city")) gin_trgm_ops);--> statement-breakpoint
+CREATE INDEX "accommodation_listing_country_trgm_idx" ON "accommodation_listing" USING gin (immutable_unaccent(lower("country")) gin_trgm_ops);--> statement-breakpoint
+CREATE INDEX "accommodation_listing_property_type_trgm_idx" ON "accommodation_listing" USING gin (immutable_unaccent(lower("property_type")) gin_trgm_ops);--> statement-breakpoint
 -- Backfill the weighted source columns from processed content + typed columns
 -- (mirrors buildListingSearchIndex). search_vector regenerates automatically.
 UPDATE "accommodation_listing" SET

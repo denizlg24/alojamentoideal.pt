@@ -3,7 +3,7 @@ import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
 	// Dynamic-by-default rendering; catalog reads opt into caching explicitly via
-	// the `use cache` directive in `lib/catalog-cache.ts`, invalidated on-demand
+	// the `use cache` directive in `lib/catalog/cache.ts`, invalidated on-demand
 	// by the Hostify sync cron through `revalidateTag`.
 	cacheComponents: true,
 	transpilePackages: [

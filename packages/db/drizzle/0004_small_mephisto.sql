@@ -1,12 +1,9 @@
 ALTER TABLE "accommodation_listing" ADD COLUMN "amenity_keys" text[] DEFAULT '{}'::text[] NOT NULL;--> statement-breakpoint
 ALTER TABLE "accommodation_listing" ADD COLUMN "search_text" text;--> statement-breakpoint
 ALTER TABLE "accommodation_listing" ADD COLUMN "search_vector" "tsvector" GENERATED ALWAYS AS (to_tsvector('simple', coalesce(search_text, ''))) STORED;--> statement-breakpoint
-COMMIT;--> statement-breakpoint
-CREATE INDEX CONCURRENTLY "accommodation_listing_lat_lng_idx" ON "accommodation_listing" USING btree ("latitude","longitude");--> statement-breakpoint
-COMMIT;--> statement-breakpoint
-CREATE INDEX CONCURRENTLY "accommodation_listing_search_vector_idx" ON "accommodation_listing" USING gin ("search_vector");--> statement-breakpoint
-COMMIT;--> statement-breakpoint
-CREATE INDEX CONCURRENTLY "accommodation_listing_amenity_keys_idx" ON "accommodation_listing" USING gin ("amenity_keys");--> statement-breakpoint
+CREATE INDEX "accommodation_listing_lat_lng_idx" ON "accommodation_listing" USING btree ("latitude","longitude");--> statement-breakpoint
+CREATE INDEX "accommodation_listing_search_vector_idx" ON "accommodation_listing" USING gin ("search_vector");--> statement-breakpoint
+CREATE INDEX "accommodation_listing_amenity_keys_idx" ON "accommodation_listing" USING gin ("amenity_keys");--> statement-breakpoint
 -- Backfill search_text and amenity_keys for existing rows from processed content
 -- (search_vector regenerates automatically). Mirrors buildListingSearchIndex.
 UPDATE "accommodation_listing" SET
