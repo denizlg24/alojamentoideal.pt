@@ -26,6 +26,7 @@ export interface ListingCacheProjection {
 	active: boolean;
 	bathrooms: number | null;
 	bedrooms: number | null;
+	beds: number | null;
 	city: string | null;
 	country: string | null;
 	description: string | null;
@@ -99,6 +100,7 @@ export function buildListingCacheProjection(
 		active: readBoolean(listing, "active") ?? true,
 		bathrooms: readNumber(listing, "bathrooms"),
 		bedrooms: readNumber(listing, "bedrooms"),
+		beds: readNumber(listing, "beds"),
 		city: readString(listing, "city"),
 		country: readString(listing, "country"),
 		description,
