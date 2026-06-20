@@ -6,6 +6,14 @@ const nextConfig: NextConfig = {
 	// the `use cache` directive in `lib/catalog/cache.ts`, invalidated on-demand
 	// by the Hostify sync cron through `revalidateTag`.
 	cacheComponents: true,
+	images: {
+		// Listing/activity photos are served from the Hostify and Bokun CDNs.
+		remotePatterns: [
+			new URL("https://img.hostify.com/**"),
+			new URL("https://bokun.s3.amazonaws.com/**"),
+			new URL("http://bokundemo.s3.amazonaws.com/**"),
+		],
+	},
 	transpilePackages: [
 		"@workspace/ui",
 		"@workspace/auth",

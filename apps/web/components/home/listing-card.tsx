@@ -1,6 +1,7 @@
 import type { CatalogListingSummaryDto } from "@workspace/core/catalog";
 import { Badge } from "@workspace/ui/components/badge";
-import { Bath, BedDouble, MapPin, Star, Users } from "lucide-react";
+import { BedDouble, MapPin, Star, Toilet, Users } from "lucide-react";
+import Image from "next/image";
 import Link from "next/link";
 
 function formatLocation(listing: CatalogListingSummaryDto): string | null {
@@ -12,35 +13,16 @@ function pluralize(count: number, singular: string): string {
 	return `${count} ${count === 1 ? singular : `${singular}s`}`;
 }
 
-interface ListingReview {
-	count: number;
-	rating: number;
-}
-
-// TODO: replace with real review data once the reviews source is wired up.
-// Derived from the listing id so each card stays stable across renders.
-function placeholderReview(id: string): ListingReview {
-	let hash = 0;
-	for (let index = 0; index < id.length; index += 1) {
-		hash = (hash * 31 + id.charCodeAt(index)) | 0;
-	}
-	const seed = Math.abs(hash);
-	return {
-		count: 8 + (seed % 240),
-		rating: 4 + ((seed % 100) / 100) * 0.9,
-	};
-}
-
 export function ListingCard({
 	listing,
 }: {
 	listing: CatalogListingSummaryDto;
 }) {
 	const location = formatLocation(listing);
-	const { guests, bedrooms, bathrooms } = listing.capacity;
+	const { guests, beds, bathrooms } = listing.capacity;
 	const distanceLabel =
 		listing.distanceKm !== null ? `${listing.distanceKm} km away` : null;
-	const review = placeholderReview(listing.id);
+	const { average: rating, count: reviewCount } = listing.reviews;
 
 	return (
 		<Link
@@ -49,13 +31,12 @@ export function ListingCard({
 		>
 			<div className="relative aspect-[16/9] overflow-hidden rounded-lg bg-muted shadow-sm transition-shadow group-hover:shadow-lg">
 				{listing.coverPhoto ? (
-					// Plain img: the Hostify photo CDN host is not configured for
-					// next/image, so this keeps the draft host-agnostic.
-					<img
+					<Image
 						src={listing.coverPhoto.thumbnailUrl ?? listing.coverPhoto.url}
 						alt={listing.coverPhoto.caption ?? listing.title}
-						loading="lazy"
-						className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105"
+						fill
+						sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 33vw"
+						className="object-cover transition-transform duration-500 group-hover:scale-105"
 					/>
 				) : (
 					<div className="flex h-full w-full items-center justify-center text-muted-foreground text-sm">
@@ -86,11 +67,13 @@ export function ListingCard({
 					<h3 className="line-clamp-1 font-medium leading-tight">
 						{listing.title}
 					</h3>
-					<span className="flex shrink-0 items-center gap-1 text-sm">
-						<Star className="size-3.5 fill-current text-amber-500" />
-						<span className="font-medium">{review.rating.toFixed(1)}</span>
-						<span className="text-muted-foreground">({review.count})</span>
-					</span>
+					{rating !== null && (
+						<span className="flex shrink-0 items-center gap-1 text-sm">
+							<Star className="size-3.5 fill-current text-amber-500" />
+							<span className="font-medium">{rating.toFixed(1)}</span>
+							<span className="text-muted-foreground">({reviewCount})</span>
+						</span>
+					)}
 				</div>
 
 				{location && (
@@ -107,16 +90,16 @@ export function ListingCard({
 							{pluralize(guests, "guest")}
 						</span>
 					)}
-					{bedrooms !== null && (
+					{beds !== null && (
 						<span className="flex items-center gap-1.5">
 							<BedDouble className="size-4 text-muted-foreground" />
-							{pluralize(bedrooms, "bed")}
+							{pluralize(beds, "bed")}
 						</span>
 					)}
 					{bathrooms !== null && (
 						<span className="flex items-center gap-1.5">
-							<Bath className="size-4 text-muted-foreground" />
-							{pluralize(bathrooms, "bath")}
+							<Toilet className="size-4 text-muted-foreground" />
+							{pluralize(bathrooms, "bathroom")}
 						</span>
 					)}
 				</div>
