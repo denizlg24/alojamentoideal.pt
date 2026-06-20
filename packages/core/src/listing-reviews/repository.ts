@@ -194,6 +194,16 @@ export function reviewRowId(
 	source: ListingReviewSource,
 	externalId: string | null,
 ): string {
+	if (source === "external" && externalId === null) {
+		throw new Error(
+			"externalId is required for external reviews to ensure deduplication",
+		);
+	}
+	if (source === "internal" && externalId !== null) {
+		throw new Error(
+			"externalId must be null for internal reviews; each internal review gets a unique id",
+		);
+	}
 	return `${provider}:${accountId}:${source}:${externalId ?? crypto.randomUUID()}`;
 }
 

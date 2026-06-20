@@ -90,6 +90,10 @@ describe("toCatalogListingSummary", () => {
 		expect(summary.amenityCount).toBe(1);
 		expect(summary.freshness.isStale).toBe(false);
 		expect(summary.freshness.active).toBe(true);
+		expect(summary.reviews).toEqual({
+			average: null,
+			count: 0,
+		});
 	});
 
 	test("cover photo is the lowest sort_order with a url", () => {
@@ -112,6 +116,28 @@ describe("toCatalogListingSummary", () => {
 			locale: "en",
 		});
 		expect(summary.distanceKm).toBe(3.15);
+	});
+
+	test("includes reviews when count > 0", () => {
+		const summary = toCatalogListingSummary(
+			record({ reviewAverage: 4.7, reviewCount: 23 }),
+			{ locale: "en" },
+		);
+		expect(summary.reviews).toEqual({
+			average: 4.7,
+			count: 23,
+		});
+	});
+
+	test("sets reviews average to null when count is 0", () => {
+		const summary = toCatalogListingSummary(
+			record({ reviewAverage: null, reviewCount: 0 }),
+			{ locale: "en" },
+		);
+		expect(summary.reviews).toEqual({
+			average: null,
+			count: 0,
+		});
 	});
 
 	test("never leaks raw or normalized payloads", () => {
