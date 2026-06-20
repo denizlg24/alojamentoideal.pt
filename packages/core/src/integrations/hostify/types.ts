@@ -537,6 +537,8 @@ export interface HostifyReviewListQuery extends HostifyPagination {
 	city?: string;
 	created_from?: HostifyDate;
 	created_to?: HostifyDate;
+	// Scopes the response to one listing and adds the per-channel `channels` map.
+	listing_id?: HostifyId;
 }
 
 export interface HostifySearchQuery {

@@ -16,6 +16,10 @@
 			"types": "./src/listing-cache/index.ts",
 			"default": "./src/listing-cache/index.ts"
 		},
+		"./listing-reviews": {
+			"types": "./src/listing-reviews/index.ts",
+			"default": "./src/listing-reviews/index.ts"
+		},
 		"./redis": {
 			"types": "./src/redis/index.ts",
 			"default": "./src/redis/index.ts"

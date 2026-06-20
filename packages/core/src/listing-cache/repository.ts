@@ -8,7 +8,7 @@ import {
 	providerSyncRun,
 	providerSyncState,
 } from "@workspace/db";
-import { and, eq, sql } from "drizzle-orm";
+import { and, asc, eq, sql } from "drizzle-orm";
 import type { ListingProcessingStatus } from "./processor";
 
 export interface ListingState {
@@ -23,6 +23,7 @@ export interface UpsertListingInput {
 	amenityKeys: string[];
 	bathrooms: number | null;
 	bedrooms: number | null;
+	beds: number | null;
 	city: string | null;
 	country: string | null;
 	externalId: string;
@@ -303,6 +304,33 @@ export class ListingCacheRepository {
 			);
 	}
 
+	/**
+	 * Returns a stable, ordered page of cached listing external ids for a scope.
+	 * The review sync pages over these to fetch each listing's reviews; ordering
+	 * by `externalId` keeps the cursor deterministic across runs.
+	 */
+	async listListingExternalIds(input: {
+		accountId: string;
+		limit: number;
+		offset: number;
+		provider: string;
+	}): Promise<string[]> {
+		const rows = await this.#db
+			.select({ externalId: accommodationListing.externalId })
+			.from(accommodationListing)
+			.where(
+				and(
+					eq(accommodationListing.provider, input.provider),
+					eq(accommodationListing.externalAccountId, input.accountId),
+				),
+			)
+			.orderBy(asc(accommodationListing.externalId))
+			.limit(input.limit)
+			.offset(input.offset);
+
+		return rows.map((row) => row.externalId);
+	}
+
 	async findListingState(
 		provider: string,
 		accountId: string,
@@ -334,6 +362,7 @@ export class ListingCacheRepository {
 			amenityKeys: input.amenityKeys,
 			bathrooms: input.bathrooms,
 			bedrooms: input.bedrooms,
+			beds: input.beds,
 			city: input.city,
 			country: input.country,
 			externalAccountId: input.accountId,
@@ -375,6 +404,7 @@ export class ListingCacheRepository {
 					amenityKeys: values.amenityKeys,
 					bathrooms: values.bathrooms,
 					bedrooms: values.bedrooms,
+					beds: values.beds,
 					city: values.city,
 					country: values.country,
 					fetchedAt: values.fetchedAt,
