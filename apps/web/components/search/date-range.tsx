@@ -10,6 +10,7 @@ import {
 import { cn } from "@workspace/ui/lib/utils";
 import { format } from "date-fns";
 import { CalendarDays } from "lucide-react";
+import { useMemo } from "react";
 import type { DateRange } from "react-day-picker";
 
 interface DateRangeProps {
@@ -32,6 +33,8 @@ export function StayCalendar({
 	onChange,
 	value,
 }: DateRangeProps & { numberOfMonths?: number }) {
+	const today = useMemo(() => startOfToday(), []);
+
 	return (
 		<Calendar
 			mode="range"
@@ -40,7 +43,7 @@ export function StayCalendar({
 			defaultMonth={value?.from}
 			selected={value}
 			onSelect={onChange}
-			disabled={(date) => date < startOfToday()}
+			disabled={(date) => date < today}
 		/>
 	);
 }

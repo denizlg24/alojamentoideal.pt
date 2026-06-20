@@ -24,6 +24,8 @@ const FEATURED_POOL_SIZE = 12;
 export async function getFeaturedListings(
 	count: number,
 ): Promise<CatalogListingSummaryDto[]> {
+	const clampedCount = Math.min(count, FEATURED_POOL_SIZE);
+
 	const config = getListingCacheConfig();
 	const query: CatalogListQuery = {
 		amenities: [],
@@ -47,5 +49,5 @@ export async function getFeaturedListings(
 		provider: HOSTIFY_PROVIDER,
 	});
 
-	return result.items.slice(0, count);
+	return result.items.slice(0, clampedCount);
 }

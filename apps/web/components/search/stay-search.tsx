@@ -12,6 +12,7 @@ import {
 } from "@workspace/ui/components/sheet";
 import { cn } from "@workspace/ui/lib/utils";
 import { Search } from "lucide-react";
+import { useMemo } from "react";
 import { DateRangeField, StayCalendar } from "./date-range";
 import { GuestFields, GuestSelector } from "./guest-selector";
 import { LocationField } from "./location-field";
@@ -19,7 +20,10 @@ import { useStaySearch } from "./use-stay-search";
 
 export function StaySearch({ className }: { className?: string }) {
 	const { guestTotal, state, submit, update } = useStaySearch();
-	const guests = { adults: state.adults, children: state.children };
+	const guests = useMemo(
+		() => ({ adults: state.adults, children: state.children }),
+		[state.adults, state.children],
+	);
 
 	return (
 		<>
