@@ -326,6 +326,7 @@ export class HostifyListingCacheSync {
 				amenityKeys: searchIndex.amenityKeys,
 				bathrooms: projection.bathrooms,
 				bedrooms: projection.bedrooms,
+				beds: projection.beds,
 				city: projection.city,
 				country: projection.country,
 				externalId: projection.externalId,

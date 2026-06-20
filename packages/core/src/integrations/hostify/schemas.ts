@@ -141,6 +141,7 @@ export const hostifyListingSchema = entitySchema.extend({
 	address: nullableStringSchema,
 	bathrooms: nullableNumberSchema,
 	bedrooms: nullableNumberSchema,
+	beds: nullableNumberSchema,
 	city: nullableStringSchema,
 	country: nullableStringSchema,
 	currency: nullableStringSchema,
@@ -286,6 +287,7 @@ export const hostifyPromotionSchema = entitySchema.extend({
 
 export const hostifyReviewSchema = entitySchema.extend({
 	accuracy_rating: nullableNumberSchema,
+	channel_review_id: nullableIdSchema,
 	checkin_rating: nullableNumberSchema,
 	clean_rating: nullableNumberSchema,
 	comments: nullableStringSchema,
@@ -295,6 +297,7 @@ export const hostifyReviewSchema = entitySchema.extend({
 	integration_id: nullableIdSchema,
 	listing_id: nullableIdSchema,
 	location_rating: nullableNumberSchema,
+	parent_listing_id: nullableIdSchema,
 	rating: nullableNumberSchema,
 	reservation_id: nullableIdSchema,
 	value_rating: nullableNumberSchema,
@@ -460,7 +463,13 @@ export const hostifySchemas = {
 	}),
 	review: hostifySuccessSchema.extend({ review: hostifyReviewSchema }),
 	reviews: hostifySuccessSchema.extend({
+		// Present when scoping to a single listing: reviews grouped by the channel
+		// they came from (`airbnb`, `booking`, `internal`, ...). The flat `reviews`
+		// array drops channel labels and unpublished entries, so the sync reads
+		// `channels` instead. Capped per channel by `per_page`.
+		channels: z.record(z.string(), z.array(hostifyReviewSchema)).optional(),
 		reviews: z.array(hostifyReviewSchema),
+		total: nullableNumberSchema,
 	}),
 	search: hostifySuccessSchema.extend({
 		results: z.array(z.looseObject({})).optional(),

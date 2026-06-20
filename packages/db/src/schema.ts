@@ -207,6 +207,7 @@ export const accommodationListing = pgTable(
 			.default(sql`'{}'::text[]`),
 		bathrooms: doublePrecision("bathrooms"),
 		bedrooms: doublePrecision("bedrooms"),
+		beds: doublePrecision("beds"),
 		city: text("city"),
 		country: text("country"),
 		createdAt: timestampWithTimezone("created_at").notNull().defaultNow(),
@@ -318,6 +319,109 @@ export const observabilityEvent = pgTable(
 	],
 );
 
+/**
+ * Individual guest reviews for a listing. `source` discriminates between
+ * reviews mirrored from an external provider (`external`, e.g. Hostify) and
+ * reviews authored inside this app (`internal`). Internal reviews reference the
+ * authoring `user`; external reviews carry the provider's review id in
+ * `externalId`. Aggregates the UI reads from live in `listingReviewSummary`.
+ */
+export const listingReview = pgTable(
+	"listing_review",
+	{
+		id: text("id").primaryKey(),
+		source: text("source").notNull(),
+		// Distribution channel the review originated from (`airbnb`, `booking`,
+		// `internal`, ...). `source` stays the external/internal split; `channel`
+		// records the specific origin so the UI can route back to it.
+		channel: text("channel"),
+		provider: text("provider").notNull(),
+		externalAccountId: text("external_account_id").notNull(),
+		// Provider review id for external reviews; null for internal reviews.
+		externalId: text("external_id"),
+		// Review id on the originating channel (e.g. the Airbnb/Booking review id).
+		channelReviewId: text("channel_review_id"),
+		// Public/parent listing the review is attributed to.
+		listingExternalId: text("listing_external_id").notNull(),
+		// Channel-specific child listing the review actually came from. Hostify
+		// mirrors each channel onto its own child listing under the parent.
+		channelListingExternalId: text("channel_listing_external_id"),
+		reservationId: text("reservation_id"),
+		guestId: text("guest_id"),
+		guestName: text("guest_name"),
+		// Author of an internal review; null for external reviews.
+		userId: text("user_id").references(() => user.id, { onDelete: "set null" }),
+		rating: doublePrecision("rating"),
+		accuracyRating: doublePrecision("accuracy_rating"),
+		checkinRating: doublePrecision("checkin_rating"),
+		cleanRating: doublePrecision("clean_rating"),
+		communicationRating: doublePrecision("communication_rating"),
+		locationRating: doublePrecision("location_rating"),
+		valueRating: doublePrecision("value_rating"),
+		comments: text("comments"),
+		language: text("language"),
+		status: text("status").notNull().default("published"),
+		reviewedAt: timestampWithTimezone("reviewed_at"),
+		raw: jsonb("raw").$type<Record<string, unknown>>(),
+		syncRunId: text("sync_run_id").references(() => providerSyncRun.id, {
+			onDelete: "set null",
+		}),
+		createdAt: timestampWithTimezone("created_at").notNull().defaultNow(),
+		updatedAt: timestampWithTimezone("updated_at").notNull().defaultNow(),
+	},
+	(table) => [
+		// External reviews dedupe on (scope, source, providerReviewId). Internal
+		// reviews keep externalId null; Postgres treats nulls as distinct so they
+		// are never collapsed by this index.
+		uniqueIndex("listing_review_provider_source_external_uidx").on(
+			table.provider,
+			table.externalAccountId,
+			table.source,
+			table.externalId,
+		),
+		index("listing_review_listing_idx").on(
+			table.provider,
+			table.externalAccountId,
+			table.listingExternalId,
+		),
+		index("listing_review_source_idx").on(table.source),
+		index("listing_review_channel_idx").on(
+			table.provider,
+			table.externalAccountId,
+			table.listingExternalId,
+			table.channel,
+		),
+	],
+);
+
+/**
+ * Denormalized per-listing review aggregate the catalog read path joins for the
+ * rating badge. Combines all sources; `externalCount`/`internalCount` keep the
+ * split available so we can show them separately later. Recomputed by the
+ * reviews sync whenever a listing's reviews change.
+ */
+export const listingReviewSummary = pgTable(
+	"listing_review_summary",
+	{
+		id: text("id").primaryKey(),
+		provider: text("provider").notNull(),
+		externalAccountId: text("external_account_id").notNull(),
+		listingExternalId: text("listing_external_id").notNull(),
+		reviewCount: integer("review_count").notNull().default(0),
+		ratingAverage: doublePrecision("rating_average"),
+		externalCount: integer("external_count").notNull().default(0),
+		internalCount: integer("internal_count").notNull().default(0),
+		updatedAt: timestampWithTimezone("updated_at").notNull().defaultNow(),
+	},
+	(table) => [
+		uniqueIndex("listing_review_summary_scope_uidx").on(
+			table.provider,
+			table.externalAccountId,
+			table.listingExternalId,
+		),
+	],
+);
+
 export const schema = {
 	user,
 	session,
@@ -327,4 +431,6 @@ export const schema = {
 	providerSyncState,
 	accommodationListing,
 	observabilityEvent,
+	listingReview,
+	listingReviewSummary,
 };

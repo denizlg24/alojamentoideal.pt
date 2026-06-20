@@ -43,6 +43,27 @@
       "when": 1781880428592,
       "tag": "0005_goofy_fallen_one",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1781949638212,
+      "tag": "0006_magical_lord_hawal",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1781951550146,
+      "tag": "0007_next_exodus",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1781953095943,
+      "tag": "0008_reviews_channel_routing",
+      "breakpoints": true
     }
   ]
 }

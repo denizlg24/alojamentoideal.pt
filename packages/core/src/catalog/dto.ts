@@ -30,7 +30,14 @@ export interface CatalogLocationDto {
 export interface CatalogCapacityDto {
 	bathrooms: number | null;
 	bedrooms: number | null;
+	beds: number | null;
 	guests: number | null;
+}
+
+export interface CatalogReviewsDto {
+	/** Combined average across all sources, or null when there are no ratings. */
+	average: number | null;
+	count: number;
 }
 
 export interface CatalogFreshnessDto {
@@ -51,6 +58,7 @@ export interface CatalogListingSummaryDto {
 	location: CatalogLocationDto;
 	propertyType: string | null;
 	provider: string;
+	reviews: CatalogReviewsDto;
 	title: string;
 }
 
@@ -67,6 +75,7 @@ export interface CatalogListingRecord {
 	active: boolean;
 	bathrooms: number | null;
 	bedrooms: number | null;
+	beds: number | null;
 	city: string | null;
 	country: string | null;
 	externalId: string;
@@ -81,6 +90,8 @@ export interface CatalogListingRecord {
 	provider: string;
 	providerUpdatedAt: Date | null;
 	raw: AccommodationListingRawContent;
+	reviewAverage: number | null;
+	reviewCount: number;
 	staleAfter: Date;
 	timezone: string | null;
 }
@@ -103,6 +114,7 @@ export function toCatalogListingSummary(
 		capacity: {
 			bathrooms: record.bathrooms,
 			bedrooms: record.bedrooms,
+			beds: record.beds,
 			guests: record.personCapacity,
 		},
 		coverPhoto: photos[0] ?? null,
@@ -118,6 +130,10 @@ export function toCatalogListingSummary(
 		},
 		propertyType: record.propertyType,
 		provider: record.provider,
+		reviews: {
+			average: record.reviewCount > 0 ? record.reviewAverage : null,
+			count: record.reviewCount,
+		},
 		title: pickTitle(record, options.locale),
 	};
 }

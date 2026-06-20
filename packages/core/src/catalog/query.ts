@@ -1,4 +1,8 @@
-import { accommodationListing, type Database } from "@workspace/db";
+import {
+	accommodationListing,
+	type Database,
+	listingReviewSummary,
+} from "@workspace/db";
 import {
 	and,
 	arrayContains,
@@ -37,6 +41,7 @@ const RECORD_COLUMNS = {
 	active: accommodationListing.active,
 	bathrooms: accommodationListing.bathrooms,
 	bedrooms: accommodationListing.bedrooms,
+	beds: accommodationListing.beds,
 	city: accommodationListing.city,
 	country: accommodationListing.country,
 	externalId: accommodationListing.externalId,
@@ -54,6 +59,26 @@ const RECORD_COLUMNS = {
 	staleAfter: accommodationListing.staleAfter,
 	timezone: accommodationListing.timezone,
 } as const;
+
+/**
+ * Per-listing review aggregate, left-joined so listings without reviews still
+ * return a zero count. Combines all sources; see `listingReviewSummary`.
+ */
+const REVIEW_COLUMNS = {
+	reviewAverage: listingReviewSummary.ratingAverage,
+	reviewCount: sql<number>`coalesce(${listingReviewSummary.reviewCount}, 0)::int`,
+} as const;
+
+function reviewSummaryJoin(): SQL {
+	return and(
+		eq(listingReviewSummary.provider, accommodationListing.provider),
+		eq(
+			listingReviewSummary.externalAccountId,
+			accommodationListing.externalAccountId,
+		),
+		eq(listingReviewSummary.listingExternalId, accommodationListing.externalId),
+	) as SQL;
+}
 
 export class CatalogRepository {
 	readonly #db: Database;
@@ -73,9 +98,11 @@ export class CatalogRepository {
 		const rows = await this.#db
 			.select({
 				...RECORD_COLUMNS,
+				...REVIEW_COLUMNS,
 				distanceKm: distance ?? sql<number | null>`null`,
 			})
 			.from(accommodationListing)
+			.leftJoin(listingReviewSummary, reviewSummaryJoin())
 			.where(and(...conditions))
 			.orderBy(...this.#orderBy(query, distance))
 			.limit(query.limit)
@@ -106,8 +133,9 @@ export class CatalogRepository {
 		locale: CatalogLocale,
 	): Promise<CatalogListingDetailDto | null> {
 		const [row] = await this.#db
-			.select(RECORD_COLUMNS)
+			.select({ ...RECORD_COLUMNS, ...REVIEW_COLUMNS })
 			.from(accommodationListing)
+			.leftJoin(listingReviewSummary, reviewSummaryJoin())
 			.where(
 				and(
 					eq(accommodationListing.provider, scope.provider),
