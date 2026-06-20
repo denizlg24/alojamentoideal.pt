@@ -18,6 +18,25 @@ env:
 jobs:
   check:
     runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: alojamentoideal
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d alojamentoideal"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      DATABASE_URL: postgres://postgres:postgres@localhost:5432/alojamentoideal
+
     steps:
       - uses: actions/checkout@v6
 
@@ -28,6 +47,13 @@ jobs:
 
       - name: Install dependencies
         run: bun install --frozen-lockfile
+
+      # The root scripts run through dotenv-cli, which expects a root `.env`.
+      - name: Write CI env file
+        run: echo "DATABASE_URL=${DATABASE_URL}" > .env
+
+      - name: Run database migrations
+        run: bun run db:migrate
 
       - name: Lint & format check
         run: bunx biome ci .
