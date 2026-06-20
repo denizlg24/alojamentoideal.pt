@@ -28,6 +28,7 @@ function record(
 		active: true,
 		bathrooms: 1,
 		bedrooms: 2,
+		beds: 3,
 		city: "Porto",
 		country: "PT",
 		externalId: "999",
@@ -62,6 +63,8 @@ function record(
 			status: null,
 			translations: null,
 		},
+		reviewAverage: null,
+		reviewCount: 0,
 		staleAfter: new Date("2026-06-19T00:00:00Z"),
 		timezone: "Europe/Lisbon",
 		...overrides,
@@ -77,7 +80,12 @@ describe("toCatalogListingSummary", () => {
 
 		expect(summary.id).toBe("999");
 		expect(summary.title).toBe("Loft Oceano");
-		expect(summary.capacity).toEqual({ bathrooms: 1, bedrooms: 2, guests: 4 });
+		expect(summary.capacity).toEqual({
+			bathrooms: 1,
+			bedrooms: 2,
+			beds: 3,
+			guests: 4,
+		});
 		expect(summary.location.timezone).toBe("Europe/Lisbon");
 		expect(summary.amenityCount).toBe(1);
 		expect(summary.freshness.isStale).toBe(false);

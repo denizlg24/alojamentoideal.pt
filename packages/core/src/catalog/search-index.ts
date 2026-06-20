@@ -28,7 +28,7 @@ export function buildListingSearchIndex(
 ): ListingSearchIndex {
 	const amenityKeys = uniqueStrings(
 		input.processed.amenities.map(
-			(amenity) => (amenity.id && amenity.id.trim()) || amenity.sourceLabel,
+			(amenity) => amenity.id?.trim() || amenity.sourceLabel,
 		),
 	);
 
