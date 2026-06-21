@@ -354,7 +354,10 @@ export class ListingCacheRepository {
 
 	async isSyncStateComplete(input: SyncStateScopeInput): Promise<boolean> {
 		const state = await this.getSyncState(input);
-		return state?.status === "complete" && state.lastCompletedAt !== null;
+		return (
+			state?.status === "skipped" ||
+			(state?.status === "complete" && state.lastCompletedAt !== null)
+		);
 	}
 
 	/**
