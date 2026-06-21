@@ -302,18 +302,19 @@ export class HostifyListingCacheSync {
 				this.#processor.enabled &&
 				(existing?.processedSourceHash !== projection.sourceHash ||
 					existing?.processingStatus !== "processed");
-			const coordinateRefreshNeeded =
-				existing !== null && coordinatesChanged(existing, projection);
+			const derivedRefreshNeeded =
+				existing !== null && derivedFieldsChanged(existing, projection);
 
-			if (!sourceChanged && !processingNeeded && !coordinateRefreshNeeded) {
+			if (!sourceChanged && !processingNeeded && !derivedRefreshNeeded) {
 				stats.listingsUnchanged += 1;
 				return;
 			}
 
-			if (!sourceChanged && !processingNeeded && coordinateRefreshNeeded) {
+			if (!sourceChanged && !processingNeeded && derivedRefreshNeeded) {
 				const fetchedAt = this.#now();
 				const updated = await this.#repository.refreshListingCoordinates({
 					accountId: this.#config.hostifyAccountId,
+					active: projection.active,
 					externalId: projection.externalId,
 					fetchedAt,
 					latitude: projection.latitude,
@@ -424,7 +425,7 @@ export class HostifyListingCacheSync {
 			description: readField(detail, "description"),
 			details: readField(detail, "details"),
 			fees: readField(fees, "fees"),
-			guestGuide,
+			guestGuide: readGuestGuide(detail, guestGuide),
 			listing: readField(detail, "listing") ?? listingSummary,
 			photos: readField(photos, "photos"),
 			rooms: readField(detail, "rooms"),
@@ -492,17 +493,51 @@ function readField(value: unknown, key: string): unknown {
 	return asRecord(value)[key] ?? null;
 }
 
+function readGuestGuide(detail: unknown, endpointResponse: unknown): unknown {
+	const detailGuide = readField(detail, "guest_guide");
+	if (hasGuideContent(detailGuide)) {
+		return detailGuide;
+	}
+
+	const endpointGuide = readField(endpointResponse, "guest_guide");
+	if (hasGuideContent(endpointGuide)) {
+		return endpointGuide;
+	}
+
+	return hasGuideContent(endpointResponse) ? endpointResponse : null;
+}
+
+function hasGuideContent(value: unknown): boolean {
+	if (typeof value === "string") {
+		return value.trim().length > 0;
+	}
+
+	if (Array.isArray(value)) {
+		return value.some(hasGuideContent);
+	}
+
+	const record = asRecord(value);
+	return Object.entries(record).some(
+		([key, nested]) =>
+			!["env", "listing_id", "success"].includes(key) &&
+			nested !== null &&
+			nested !== undefined &&
+			hasGuideContent(nested),
+	);
+}
+
 function asRecord(value: unknown): Record<string, unknown> {
 	return typeof value === "object" && value !== null && !Array.isArray(value)
 		? (value as Record<string, unknown>)
 		: {};
 }
 
-function coordinatesChanged(
+function derivedFieldsChanged(
 	existing: ListingState,
 	projection: ListingCacheProjection,
 ): boolean {
 	return (
+		existing.active !== projection.active ||
 		!sameNullableNumber(existing.latitude, projection.latitude) ||
 		!sameNullableNumber(existing.longitude, projection.longitude)
 	);

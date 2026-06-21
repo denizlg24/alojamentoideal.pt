@@ -14,7 +14,7 @@ import { stableHash } from "./hash";
  * Pricing and review syncs page-and-upsert without content hashes, so they have
  * no equivalent lever; re-run their crons to refresh them.
  */
-export const LISTING_SYNC_VERSION = 4;
+export const LISTING_SYNC_VERSION = 5;
 
 /** Hash `value` bound to the current {@link LISTING_SYNC_VERSION}. */
 export function versionedHash(value: unknown): string {

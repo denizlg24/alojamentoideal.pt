@@ -12,6 +12,7 @@ import { and, asc, eq, sql } from "drizzle-orm";
 import type { ListingProcessingStatus } from "./processor";
 
 export interface ListingState {
+	active: boolean;
 	latitude: number | null;
 	longitude: number | null;
 	processedSourceHash: string | null;
@@ -57,6 +58,7 @@ export interface UpsertListingInput {
 
 export interface RefreshListingCoordinatesInput {
 	accountId: string;
+	active: boolean;
 	externalId: string;
 	fetchedAt: Date;
 	latitude: number | null;
@@ -394,6 +396,7 @@ export class ListingCacheRepository {
 	): Promise<ListingState | null> {
 		const [row] = await this.#db
 			.select({
+				active: accommodationListing.active,
 				latitude: accommodationListing.latitude,
 				longitude: accommodationListing.longitude,
 				processedSourceHash: accommodationListing.processedSourceHash,
@@ -420,6 +423,7 @@ export class ListingCacheRepository {
 		const [row] = await this.#db
 			.update(accommodationListing)
 			.set({
+				active: input.active,
 				fetchedAt: input.fetchedAt,
 				latitude: input.latitude,
 				longitude: input.longitude,
@@ -434,7 +438,8 @@ export class ListingCacheRepository {
 					eq(accommodationListing.externalAccountId, input.accountId),
 					eq(accommodationListing.externalId, input.externalId),
 					sql`(
-						${accommodationListing.latitude} is distinct from ${input.latitude}
+						${accommodationListing.active} is distinct from ${input.active}
+						or ${accommodationListing.latitude} is distinct from ${input.latitude}
 						or ${accommodationListing.longitude} is distinct from ${input.longitude}
 					)`,
 				),

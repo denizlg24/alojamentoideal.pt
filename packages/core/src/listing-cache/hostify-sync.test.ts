@@ -105,6 +105,92 @@ describe("buildListingCacheProjection amenities", () => {
 	});
 });
 
+describe("buildListingCacheProjection visibility", () => {
+	test("prefers Hostify is_listed over active", () => {
+		const projection = buildListingCacheProjection({
+			amenities: [],
+			description: null,
+			details: null,
+			fees: [],
+			guestGuide: { success: true },
+			listing: { active: true, id: "1", is_listed: 0, name: "Test" },
+			photos: [],
+			rooms: [],
+			status: "Clean",
+			translations: [],
+		});
+
+		expect(projection.active).toBe(false);
+	});
+
+	test("does not treat housekeeping status as listing visibility", () => {
+		const projection = buildListingCacheProjection({
+			amenities: [],
+			description: null,
+			details: null,
+			fees: [],
+			guestGuide: { success: true },
+			listing: { active: true, id: "1", name: "Test" },
+			photos: [],
+			rooms: [],
+			status: "Clean",
+			translations: [],
+		});
+
+		expect(projection.active).toBe(true);
+	});
+});
+
+describe("buildListingCacheProjection description", () => {
+	test("uses summary as the lead and provider translations as localized fallbacks", () => {
+		const projection = buildListingCacheProjection({
+			amenities: [],
+			description: {
+				description: "Long description with extra notes",
+				summary: "Clean summary",
+			},
+			details: null,
+			fees: [],
+			guestGuide: { success: true },
+			listing: { id: "1", name: "Test" },
+			photos: [],
+			rooms: [],
+			status: "Clean",
+			translations: [
+				{ language: "pt", summary: "Resumo limpo" },
+				{ description: "Descripcion limpia", language: "es" },
+			],
+		});
+
+		expect(projection.description).toBe("Clean summary");
+		expect(projection.processedFallback.description).toEqual({
+			en: "Clean summary",
+			es: "Descripcion limpia",
+			pt: "Resumo limpo",
+		});
+	});
+
+	test("uses the first translated summary when the raw description is empty", () => {
+		const projection = buildListingCacheProjection({
+			amenities: [],
+			description: null,
+			details: null,
+			fees: [],
+			guestGuide: null,
+			listing: { id: "1", name: "Test" },
+			photos: [],
+			rooms: [],
+			status: "Clean",
+			translations: [{ language: "pt", summary: "Resumo disponível" }],
+		});
+
+		expect(projection.description).toBe("Resumo disponível");
+		expect(projection.processedFallback.description.en).toBe(
+			"Resumo disponível",
+		);
+	});
+});
+
 describe("HostifyListingCacheSync.pollListings", () => {
 	test("processes one page and advances the cursor", async () => {
 		const repository = new FakeListingCacheRepository();
@@ -158,7 +244,7 @@ describe("HostifyListingCacheSync.pollListings", () => {
 			description: null,
 			details: null,
 			fees: [],
-			guestGuide: { success: true },
+			guestGuide: null,
 			listing: hostifyListing,
 			photos: [],
 			rooms: null,
@@ -167,6 +253,7 @@ describe("HostifyListingCacheSync.pollListings", () => {
 		});
 		const repository = new FakeListingCacheRepository();
 		repository.listingStates.set("1", {
+			active: true,
 			latitude: null,
 			longitude: null,
 			processedSourceHash: null,
@@ -189,6 +276,45 @@ describe("HostifyListingCacheSync.pollListings", () => {
 		expect(repository.coordinateRefreshes[0]?.longitude).toBe(-8.6291);
 	});
 
+	test("refreshes active state when listed visibility changes but source hash is unchanged", async () => {
+		const hostifyListing = listing("1", { is_listed: 0 });
+		const projection = buildListingCacheProjection({
+			amenities: [],
+			description: null,
+			details: null,
+			fees: [],
+			guestGuide: null,
+			listing: hostifyListing,
+			photos: [],
+			rooms: null,
+			status: "Clean",
+			translations: [],
+		});
+		const repository = new FakeListingCacheRepository();
+		repository.listingStates.set("1", {
+			active: true,
+			latitude: null,
+			longitude: null,
+			processedSourceHash: null,
+			processingStatus: "skipped",
+			sourceHash: projection.sourceHash,
+		});
+		const client = new FakeHostifyClient({
+			1: [hostifyListing],
+		});
+		const sync = createSync({ client, repository });
+
+		const result = await sync.pollListings("poll");
+
+		expect(result.status).toBe("completed");
+		expect(result.data?.changedExternalIds).toEqual(["1"]);
+		expect(result.data?.listingsUpdated).toBe(1);
+		expect(repository.upserts).toHaveLength(0);
+		expect(repository.coordinateRefreshes).toHaveLength(1);
+		expect(repository.coordinateRefreshes[0]?.active).toBe(false);
+		expect(repository.listingStates.get("1")?.active).toBe(false);
+	});
+
 	test("captures related detail siblings in the raw listing cache", async () => {
 		const repository = new FakeListingCacheRepository();
 		const client = new FakeHostifyClient({
@@ -199,11 +325,24 @@ describe("HostifyListingCacheSync.pollListings", () => {
 			description: {
 				description: "Detail sibling description",
 				house_rules: { quiet_hours: "22:00" },
+				summary: "Detail sibling summary",
 			},
 			details: {
 				floor: 2,
 				wireless_password: "should not be persisted",
 				wireless_ssid: "Guest Wifi",
+			},
+			guest_guide: {
+				area_guide: {
+					description: "Explore the best nearby cafes",
+					name: "Area guide",
+					places: [
+						{
+							description: "Great coffee and pastries",
+							name: "Corner Cafe",
+						},
+					],
+				},
 			},
 			rooms: [
 				{
@@ -224,16 +363,35 @@ describe("HostifyListingCacheSync.pollListings", () => {
 			{ guest_guide: 1, id: "1", include_related_objects: 1 },
 		]);
 		const upsert = repository.upserts[0];
-		expect(upsert?.normalized.description).toBe("Detail sibling description");
-		expect(upsert?.processed.description.en).toBe("Detail sibling description");
+		expect(upsert?.normalized.description).toBe("Detail sibling summary");
+		expect(upsert?.processed.description.en).toBe("Detail sibling summary");
 		expect(upsert?.raw.description).toEqual({
 			description: "Detail sibling description",
 			house_rules: { quiet_hours: "22:00" },
+			summary: "Detail sibling summary",
 		});
 		expect(upsert?.raw.details).toEqual({
 			floor: 2,
 			wireless_ssid: "Guest Wifi",
 		});
+		expect(upsert?.raw.guestGuide).toEqual({
+			area_guide: {
+				description: "Explore the best nearby cafes",
+				name: "Area guide",
+				places: [
+					{
+						description: "Great coffee and pastries",
+						name: "Corner Cafe",
+					},
+				],
+			},
+		});
+		expect(upsert?.processed.guide.en).toContain(
+			"area_guide.description: Explore the best nearby cafes",
+		);
+		expect(upsert?.processed.guide.en).toContain(
+			"area_guide.places[0].description: Great coffee and pastries",
+		);
 		expect(upsert?.raw.rooms).toEqual([
 			{
 				beds: [{ count: 1, type: "Queen bed" }],
@@ -402,6 +560,7 @@ class FakeListingCacheRepository {
 		if (state) {
 			this.listingStates.set(input.externalId, {
 				...state,
+				active: input.active,
 				latitude: input.latitude,
 				longitude: input.longitude,
 			});
