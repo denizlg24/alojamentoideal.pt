@@ -36,7 +36,7 @@ export function getListingReviewSyncConfig(
 			environment.HOSTIFY_REVIEW_SYNC_BATCH_SIZE,
 			1,
 			100,
-			50,
+			10,
 		),
 		cronSecret: environment.HOSTIFY_SYNC_CRON_SECRET ?? environment.CRON_SECRET,
 		hostifyAccountId: environment.HOSTIFY_ACCOUNT_ID ?? "default",
