@@ -28,6 +28,38 @@ const baseConfig: ListingCacheConfig = {
 	syncPerPage: 50,
 };
 
+describe("buildListingCacheProjection amenities", () => {
+	test("maps amenities from the detail sibling array, not the listing object", () => {
+		const projection = buildListingCacheProjection({
+			amenities: [
+				{ id: 46, target_id: 4, name: "Air conditioning" },
+				{ id: 9, target_id: 88, name: "Fire extinguisher" },
+			],
+			description: null,
+			details: null,
+			fees: [],
+			guestGuide: { success: true },
+			// The listing object itself carries no amenities (Hostify returns them
+			// only as an include_related_objects sibling), so this must not be the
+			// extraction source.
+			listing: { id: "1", name: "Test", sync_amenities: null },
+			photos: [],
+			rooms: [],
+			status: "Clean",
+			translations: [],
+		});
+
+		const amenities = projection.processedFallback.amenities;
+		expect(amenities.map((amenity) => amenity.id)).toEqual(["46", "9"]);
+		expect(amenities.map((amenity) => amenity.sourceLabel)).toEqual([
+			"Air conditioning",
+			"Fire extinguisher",
+		]);
+		expect(amenities[0]?.icon.name).toBe("FaSnowflake");
+		expect(amenities[0]?.labels.en).toBe("Air conditioning");
+	});
+});
+
 describe("HostifyListingCacheSync.pollListings", () => {
 	test("processes one page and advances the cursor", async () => {
 		const repository = new FakeListingCacheRepository();
@@ -77,10 +109,14 @@ describe("HostifyListingCacheSync.pollListings", () => {
 			longitude: -8.6291,
 		});
 		const projection = buildListingCacheProjection({
+			amenities: [],
+			description: null,
+			details: null,
 			fees: [],
 			guestGuide: { success: true },
 			listing: hostifyListing,
 			photos: [],
+			rooms: null,
 			status: "Clean",
 			translations: [],
 		});
@@ -106,6 +142,65 @@ describe("HostifyListingCacheSync.pollListings", () => {
 		expect(repository.coordinateRefreshes).toHaveLength(1);
 		expect(repository.coordinateRefreshes[0]?.latitude).toBe(41.1579);
 		expect(repository.coordinateRefreshes[0]?.longitude).toBe(-8.6291);
+	});
+
+	test("captures related detail siblings in the raw listing cache", async () => {
+		const repository = new FakeListingCacheRepository();
+		const client = new FakeHostifyClient({
+			1: [listing("1")],
+		});
+		client.detailSiblings.set("1", {
+			amenities: [{ id: 46, name: "Air conditioning" }],
+			description: {
+				description: "Detail sibling description",
+				house_rules: { quiet_hours: "22:00" },
+			},
+			details: {
+				floor: 2,
+				wireless_password: "should not be persisted",
+				wireless_ssid: "Guest Wifi",
+			},
+			rooms: [
+				{
+					beds: [{ count: 1, type: "Queen bed" }],
+					name: "Bedroom",
+					person_capacity: 2,
+					room_type: "Bedroom",
+					shared: 0,
+				},
+			],
+		});
+		const sync = createSync({ client, repository });
+
+		const result = await sync.pollListings("poll");
+
+		expect(result.status).toBe("completed");
+		expect(client.getQueries).toEqual([
+			{ guest_guide: 1, id: "1", include_related_objects: 1 },
+		]);
+		const upsert = repository.upserts[0];
+		expect(upsert?.normalized.description).toBe("Detail sibling description");
+		expect(upsert?.processed.description.en).toBe("Detail sibling description");
+		expect(upsert?.raw.description).toEqual({
+			description: "Detail sibling description",
+			house_rules: { quiet_hours: "22:00" },
+		});
+		expect(upsert?.raw.details).toEqual({
+			floor: 2,
+			wireless_ssid: "Guest Wifi",
+		});
+		expect(upsert?.raw.rooms).toEqual([
+			{
+				beds: [{ count: 1, type: "Queen bed" }],
+				name: "Bedroom",
+				person_capacity: 2,
+				room_type: "Bedroom",
+				shared: 0,
+			},
+		]);
+		expect(upsert?.processed.amenities[0]?.sourceLabel).toBe(
+			"Air conditioning",
+		);
 	});
 });
 
@@ -151,9 +246,24 @@ function listing(
 }
 
 class FakeHostifyClient {
+	readonly detailSiblings = new Map<string, Record<string, unknown>>();
+	readonly getQueries: Array<{
+		guest_guide?: 0 | 1;
+		id: string;
+		include_related_objects?: 0 | 1;
+	}> = [];
 	readonly listQueries: Array<{ page: number; per_page: number }> = [];
 	readonly listings = {
-		get: async (id: string) => ({ listing: this.findListing(id) }),
+		get: async (
+			id: string,
+			query: { guest_guide?: 0 | 1; include_related_objects?: 0 | 1 } = {},
+		) => {
+			this.getQueries.push({ id, ...query });
+			return {
+				listing: this.findListing(id),
+				...this.detailSiblings.get(id),
+			};
+		},
 		getFees: async () => ({ fees: [] }),
 		getGuestGuide: async () => ({ success: true }),
 		getPhotos: async () => ({ photos: [] }),

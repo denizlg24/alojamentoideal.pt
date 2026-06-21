@@ -43,6 +43,8 @@ function record(
 		provider: "hostify",
 		providerUpdatedAt: new Date("2026-06-17T00:00:00Z"),
 		raw: {
+			description: null,
+			details: null,
 			fees: null,
 			guestGuide: null,
 			listing: {},
@@ -59,6 +61,16 @@ function record(
 					thumbnail: null,
 				},
 				{ caption: "no url" },
+			],
+			rooms: [
+				{
+					beds: [{ count: 1, type: "Double bed" }],
+					name: "Bedroom",
+					person_capacity: 2,
+					room_type: "Bedroom",
+					shared: 0,
+				},
+				{ name: "Full bathroom", room_type: "Bathroom", shared: 0 },
 			],
 			status: null,
 			translations: null,
@@ -108,10 +120,13 @@ describe("toCatalogListingSummary", () => {
 			record({
 				propertyType: null,
 				raw: {
+					description: null,
+					details: null,
 					fees: null,
 					guestGuide: null,
 					listing: { property_type: "studio" },
 					photos: [],
+					rooms: [],
 					status: null,
 					translations: null,
 				},
@@ -127,10 +142,13 @@ describe("toCatalogListingSummary", () => {
 			record({
 				propertyType: null,
 				raw: {
+					description: null,
+					details: null,
 					fees: null,
 					guestGuide: null,
 					listing: { property_type_id: 1 },
 					photos: [],
+					rooms: [],
 					status: null,
 					translations: null,
 				},
@@ -146,10 +164,13 @@ describe("toCatalogListingSummary", () => {
 			record({
 				propertyType: null,
 				raw: {
+					description: null,
+					details: null,
 					fees: null,
 					guestGuide: null,
 					listing: { property_type_id: 6 },
 					photos: [],
+					rooms: [],
 					status: null,
 					translations: null,
 				},
@@ -207,7 +228,7 @@ describe("toCatalogListingSummary", () => {
 });
 
 describe("toCatalogListingDetail", () => {
-	test("includes localized content, amenities and sorted photos", () => {
+	test("includes localized content, amenities, sorted photos and rooms", () => {
 		const detail = toCatalogListingDetail(record(), { locale: "pt" });
 
 		expect(detail.description).toBe("Descricao PT");
@@ -222,6 +243,22 @@ describe("toCatalogListingDetail", () => {
 		expect(detail.photos.map((photo) => photo.url)).toEqual([
 			"https://cdn/a.jpg",
 			"https://cdn/b.jpg",
+		]);
+		expect(detail.rooms).toEqual([
+			{
+				beds: [{ count: 1, type: "Double bed" }],
+				capacity: 2,
+				name: "Bedroom",
+				shared: false,
+				type: "Bedroom",
+			},
+			{
+				beds: [],
+				capacity: null,
+				name: "Full bathroom",
+				shared: false,
+				type: "Bathroom",
+			},
 		]);
 	});
 

@@ -26,10 +26,12 @@ const tsvector = customType<{ data: string; driverData: string }>({
 export interface ListingSectionHashes {
 	amenities: string;
 	description: string;
+	details: string;
 	fees: string;
 	guide: string;
 	location: string;
 	photos: string;
+	rooms: string;
 	status: string;
 	title: string;
 	translations: string;
@@ -69,10 +71,16 @@ export interface AccommodationListingNormalizedContent {
 }
 
 export interface AccommodationListingRawContent {
+	/** Rich description sibling (`{ description, name, house_rules, ... }`). */
+	description: unknown;
+	/** Structured facts sibling (`{ floor, area, wireless_ssid, ... }`). */
+	details: unknown;
 	fees: unknown;
 	guestGuide: unknown;
 	listing: unknown;
 	photos: unknown;
+	/** Per-room breakdown (`{ name, room_type, person_capacity, beds[] }`). */
+	rooms: unknown;
 	status: unknown;
 	translations: unknown;
 }

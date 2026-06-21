@@ -236,6 +236,11 @@ export interface HostifyIntegrationListQuery
 export interface HostifyGetListingQuery {
 	guest_guide?: HostifyBoolean;
 	include_owner_contract?: HostifyBoolean;
+	/**
+	 * Returns related collections (amenities, rooms, host, ...) as siblings of
+	 * `listing` in the response. Required to read a listing's amenities.
+	 */
+	include_related_objects?: HostifyBoolean;
 }
 
 export interface HostifyListingListQuery
