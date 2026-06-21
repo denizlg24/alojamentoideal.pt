@@ -4,15 +4,15 @@ This is the recommended build order for Alojamento Ideal as an end-to-end app.
 The goal is to move from backend foundations to a usable customer booking flow,
 then into operations, automation, and polish.
 
-## Status (as of 2026-06-19)
+## Status (as of 2026-06-21)
 
 Legend: ✅ done · 🟡 in progress / partial · ⬜ not started
 
 | # | Milestone | Status | Notes |
 |---|---|---|---|
 | 0 | Foundations (cache, sync, platform) | ✅ | Hostify incremental sync cron, content processing, and the `accommodation_listing` projection with FTS + trigram + geo search index. Rate limiting (Redis) and observability (Sentry errors + PostgreSQL analytics) wired through `withApiRoute`. |
-| 1 | Catalog Browsing | 🟡 | Catalog read API done: `GET /api/catalog/listings` (filter/sort/paginate) and `/api/catalog/listings/[externalId]` (localized detail), with Next.js `use cache` + cron-driven `revalidateTag` invalidation. Visitor-facing frontend (listing grid, filters, detail page) **not built**. |
-| 2 | Live Availability and Quote | ⬜ | Needs live Hostify price/availability revalidation and short-lived quote storage. |
+| 1 | Catalog Browsing | 🟡 | Catalog read API done: `GET /api/catalog/listings` (filter/sort/paginate) and `/api/catalog/listings/[externalId]` (localized detail), with Next.js `use cache` + cron-driven `revalidateTag` invalidation. Frontend: `/homes` grid, filter bar (dates/guests/rooms/rating/amenities), and Leaflet map shipped. Detail page and broader polish still pending. |
+| 2 | Live Availability and Quote | 🟡 | Browsing half done: homes availability filtering and the "from X for Y nights" base-price estimate are served from the synced nightly calendar in Postgres (`AccommodationPricingRepository.availabilityForStay`), so no Hostify call sits on the grid. Remaining: live Hostify price/availability revalidation at checkout and short-lived quote storage (see Debt: always re-validate before booking). |
 | 3 | Cart and Checkout Shell | ⬜ | Draft order from quote; no provider side effects yet. |
 | 4 | Payment Foundation | ⬜ | Stripe PaymentIntent from server-side order total; payment attempts + idempotency. |
 | 5 | Provider Reservation Saga | ⬜ | Durable Hostify reservation confirm/compensate workflow. |
@@ -25,6 +25,54 @@ Legend: ✅ done · 🟡 in progress / partial · ⬜ not started
 
 Current focus: finish milestone 1 by building the catalog browsing frontend on
 top of the stable catalog read API.
+
+## Technical Notes and Debt
+
+Running list of known shortcuts and follow-ups noticed during implementation.
+Keep this honest: when a debt item is paid, move the detail into the relevant
+milestone and delete it here.
+
+### Done in the DB-backed homes search iteration (2026-06-21)
+
+- ✅ Homes grid no longer calls Hostify. Date-aware availability and the base
+  price estimate come from the synced `accommodation_listing_night` calendar via
+  `AccommodationPricingRepository.availabilityForStay`. The live Hostify
+  availability and quote services remain only on their own routes
+  (`/api/accommodations/availability`, `/api/accommodations/quote`).
+- ✅ Listing cards show "from {total} for {nights} nights" (base-price estimate),
+  falling back to the advisory "from {nightly}" rate when a stay is not fully
+  priced.
+- ✅ Single-listing resync hook in place: `NightlyPriceSync.syncListing` and the
+  from-env `resyncAccommodationListing(listingId)` so a future webhook can
+  refresh one listing without a full nightly run.
+- ✅ Filter UX: `useTransition`-based pending (previous results stay visible and
+  dim instead of a skeleton swap); guests commit-on-close; dates only commit a
+  real multi-night range; mobile search collapses to a Filters button with
+  collapsible When/Who sections.
+
+### Open debt
+
+- ⬜ **Always fetch live Hostify price + availability before booking.** The grid
+  estimate excludes cleaning/extra-person fees and taxes and can be stale.
+  Checkout (and ideally the detail page) must re-quote and re-validate
+  availability against Hostify before payment, and fail gracefully if the stay
+  is no longer bookable. Non-negotiable before milestone 4/5.
+- ⬜ **Hostify reservation webhook → cache invalidation.** Build the webhook
+  endpoint that calls `resyncAccommodationListing(listingId)` so out-of-band
+  bookings (other channels/OTAs) correct our availability without waiting for
+  the nightly sync. Confirm Hostify's webhook payload covers OTA bookings, not
+  just direct ones.
+- ⬜ **Availability freshness cadence.** Now that availability is fully
+  DB-driven, revisit the nightly horizon/frequency. Consider a more frequent
+  near-term refresh (e.g. next ~90 days every few hours) since bookings cluster
+  there and staleness hurts most; the webhook is the primary freshness signal
+  once it lands.
+- ⬜ **Estimate accuracy / min-stay.** `availabilityForStay` checks only the
+  arrival-night `min_stay` and treats a stay as priced only when every night has
+  a price; revisit if Hostify expresses min-stay or gap rules differently.
+- ⬜ **Search API response shape.** `GET /api/accommodations/search` dropped
+  `page.availabilityCache` and no longer honors `quoteVisible`/`forceFresh`
+  (grid is DB-backed). Update any external consumers if they exist.
 
 ## 1. Catalog Browsing
 

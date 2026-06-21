@@ -4,6 +4,7 @@ import type {
 	LocalizedText,
 	ProcessedAmenity,
 } from "@workspace/db";
+import { hostifyPropertyTypeLabel } from "../hostify-property-types";
 import type { CatalogLocale } from "./params";
 
 export interface CatalogAmenityDto {
@@ -128,7 +129,7 @@ export function toCatalogListingSummary(
 			longitude: record.longitude,
 			timezone: record.timezone,
 		},
-		propertyType: record.propertyType,
+		propertyType: pickPropertyType(record),
 		provider: record.provider,
 		reviews: {
 			average: record.reviewCount > 0 ? record.reviewAverage : null,
@@ -177,6 +178,33 @@ function toAmenity(
 		key: amenity.id ?? amenity.sourceLabel,
 		label: pickLocalized(amenity.labels, locale) || amenity.sourceLabel,
 	};
+}
+
+function pickPropertyType(record: CatalogListingRecord): string | null {
+	return (
+		record.propertyType ??
+		readRawListingString(record.raw, "property_type") ??
+		readRawListingString(record.raw, "property_type_group") ??
+		hostifyPropertyTypeLabel(
+			readRawListingString(record.raw, "property_type_id"),
+		)
+	);
+}
+
+function readRawListingString(
+	raw: AccommodationListingRawContent,
+	key: string,
+): string | null {
+	const listing = raw.listing;
+	if (!isRecord(listing)) return null;
+
+	const value = listing[key];
+	if (typeof value === "string") return readString(value);
+	if (typeof value === "number" || typeof value === "boolean") {
+		return readString(String(value));
+	}
+
+	return null;
 }
 
 function pickTitle(

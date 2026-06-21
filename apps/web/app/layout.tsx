@@ -1,6 +1,19 @@
 import "@workspace/ui/globals.css";
 import type { Metadata, Viewport } from "next";
+import { Bricolage_Grotesque, Hanken_Grotesk } from "next/font/google";
 import { siteConfig } from "@/lib/site/config";
+
+const fontSans = Hanken_Grotesk({
+	subsets: ["latin"],
+	variable: "--font-sans",
+	display: "swap",
+});
+
+const fontDisplay = Bricolage_Grotesque({
+	subsets: ["latin"],
+	variable: "--font-display",
+	display: "swap",
+});
 
 export const metadata: Metadata = {
 	metadataBase: new URL(siteConfig.url),
@@ -47,7 +60,7 @@ export default function RootLayout({
 	children: React.ReactNode;
 }>) {
 	return (
-		<html lang="en">
+		<html lang="en" className={`${fontSans.variable} ${fontDisplay.variable}`}>
 			<body>{children}</body>
 		</html>
 	);

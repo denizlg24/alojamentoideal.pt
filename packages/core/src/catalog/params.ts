@@ -9,6 +9,8 @@ export const CATALOG_SORTS = [
 	"recent",
 	"capacity",
 	"name",
+	"price_asc",
+	"price_desc",
 ] as const;
 export type CatalogSort = (typeof CATALOG_SORTS)[number];
 
@@ -32,8 +34,11 @@ export interface CatalogListQuery {
 	locale: CatalogLocale;
 	minGuests: number | null;
 	offset: number;
+	priceMax: number | null;
+	priceMin: number | null;
 	propertyType: string | null;
 	radius: CatalogRadius | null;
+	ratingMin: number | null;
 	sort: CatalogSort;
 	text: string | null;
 }
@@ -65,9 +70,12 @@ const baseSchema = z.object({
 	lng: longitude.optional(),
 	minGuests: z.coerce.number().int().min(1).optional(),
 	offset: z.coerce.number().int().min(0).optional(),
+	priceMax: z.coerce.number().min(0).optional(),
+	priceMin: z.coerce.number().min(0).optional(),
 	propertyType: optionalText,
 	q: optionalText,
 	radiusKm: radiusKm.optional(),
+	ratingMin: z.coerce.number().min(0).max(5).optional(),
 	sort: z.enum(CATALOG_SORTS).optional(),
 });
 
@@ -110,9 +118,12 @@ export function parseCatalogListQuery(
 		lng: searchParams.get("lng") ?? undefined,
 		minGuests: searchParams.get("guests") ?? undefined,
 		offset: searchParams.get("offset") ?? undefined,
+		priceMax: searchParams.get("priceMax") ?? undefined,
+		priceMin: searchParams.get("priceMin") ?? undefined,
 		propertyType: searchParams.get("propertyType") ?? undefined,
 		q: searchParams.get("q") ?? undefined,
 		radiusKm: searchParams.get("radiusKm") ?? undefined,
+		ratingMin: searchParams.get("ratingMin") ?? undefined,
 		sort: searchParams.get("sort") ?? undefined,
 	});
 
@@ -140,8 +151,11 @@ export function parseCatalogListQuery(
 			locale: value.lang ?? "en",
 			minGuests: value.minGuests ?? null,
 			offset: value.offset ?? 0,
+			priceMax: value.priceMax ?? null,
+			priceMin: value.priceMin ?? null,
 			propertyType: value.propertyType,
 			radius,
+			ratingMin: value.ratingMin ?? null,
 			sort:
 				value.sort ?? (value.q ? "relevance" : radius ? "distance" : "recent"),
 			text: value.q,
