@@ -13,9 +13,10 @@ import {
 import { cn } from "@workspace/ui/lib/utils";
 import { Search } from "lucide-react";
 import { useMemo } from "react";
+import { findLocationPreset } from "@/lib/catalog/locations";
 import { DateRangeField, StayCalendar } from "./date-range";
 import { GuestFields, GuestSelector } from "./guest-selector";
-import { LocationField } from "./location-field";
+import { LocationSelect } from "./location-select";
 import { useStaySearch } from "./use-stay-search";
 
 export function StaySearch({ className }: { className?: string }) {
@@ -24,6 +25,7 @@ export function StaySearch({ className }: { className?: string }) {
 		() => ({ adults: state.adults, children: state.children }),
 		[state.adults, state.children],
 	);
+	const placeLabel = findLocationPreset(state.place)?.label ?? "Anywhere";
 
 	return (
 		<>
@@ -37,10 +39,10 @@ export function StaySearch({ className }: { className?: string }) {
 					className,
 				)}
 			>
-				<LocationField
+				<LocationSelect
 					className="flex-[1.3]"
-					value={state.location}
-					onChange={(location) => update({ location })}
+					value={state.place}
+					onChange={(place) => update({ place })}
 				/>
 				<Separator orientation="vertical" className="h-8" />
 				<DateRangeField
@@ -79,7 +81,7 @@ export function StaySearch({ className }: { className?: string }) {
 								Search stays
 							</span>
 							<span className="text-muted-foreground text-xs">
-								{state.location || "Anywhere"} · {guestTotal}{" "}
+								{placeLabel} · {guestTotal}{" "}
 								{guestTotal === 1 ? "guest" : "guests"}
 							</span>
 						</span>
@@ -94,9 +96,9 @@ export function StaySearch({ className }: { className?: string }) {
 					</SheetHeader>
 					<div className="flex flex-col gap-5 px-4 pb-6">
 						<div className="rounded-xl border py-2">
-							<LocationField
-								value={state.location}
-								onChange={(location) => update({ location })}
+							<LocationSelect
+								value={state.place}
+								onChange={(place) => update({ place })}
 							/>
 						</div>
 

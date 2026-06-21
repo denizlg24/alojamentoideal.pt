@@ -38,8 +38,11 @@ export async function getFeaturedListings(
 		locale: "en",
 		minGuests: null,
 		offset: 0,
+		priceMax: null,
+		priceMin: null,
 		propertyType: null,
 		radius: null,
+		ratingMin: null,
 		sort: "recent",
 		text: null,
 	};

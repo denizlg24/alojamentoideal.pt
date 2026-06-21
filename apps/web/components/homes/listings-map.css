@@ -1,0 +1,31 @@
+/* Keep Leaflet's high internal pane z-indexes inside the map box so Radix
+   portals such as sheets and selects can stack above it on mobile. */
+.leaflet-container {
+	isolation: isolate;
+	z-index: 0;
+}
+
+/* Turn the default Leaflet popup bubble into a clean listing card. */
+.leaflet-popup.listing-popup .leaflet-popup-content-wrapper {
+	padding: 0;
+	overflow: hidden;
+	border-radius: 0.875rem;
+	border: 1px solid var(--border);
+	box-shadow: 0 12px 32px rgb(0 0 0 / 0.18);
+}
+
+.leaflet-popup.listing-popup .leaflet-popup-content {
+	margin: 0;
+	line-height: normal;
+}
+
+.leaflet-popup.listing-popup .leaflet-popup-content-wrapper,
+.leaflet-popup.listing-popup .leaflet-popup-tip {
+	background: var(--card);
+	color: var(--card-foreground);
+}
+
+.leaflet-popup.listing-popup a {
+	color: inherit;
+	text-decoration: none;
+}

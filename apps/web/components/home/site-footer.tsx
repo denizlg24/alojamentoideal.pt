@@ -92,7 +92,7 @@ export function SiteFooter() {
 						<Image
 							src={livroReclamacoes}
 							alt="Livro de Reclamações"
-							className="h-auto w-[135px] max-w-full"
+							className="h-auto w-33.75 max-w-full"
 						/>
 					</a>
 				</div>
