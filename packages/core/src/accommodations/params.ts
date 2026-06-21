@@ -27,8 +27,10 @@ export interface AvailabilityRequest {
 }
 
 export interface QuoteRequest extends AvailabilityRequest {
+	accountId?: string;
 	listingId: string;
 	pets: number;
+	providerId?: string;
 }
 
 export interface SearchRequest extends AvailabilityRequest {

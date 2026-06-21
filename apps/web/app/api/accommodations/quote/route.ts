@@ -6,6 +6,7 @@ import {
 import { createHostifyClientFromEnv } from "@workspace/core/integrations/hostify";
 import { getRedis } from "@workspace/core/redis";
 import { withApiRoute } from "@/lib/api/route";
+import { HOSTIFY_PROVIDER } from "@/lib/catalog/constants";
 
 export const POST = withApiRoute(
 	{ name: "accommodations.quote", rateLimit: { bucket: "default" } },
@@ -33,7 +34,11 @@ export const POST = withApiRoute(
 			redis: getRedis(),
 			ttlSeconds: parsed.data.forceFresh ? 0 : config.quoteCacheTtlSeconds,
 		});
-		const result = await service.quote(parsed.data);
+		const result = await service.quote({
+			...parsed.data,
+			accountId: config.hostifyAccountId,
+			providerId: HOSTIFY_PROVIDER,
+		});
 
 		return Response.json({ data: result });
 	},
