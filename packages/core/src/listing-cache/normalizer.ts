@@ -5,6 +5,7 @@ import type {
 	LocalizedText,
 	ProcessedAmenity,
 } from "@workspace/db";
+import { hostifyPropertyTypeLabel } from "../hostify-property-types";
 import { AMENITY_ICON_SET, pickAmenityIcon } from "./amenity-icons";
 import { sanitizeProviderPayload, stableHash } from "./hash";
 
@@ -81,8 +82,8 @@ export function buildListingCacheProjection(
 			address: readString(listing, "address"),
 			city: readString(listing, "city"),
 			country: readString(listing, "country"),
-			latitude: readNumber(listing, "latitude"),
-			longitude: readNumber(listing, "longitude"),
+			latitude: readNumberFrom(listing, ["lat", "latitude"]),
+			longitude: readNumberFrom(listing, ["lng", "longitude"]),
 			state: readString(listing, "state"),
 			timezone: readString(listing, "timezone"),
 			zipcode: readScalarString(listing, "zipcode"),
@@ -105,8 +106,8 @@ export function buildListingCacheProjection(
 		country: readString(listing, "country"),
 		description,
 		externalId: readRequiredId(listing),
-		latitude: readNumber(listing, "latitude"),
-		longitude: readNumber(listing, "longitude"),
+		latitude: readNumberFrom(listing, ["lat", "latitude"]),
+		longitude: readNumberFrom(listing, ["lng", "longitude"]),
 		name: readString(listing, "name"),
 		nickname: readString(listing, "nickname"),
 		normalized,
@@ -118,7 +119,9 @@ export function buildListingCacheProjection(
 			model: null,
 			title: repeatLocalized(title),
 		},
-		propertyType: readString(listing, "property_type"),
+		propertyType:
+			readScalarString(listing, "property_type") ??
+			hostifyPropertyTypeLabel(readScalarString(listing, "property_type_id")),
 		providerUpdatedAt: readDate(listing, [
 			"updated_at",
 			"updatedAt",
@@ -305,6 +308,18 @@ function readBoolean(
 		}
 	}
 
+	return null;
+}
+
+/** First non-null numeric value across the given keys, in priority order. */
+function readNumberFrom(
+	record: Record<string, unknown>,
+	keys: string[],
+): number | null {
+	for (const key of keys) {
+		const value = readNumber(record, key);
+		if (value !== null) return value;
+	}
 	return null;
 }
 
