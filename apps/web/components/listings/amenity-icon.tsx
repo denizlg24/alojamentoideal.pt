@@ -190,13 +190,15 @@ const AMENITY_ICONS: Record<AmenityIconName, IconType> = {
 	FaWineGlass,
 };
 
+const DEFAULT_AMENITY_ICON = FaBellConcierge;
+
 export function AmenityIcon({
 	className,
 	name,
 }: {
 	className?: string;
-	name: AmenityIconName;
+	name: string;
 }) {
-	const Icon = AMENITY_ICONS[name];
+	const Icon = AMENITY_ICONS[name as AmenityIconName] ?? DEFAULT_AMENITY_ICON;
 	return <Icon className={className} aria-hidden />;
 }

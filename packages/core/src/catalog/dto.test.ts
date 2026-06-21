@@ -101,6 +101,14 @@ describe("toCatalogListingSummary", () => {
 		expect(summary.location.timezone).toBe("Europe/Lisbon");
 		expect(summary.propertyType).toBe("apartment");
 		expect(summary.amenityCount).toBe(1);
+		expect(summary.amenities).toEqual([
+			{
+				icon: { name: "wifi", set: "fa6" },
+				id: "12",
+				key: "12",
+				label: "Internet",
+			},
+		]);
 		expect(summary.freshness.isStale).toBe(false);
 		expect(summary.freshness.active).toBe(true);
 		expect(summary.reviews).toEqual({

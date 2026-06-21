@@ -63,6 +63,7 @@ export interface CatalogFreshnessDto {
 }
 
 export interface CatalogListingSummaryDto {
+	amenities: CatalogAmenityDto[];
 	amenityCount: number;
 	capacity: CatalogCapacityDto;
 	coverPhoto: CatalogPhotoDto | null;
@@ -77,7 +78,6 @@ export interface CatalogListingSummaryDto {
 }
 
 export interface CatalogListingDetailDto extends CatalogListingSummaryDto {
-	amenities: CatalogAmenityDto[];
 	description: string;
 	guide: string;
 	nickname: string | null;
@@ -125,6 +125,9 @@ export function toCatalogListingSummary(
 	const photos = extractPhotos(record.raw);
 
 	return {
+		amenities: record.processed.amenities.map((amenity) =>
+			toAmenity(amenity, options.locale),
+		),
 		amenityCount: record.processed.amenities.length,
 		capacity: {
 			bathrooms: record.bathrooms,
@@ -159,9 +162,6 @@ export function toCatalogListingDetail(
 ): CatalogListingDetailDto {
 	return {
 		...toCatalogListingSummary(record, options),
-		amenities: record.processed.amenities.map((amenity) =>
-			toAmenity(amenity, options.locale),
-		),
 		description: pickLocalized(record.processed.description, options.locale),
 		guide: pickLocalized(record.processed.guide, options.locale),
 		nickname: record.nickname,

@@ -17,6 +17,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { Suspense } from "react";
 import type { ListingCardPrice } from "@/lib/catalog/pricing-display";
+import { ListingAmenitiesDialog } from "./listing-amenities-dialog";
 import {
 	ListingCardPriceAsync,
 	ListingCardPriceSkeleton,
@@ -75,11 +76,6 @@ function formatPropertyType(listing: CatalogListingSummaryDto): string | null {
 		.join(" ");
 }
 
-function amenityLabel(count: number): string | null {
-	if (count <= 0) return null;
-	return `${count} ${count === 1 ? "amenity" : "amenities"}`;
-}
-
 function CapacityRow({ stats }: { stats: CapacityStat[] }) {
 	if (stats.length === 0) return null;
 	return (
@@ -118,7 +114,6 @@ export function ListingCard({
 	const distanceLabel =
 		listing.distanceKm !== null ? `${listing.distanceKm} km away` : null;
 	const propertyTypeLabel = formatPropertyType(listing);
-	const visibleAmenityLabel = amenityLabel(listing.amenityCount);
 	const priceNode = pricePromise ? (
 		<Suspense fallback={<ListingCardPriceSkeleton layout={layout} />}>
 			<ListingCardPriceAsync
@@ -208,11 +203,11 @@ export function ListingCard({
 									{propertyTypeLabel}
 								</span>
 							)}
-							{visibleAmenityLabel && (
-								<span className="flex items-center gap-1.5">
-									<Bookmark className="size-4" />
-									{visibleAmenityLabel}
-								</span>
+							{listing.amenities.length > 0 && (
+								<ListingAmenitiesDialog
+									amenities={listing.amenities}
+									listingTitle={listing.title}
+								/>
 							)}
 						</div>
 

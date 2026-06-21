@@ -62,6 +62,7 @@ import {
 	GuestFields,
 	GuestSelector,
 } from "../search/guest-selector";
+import { FilterPill } from "./filter-pill";
 import { useHomesPending } from "./homes-pending";
 
 const RATING_OPTIONS = [
@@ -91,32 +92,6 @@ function toDateRange(filters: HomesFilters): DateRange | undefined {
 		from: parseISO(filters.checkIn),
 		to: filters.checkOut ? parseISO(filters.checkOut) : undefined,
 	};
-}
-
-function FilterPill({
-	active,
-	children,
-	onClick,
-}: {
-	active: boolean;
-	children: ReactNode;
-	onClick: () => void;
-}) {
-	return (
-		<button
-			type="button"
-			aria-pressed={active}
-			onClick={onClick}
-			className={cn(
-				"rounded-full border px-4 py-2 font-medium text-sm transition-colors",
-				active
-					? "border-foreground bg-accent text-foreground"
-					: "border-input text-muted-foreground hover:border-foreground hover:text-foreground",
-			)}
-		>
-			{children}
-		</button>
-	);
 }
 
 function PillRow({
