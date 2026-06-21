@@ -51,12 +51,18 @@ export function StayCalendar({
 export function DateRangeField({
 	className,
 	onChange,
+	onOpenChange,
+	open,
 	value,
-}: DateRangeProps & { className?: string }) {
+}: DateRangeProps & {
+	className?: string;
+	onOpenChange?: (open: boolean) => void;
+	open?: boolean;
+}) {
 	const label = formatRange(value);
 
 	return (
-		<Popover>
+		<Popover open={open} onOpenChange={onOpenChange}>
 			<PopoverTrigger asChild>
 				<Button
 					type="button"

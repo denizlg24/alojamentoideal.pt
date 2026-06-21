@@ -2,6 +2,7 @@ import { sql } from "drizzle-orm";
 import {
 	boolean,
 	customType,
+	date,
 	doublePrecision,
 	index,
 	integer,
@@ -281,6 +282,45 @@ export const accommodationListing = pgTable(
 	],
 );
 
+export interface AccommodationListingNightRawContent {
+	calendar: unknown;
+}
+
+export const accommodationListingNight = pgTable(
+	"accommodation_listing_night",
+	{
+		id: text("id").primaryKey(),
+		active: boolean("active").notNull().default(true),
+		basePrice: doublePrecision("base_price"),
+		currency: text("currency"),
+		date: date("date", { mode: "string" }).notNull(),
+		externalAccountId: text("external_account_id").notNull(),
+		fetchedAt: timestampWithTimezone("fetched_at").notNull(),
+		listingExternalId: text("listing_external_id").notNull(),
+		minStay: integer("min_stay"),
+		price: doublePrecision("price"),
+		provider: text("provider").notNull(),
+		raw: jsonb("raw").$type<AccommodationListingNightRawContent>().notNull(),
+		reservationId: text("reservation_id"),
+		staleAfter: timestampWithTimezone("stale_after").notNull(),
+		status: text("status"),
+		syncRunId: text("sync_run_id").references(() => providerSyncRun.id, {
+			onDelete: "set null",
+		}),
+		updatedAt: timestampWithTimezone("updated_at").notNull().defaultNow(),
+	},
+	(table) => [
+		uniqueIndex("accommodation_listing_night_scope_date_uidx").on(
+			table.provider,
+			table.externalAccountId,
+			table.listingExternalId,
+			table.date,
+		),
+		index("accommodation_listing_night_date_idx").on(table.date),
+		index("accommodation_listing_night_stale_after_idx").on(table.staleAfter),
+	],
+);
+
 /**
  * Append-only observability event log powering analytics and the future admin
  * dashboard. Rows are written best-effort from the application and must never
@@ -430,6 +470,7 @@ export const schema = {
 	providerSyncRun,
 	providerSyncState,
 	accommodationListing,
+	accommodationListingNight,
 	observabilityEvent,
 	listingReview,
 	listingReviewSummary,

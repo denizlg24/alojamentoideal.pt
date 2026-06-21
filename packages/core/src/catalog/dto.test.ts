@@ -87,6 +87,7 @@ describe("toCatalogListingSummary", () => {
 			guests: 4,
 		});
 		expect(summary.location.timezone).toBe("Europe/Lisbon");
+		expect(summary.propertyType).toBe("apartment");
 		expect(summary.amenityCount).toBe(1);
 		expect(summary.freshness.isStale).toBe(false);
 		expect(summary.freshness.active).toBe(true);
@@ -100,6 +101,63 @@ describe("toCatalogListingSummary", () => {
 		const summary = toCatalogListingSummary(record(), { locale: "en" });
 		expect(summary.coverPhoto?.url).toBe("https://cdn/a.jpg");
 		expect(summary.coverPhoto?.caption).toBe("Front");
+	});
+
+	test("falls back to raw listing property type", () => {
+		const summary = toCatalogListingSummary(
+			record({
+				propertyType: null,
+				raw: {
+					fees: null,
+					guestGuide: null,
+					listing: { property_type: "studio" },
+					photos: [],
+					status: null,
+					translations: null,
+				},
+			}),
+			{ locale: "en" },
+		);
+
+		expect(summary.propertyType).toBe("studio");
+	});
+
+	test("maps Hostify property type ids used by apartment listings", () => {
+		const summary = toCatalogListingSummary(
+			record({
+				propertyType: null,
+				raw: {
+					fees: null,
+					guestGuide: null,
+					listing: { property_type_id: 1 },
+					photos: [],
+					status: null,
+					translations: null,
+				},
+			}),
+			{ locale: "en" },
+		);
+
+		expect(summary.propertyType).toBe("Apartment");
+	});
+
+	test("uses the legacy Hostify mapping for house property type", () => {
+		const summary = toCatalogListingSummary(
+			record({
+				propertyType: null,
+				raw: {
+					fees: null,
+					guestGuide: null,
+					listing: { property_type_id: 6 },
+					photos: [],
+					status: null,
+					translations: null,
+				},
+			}),
+			{ locale: "en" },
+		);
+
+		expect(summary.propertyType).toBe("House");
 	});
 
 	test("marks rows past staleAfter as stale", () => {

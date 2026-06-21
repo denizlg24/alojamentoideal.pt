@@ -4,26 +4,28 @@ import { format } from "date-fns";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import type { DateRange } from "react-day-picker";
+import { capacityForGuests } from "@/lib/catalog/guests";
 
 export interface StaySearchState {
 	adults: number;
 	children: number;
-	location: string;
+	place: string | null;
 	range: DateRange | undefined;
 }
 
 const DEFAULTS: StaySearchState = {
 	adults: 1,
 	children: 0,
-	location: "",
+	place: null,
 	range: undefined,
 };
 
 /**
- * Holds the search selectors' state and turns it into a `/homes` query. Capacity
- * (adults + children) maps to the catalog list API's `guests` filter; the stay
- * period is captured for later but does not filter yet, since availability is
- * not wired up.
+ * Holds the search selectors' state and turns it into a `/homes` query. The
+ * chosen service area maps to the catalog list API via the `place` param (the
+ * homes page resolves it to a radius search); guest capacity is sent as the
+ * `guests` filter. A chosen stay period adds `checkIn`/`checkOut`, which the
+ * homes page uses to run the live availability-and-quote search.
  */
 export function useStaySearch(initial?: Partial<StaySearchState>) {
 	const router = useRouter();
@@ -39,17 +41,19 @@ export function useStaySearch(initial?: Partial<StaySearchState>) {
 
 	const buildHref = () => {
 		const params = new URLSearchParams();
-		const location = state.location.trim();
 
-		if (location) params.set("q", location);
-		if (state.range?.from)
+		if (state.place) params.set("place", state.place);
+		if (state.range?.from && state.range?.to) {
 			params.set("checkIn", format(state.range.from, "yyyy-MM-dd"));
-		if (state.range?.to)
 			params.set("checkOut", format(state.range.to, "yyyy-MM-dd"));
+		}
 
 		params.set("adults", String(state.adults));
 		params.set("children", String(state.children));
-		params.set("guests", String(guestTotal));
+		params.set(
+			"guests",
+			String(capacityForGuests(state.adults, state.children)),
+		);
 
 		return `/homes?${params.toString()}`;
 	};

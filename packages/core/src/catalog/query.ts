@@ -1,5 +1,6 @@
 import {
 	accommodationListing,
+	accommodationListingNight,
 	type Database,
 	listingReviewSummary,
 } from "@workspace/db";
@@ -37,6 +38,12 @@ export interface CatalogListResult {
 	total: number;
 }
 
+export interface CatalogAmenityFacet {
+	count: number;
+	key: string;
+	label: string;
+}
+
 const RECORD_COLUMNS = {
 	active: accommodationListing.active,
 	bathrooms: accommodationListing.bathrooms,
@@ -68,6 +75,25 @@ const REVIEW_COLUMNS = {
 	reviewAverage: listingReviewSummary.ratingAverage,
 	reviewCount: sql<number>`coalesce(${listingReviewSummary.reviewCount}, 0)::int`,
 } as const;
+
+/**
+ * Per-listing advisory "from" nightly price: the cheapest active, priced future
+ * night in the synced calendar. Correlated subquery so it can drive price
+ * filtering and sorting on the catalog list without denormalizing a column. The
+ * dataset is a single operator's own apartments, so the cost is negligible.
+ */
+function fromNightlyPrice(): SQL<number | null> {
+	return sql<number | null>`(
+		select min(${accommodationListingNight.price})
+		from ${accommodationListingNight}
+		where ${accommodationListingNight.provider} = ${accommodationListing.provider}
+			and ${accommodationListingNight.externalAccountId} = ${accommodationListing.externalAccountId}
+			and ${accommodationListingNight.listingExternalId} = ${accommodationListing.externalId}
+			and ${accommodationListingNight.active} = true
+			and ${accommodationListingNight.price} is not null
+			and ${accommodationListingNight.date} >= current_date
+	)`;
+}
 
 function reviewSummaryJoin(): SQL {
 	return and(
@@ -111,6 +137,7 @@ export class CatalogRepository {
 		const [countRow] = await this.#db
 			.select({ total: sql<number>`count(*)::int` })
 			.from(accommodationListing)
+			.leftJoin(listingReviewSummary, reviewSummaryJoin())
 			.where(and(...conditions));
 
 		return {
@@ -153,7 +180,79 @@ export class CatalogRepository {
 		return toCatalogListingDetail(row, { locale });
 	}
 
-	#conditions(query: CatalogListQuery, scope: CatalogScope): SQL[] {
+	/**
+	 * Distinct amenity filter options across active listings, ordered by how many
+	 * listings offer them. Keys match the values indexed on `amenity_keys`
+	 * (`amenity.id` when present, otherwise the source label), so they can be fed
+	 * straight back into the `amenities` list filter.
+	 */
+	async amenityFacets(
+		scope: CatalogScope,
+		limit = 24,
+	): Promise<CatalogAmenityFacet[]> {
+		const result = await this.#db.execute(sql`
+			select
+				key,
+				min(label) as label,
+				count(*)::int as count
+			from (
+				select
+					coalesce(nullif(trim(amenity->>'id'), ''), amenity->>'sourceLabel') as key,
+					coalesce(amenity->'labels'->>'en', amenity->>'sourceLabel') as label
+				from ${accommodationListing}
+				cross join lateral jsonb_array_elements(${accommodationListing.processed}->'amenities') as amenity
+				where ${accommodationListing.provider} = ${scope.provider}
+					and ${accommodationListing.externalAccountId} = ${scope.accountId}
+					and ${accommodationListing.active} = true
+			) as amenities
+			where key is not null and key <> ''
+			group by key
+			order by count desc, label asc
+			limit ${limit}
+		`);
+
+		return result.rows.map((row) => ({
+			count: Number(row.count),
+			key: String(row.key),
+			label: String(row.label),
+		}));
+	}
+
+	/**
+	 * Min/max advisory nightly price across listings matching the query, ignoring
+	 * the query's own price bounds so the homes price slider can show the full
+	 * range and let the user widen it. Returns null when no matching listing has a
+	 * synced price.
+	 */
+	async priceBounds(
+		query: CatalogListQuery,
+		scope: CatalogScope,
+	): Promise<{ max: number; min: number } | null> {
+		const conditions = this.#conditions(query, scope, false);
+		const [row] = await this.#db
+			.select({
+				max: sql<number | null>`max(${fromNightlyPrice()})`,
+				min: sql<number | null>`min(${fromNightlyPrice()})`,
+			})
+			.from(accommodationListing)
+			.leftJoin(listingReviewSummary, reviewSummaryJoin())
+			.where(and(...conditions));
+
+		if (!row || row.min === null || row.max === null) {
+			return null;
+		}
+
+		return {
+			max: Math.ceil(Number(row.max)),
+			min: Math.floor(Number(row.min)),
+		};
+	}
+
+	#conditions(
+		query: CatalogListQuery,
+		scope: CatalogScope,
+		includePrice = true,
+	): SQL[] {
 		const conditions: SQL[] = [
 			eq(accommodationListing.provider, scope.provider),
 			eq(accommodationListing.externalAccountId, scope.accountId),
@@ -184,6 +283,11 @@ export class CatalogRepository {
 		if (query.bathroomsMin !== null) {
 			conditions.push(gte(accommodationListing.bathrooms, query.bathroomsMin));
 		}
+		if (query.ratingMin !== null) {
+			conditions.push(
+				sql`coalesce(${listingReviewSummary.ratingAverage}, 0) >= ${query.ratingMin}`,
+			);
+		}
 		if (query.amenities.length > 0) {
 			conditions.push(
 				arrayContains(accommodationListing.amenityKeys, query.amenities),
@@ -199,6 +303,12 @@ export class CatalogRepository {
 			conditions.push(
 				sql`${haversineKm(query.radius)} <= ${query.radius.radiusKm}`,
 			);
+		}
+		if (includePrice && query.priceMin !== null) {
+			conditions.push(sql`${fromNightlyPrice()} >= ${query.priceMin}`);
+		}
+		if (includePrice && query.priceMax !== null) {
+			conditions.push(sql`${fromNightlyPrice()} <= ${query.priceMax}`);
 		}
 
 		return conditions;
@@ -237,6 +347,18 @@ export class CatalogRepository {
 			case "name":
 				return [
 					asc(accommodationListing.name),
+					desc(accommodationListing.providerUpdatedAt),
+					desc(accommodationListing.fetchedAt),
+				];
+			case "price_asc":
+				return [
+					sql`${fromNightlyPrice()} asc nulls last`,
+					desc(accommodationListing.providerUpdatedAt),
+					desc(accommodationListing.fetchedAt),
+				];
+			case "price_desc":
+				return [
+					sql`${fromNightlyPrice()} desc nulls last`,
 					desc(accommodationListing.providerUpdatedAt),
 					desc(accommodationListing.fetchedAt),
 				];

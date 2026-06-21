@@ -12,6 +12,10 @@
 			"types": "./src/catalog/index.ts",
 			"default": "./src/catalog/index.ts"
 		},
+		"./accommodations": {
+			"types": "./src/accommodations/index.ts",
+			"default": "./src/accommodations/index.ts"
+		},
 		"./listing-cache": {
 			"types": "./src/listing-cache/index.ts",
 			"default": "./src/listing-cache/index.ts"
