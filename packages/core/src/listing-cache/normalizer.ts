@@ -12,10 +12,26 @@ import { sanitizeProviderPayload } from "./hash";
 import { versionedHash } from "./sync-version";
 
 export interface HostifyListingSections {
+	/**
+	 * Listing amenities as returned by the detail endpoint's
+	 * `include_related_objects` sibling array (each `{ id, name, ... }`). Lives
+	 * alongside `listing`, not inside it.
+	 */
+	amenities: unknown;
+	/**
+	 * Rich description sibling (`{ description, name, house_rules, ... }`). The
+	 * `listing` object itself has no usable description, so this is the source of
+	 * the listing's prose.
+	 */
+	description: unknown;
+	/** Structured facts sibling (`{ floor, area, wireless_ssid, ... }`). */
+	details: unknown;
 	fees: unknown;
 	guestGuide: unknown;
 	listing: unknown;
 	photos: unknown;
+	/** Per-room breakdown sibling (`{ name, room_type, beds[], ... }`). */
+	rooms: unknown;
 	status: unknown;
 	translations: unknown;
 }
@@ -61,9 +77,14 @@ export function buildListingCacheProjection(
 	const raw = sanitizeSections(sections);
 	const listing = asRecord(raw.listing);
 	const translations = asArray(raw.translations);
-	const amenities = extractAmenities(listing);
+	const amenities = extractAmenities(listing, sections.amenities);
+	const descriptionContent = asRecord(raw.description);
 	const title = readString(listing, "name") ?? readString(listing, "nickname");
-	const description = readString(listing, "description");
+	// Hostify keeps the listing prose in the `description` sibling, not on the
+	// `listing` object (which has no usable `description` field).
+	const description =
+		readString(descriptionContent, "description") ??
+		readString(listing, "description");
 	const guideText = guideToText(raw.guestGuide);
 
 	const normalized: AccommodationListingNormalizedContent = {
@@ -77,7 +98,8 @@ export function buildListingCacheProjection(
 
 	const sectionHashes: ListingSectionHashes = {
 		amenities: versionedHash(amenities),
-		description: versionedHash({ description }),
+		description: versionedHash({ description, raw: raw.description }),
+		details: versionedHash(raw.details),
 		fees: versionedHash(raw.fees),
 		guide: versionedHash(raw.guestGuide),
 		location: versionedHash({
@@ -91,6 +113,7 @@ export function buildListingCacheProjection(
 			zipcode: readScalarString(listing, "zipcode"),
 		}),
 		photos: versionedHash(raw.photos),
+		rooms: versionedHash(raw.rooms),
 		status: versionedHash(raw.status),
 		title: versionedHash({
 			name: readString(listing, "name"),
@@ -175,10 +198,13 @@ function sanitizeSections(
 	sections: HostifyListingSections,
 ): AccommodationListingRawContent {
 	return {
+		description: sanitizeProviderPayload(sections.description),
+		details: sanitizeProviderPayload(sections.details),
 		fees: sanitizeProviderPayload(sections.fees),
 		guestGuide: sanitizeProviderPayload(sections.guestGuide),
 		listing: sanitizeProviderPayload(sections.listing),
 		photos: sanitizeProviderPayload(sections.photos),
+		rooms: sanitizeProviderPayload(sections.rooms),
 		status: sanitizeProviderPayload(sections.status),
 		translations: sanitizeProviderPayload(sections.translations),
 	};
@@ -207,9 +233,13 @@ function toProcessedAmenities(amenities: unknown[]): ProcessedAmenity[] {
 	});
 }
 
-function extractAmenities(listing: Record<string, unknown>): unknown[] {
+function extractAmenities(
+	listing: Record<string, unknown>,
+	sibling?: unknown,
+): unknown[] {
 	const value =
 		firstArray(
+			sibling,
 			listing.amenities,
 			listing.amenity_ids,
 			listing.amenities_ids,

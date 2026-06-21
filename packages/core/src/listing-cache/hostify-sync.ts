@@ -409,6 +409,7 @@ export class HostifyListingCacheSync {
 	): Promise<HostifyListingSections> {
 		const detail = await this.#client.listings.get(externalId, {
 			guest_guide: 1,
+			include_related_objects: 1,
 		});
 		const [translations, photos, fees, status, guestGuide] = await Promise.all([
 			this.optional(() => this.#client.listings.getTranslations(externalId)),
@@ -419,10 +420,14 @@ export class HostifyListingCacheSync {
 		]);
 
 		return {
+			amenities: readField(detail, "amenities"),
+			description: readField(detail, "description"),
+			details: readField(detail, "details"),
 			fees: readField(fees, "fees"),
 			guestGuide,
 			listing: readField(detail, "listing") ?? listingSummary,
 			photos: readField(photos, "photos"),
+			rooms: readField(detail, "rooms"),
 			status: readField(status, "listing_status"),
 			translations: readField(translations, "translation"),
 		};

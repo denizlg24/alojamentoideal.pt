@@ -20,6 +20,19 @@ export interface CatalogPhotoDto {
 	url: string;
 }
 
+export interface CatalogRoomBedDto {
+	count: number | null;
+	type: string | null;
+}
+
+export interface CatalogRoomDto {
+	beds: CatalogRoomBedDto[];
+	capacity: number | null;
+	name: string | null;
+	shared: boolean;
+	type: string | null;
+}
+
 export interface CatalogLocationDto {
 	city: string | null;
 	country: string | null;
@@ -69,6 +82,7 @@ export interface CatalogListingDetailDto extends CatalogListingSummaryDto {
 	guide: string;
 	nickname: string | null;
 	photos: CatalogPhotoDto[];
+	rooms: CatalogRoomDto[];
 }
 
 /** Columns and JSONB selected from `accommodation_listing` for catalog reads. */
@@ -152,6 +166,7 @@ export function toCatalogListingDetail(
 		guide: pickLocalized(record.processed.guide, options.locale),
 		nickname: record.nickname,
 		photos: extractPhotos(record.raw),
+		rooms: extractRooms(record.raw),
 	};
 }
 
@@ -268,6 +283,50 @@ function toPhoto(
 		},
 		sortOrder: readNumber(entry.sort_order) ?? index,
 	};
+}
+
+function extractRooms(raw: AccommodationListingRawContent): CatalogRoomDto[] {
+	if (!Array.isArray(raw.rooms)) {
+		return [];
+	}
+
+	return raw.rooms
+		.map((entry) => toRoom(entry))
+		.filter((room): room is CatalogRoomDto => room !== null);
+}
+
+function toRoom(entry: unknown): CatalogRoomDto | null {
+	if (!isRecord(entry)) {
+		return null;
+	}
+
+	const beds = Array.isArray(entry.beds)
+		? entry.beds
+				.map((bed) => toBed(bed))
+				.filter((bed): bed is CatalogRoomBedDto => bed !== null)
+		: [];
+
+	return {
+		beds,
+		capacity: readNumber(entry.person_capacity),
+		name: readString(entry.name),
+		shared: entry.shared === 1 || entry.shared === true,
+		type: readString(entry.room_type),
+	};
+}
+
+function toBed(entry: unknown): CatalogRoomBedDto | null {
+	if (!isRecord(entry)) {
+		return null;
+	}
+
+	const type = readString(entry.type);
+	const count = readNumber(entry.count);
+	if (type === null && count === null) {
+		return null;
+	}
+
+	return { count, type };
 }
 
 function readString(value: unknown): string | null {
