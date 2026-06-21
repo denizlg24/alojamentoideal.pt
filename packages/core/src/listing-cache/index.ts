@@ -1,3 +1,4 @@
+export * from "./amenity-catalog";
 export * from "./amenity-icons";
 export * from "./config";
 export * from "./cron-auth";
@@ -6,3 +7,4 @@ export * from "./hostify-sync";
 export * from "./normalizer";
 export * from "./processor";
 export * from "./repository";
+export * from "./sync-version";

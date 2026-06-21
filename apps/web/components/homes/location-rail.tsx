@@ -2,9 +2,11 @@
 
 import { cn } from "@workspace/ui/lib/utils";
 import { MapPin } from "lucide-react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useSearchParams } from "next/navigation";
+import { useEffect, useState } from "react";
 import { buildHomesHref, parseHomesFilters } from "@/lib/catalog/homes-filters";
 import { CATALOG_LOCATION_PRESETS } from "@/lib/catalog/locations";
+import { useHomesPending } from "./homes-pending";
 
 function RailChip({
 	active,
@@ -33,15 +35,34 @@ function RailChip({
 }
 
 export function LocationRail() {
-	const router = useRouter();
+	const { isPending, navigate } = useHomesPending();
 	const searchParams = useSearchParams();
-	const place = searchParams.get("place");
+	const committedPlace = searchParams.get("place");
+
+	// Highlight the selection optimistically so the active pill updates instantly
+	// while the navigation transition is in flight. We remember which committed
+	// value the optimistic pick was made against and drop it once the URL catches
+	// up or the transition completes.
+	const [optimistic, setOptimistic] = useState<{
+		from: string | null;
+		place: string | null;
+	} | null>(null);
+
+	// Clear optimistic state when the committed place changes or transition completes
+	useEffect(() => {
+		if (optimistic && (optimistic.from !== committedPlace || !isPending)) {
+			setOptimistic(null);
+		}
+	}, [committedPlace, isPending, optimistic]);
+
+	const place = optimistic ? optimistic.place : committedPlace;
 
 	const select = (id: string | null) => {
+		setOptimistic({ from: committedPlace, place: id });
 		const filters = parseHomesFilters(
 			new URLSearchParams(searchParams.toString()),
 		);
-		router.push(buildHomesHref({ ...filters, place: id }));
+		navigate(buildHomesHref({ ...filters, place: id }));
 	};
 
 	return (

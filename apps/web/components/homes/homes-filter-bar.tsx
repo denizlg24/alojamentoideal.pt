@@ -42,7 +42,8 @@ import {
 import { useSearchParams } from "next/navigation";
 import { type ReactNode, useMemo, useState } from "react";
 import type { DateRange } from "react-day-picker";
-import type { CatalogAmenityFacet } from "@/lib/catalog/amenities";
+import { AmenityIcon } from "@/components/listings/amenity-icon";
+import type { HomesAmenityFacet } from "@/lib/catalog/amenities";
 import {
 	buildHomesHref,
 	countAdvancedFilters,
@@ -165,7 +166,7 @@ export function HomesFilterBar({
 	priceBounds,
 	total,
 }: {
-	amenityFacets: CatalogAmenityFacet[];
+	amenityFacets: HomesAmenityFacet[];
 	currency: string;
 	priceBounds: { max: number; min: number } | null;
 	total: number;
@@ -757,7 +758,10 @@ export function HomesFilterBar({
 											active={draft.amenities.includes(amenity.key)}
 											onClick={() => toggleAmenity(amenity.key)}
 										>
-											{amenity.label}
+											<span className="flex items-center gap-2">
+												<AmenityIcon name={amenity.icon} className="size-4" />
+												{amenity.label}
+											</span>
 										</FilterPill>
 									))}
 								</div>

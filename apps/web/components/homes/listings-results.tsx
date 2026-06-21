@@ -17,7 +17,8 @@ interface ListingsResultsProps {
 	limit: number;
 	listings: CatalogListingSummaryDto[];
 	offset: number;
-	prices?: Map<string, ListingCardPrice>;
+	/** Streamed advisory/quote prices keyed by listing id; each card unwraps its own. */
+	pricesPromise?: Promise<Map<string, ListingCardPrice>>;
 	stayQuery?: string;
 	total: number;
 }
@@ -48,7 +49,7 @@ export function ListingsResults({
 	limit,
 	listings,
 	offset,
-	prices,
+	pricesPromise,
 	stayQuery,
 	total,
 }: ListingsResultsProps) {
@@ -78,7 +79,7 @@ export function ListingsResults({
 						key={listing.id}
 						layout="row"
 						listing={listing}
-						price={prices?.get(listing.id)}
+						pricePromise={pricesPromise?.then((map) => map.get(listing.id))}
 						stayQuery={stayQuery}
 					/>
 				))}

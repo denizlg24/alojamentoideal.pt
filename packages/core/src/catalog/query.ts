@@ -41,7 +41,6 @@ export interface CatalogListResult {
 export interface CatalogAmenityFacet {
 	count: number;
 	key: string;
-	label: string;
 }
 
 const RECORD_COLUMNS = {
@@ -182,39 +181,34 @@ export class CatalogRepository {
 
 	/**
 	 * Distinct amenity filter options across active listings, ordered by how many
-	 * listings offer them. Keys match the values indexed on `amenity_keys`
-	 * (`amenity.id` when present, otherwise the source label), so they can be fed
-	 * straight back into the `amenities` list filter.
+	 * listings offer them. Keys are the values indexed on the `amenity_keys`
+	 * array (`amenity.id` when present, otherwise the source label), so they feed
+	 * straight back into the `amenities` list filter. Presentation (icon, label)
+	 * is resolved from the static amenity catalog by the caller. Unnesting the
+	 * GIN-indexed array is far cheaper than expanding the processed JSONB.
 	 */
 	async amenityFacets(
 		scope: CatalogScope,
 		limit = 24,
 	): Promise<CatalogAmenityFacet[]> {
 		const result = await this.#db.execute(sql`
-			select
-				key,
-				min(label) as label,
-				count(*)::int as count
+			select key, count(*)::int as count
 			from (
-				select
-					coalesce(nullif(trim(amenity->>'id'), ''), amenity->>'sourceLabel') as key,
-					coalesce(amenity->'labels'->>'en', amenity->>'sourceLabel') as label
+				select unnest(${accommodationListing.amenityKeys}) as key
 				from ${accommodationListing}
-				cross join lateral jsonb_array_elements(${accommodationListing.processed}->'amenities') as amenity
 				where ${accommodationListing.provider} = ${scope.provider}
 					and ${accommodationListing.externalAccountId} = ${scope.accountId}
 					and ${accommodationListing.active} = true
-			) as amenities
+			) as keys
 			where key is not null and key <> ''
 			group by key
-			order by count desc, label asc
+			order by count desc, key asc
 			limit ${limit}
 		`);
 
 		return result.rows.map((row) => ({
 			count: Number(row.count),
 			key: String(row.key),
-			label: String(row.label),
 		}));
 	}
 

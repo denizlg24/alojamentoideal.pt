@@ -3,12 +3,7 @@ import type {
 	AccommodationListingProcessedContent,
 } from "@workspace/db";
 import { z } from "zod";
-import { AMENITY_ICON_NAMES, AMENITY_ICON_SET } from "./amenity-icons";
-import {
-	amenityInputs,
-	guideToText,
-	type ListingCacheProjection,
-} from "./normalizer";
+import { guideToText, type ListingCacheProjection } from "./normalizer";
 
 const DEFAULT_OPENAI_LISTING_MODEL = "gpt-5.5";
 const OPENAI_RESPONSES_URL = "https://api.openai.com/v1/responses";
@@ -20,17 +15,6 @@ const localizedTextSchema = z.object({
 });
 
 const processedContentSchema = z.object({
-	amenities: z.array(
-		z.object({
-			icon: z.object({
-				name: z.enum(AMENITY_ICON_NAMES),
-				set: z.literal(AMENITY_ICON_SET),
-			}),
-			id: z.string().nullable(),
-			labels: localizedTextSchema,
-			sourceLabel: z.string(),
-		}),
-	),
 	description: localizedTextSchema,
 	guide: localizedTextSchema,
 	title: localizedTextSchema,
@@ -50,33 +34,11 @@ const localizedTextJsonSchema = {
 const processedContentJsonSchema = {
 	additionalProperties: false,
 	properties: {
-		amenities: {
-			items: {
-				additionalProperties: false,
-				properties: {
-					icon: {
-						additionalProperties: false,
-						properties: {
-							name: { enum: AMENITY_ICON_NAMES, type: "string" },
-							set: { const: AMENITY_ICON_SET, type: "string" },
-						},
-						required: ["name", "set"],
-						type: "object",
-					},
-					id: { type: ["string", "null"] },
-					labels: localizedTextJsonSchema,
-					sourceLabel: { type: "string" },
-				},
-				required: ["icon", "id", "labels", "sourceLabel"],
-				type: "object",
-			},
-			type: "array",
-		},
 		description: localizedTextJsonSchema,
 		guide: localizedTextJsonSchema,
 		title: localizedTextJsonSchema,
 	},
-	required: ["amenities", "description", "guide", "title"],
+	required: ["description", "guide", "title"],
 	type: "object",
 } as const;
 
@@ -155,9 +117,14 @@ class OpenAIListingContentProcessor implements ListingContentProcessor {
 			const processedAt = new Date();
 
 			return {
+				// Amenities are resolved deterministically from the static catalog
+				// (see normalizer); the model only localizes free-form text.
 				content: {
-					...parsed,
+					amenities: input.fallback.amenities,
+					description: parsed.description,
+					guide: parsed.guide,
 					model: this.#model,
+					title: parsed.title,
 				},
 				error: null,
 				processedAt,
@@ -177,7 +144,9 @@ class OpenAIListingContentProcessor implements ListingContentProcessor {
 
 	private async parseListing(
 		normalized: AccommodationListingNormalizedContent,
-	): Promise<Omit<AccommodationListingProcessedContent, "model">> {
+	): Promise<
+		Omit<AccommodationListingProcessedContent, "amenities" | "model">
+	> {
 		const controller = new AbortController();
 		const timeoutId = setTimeout(() => controller.abort(), 30000);
 
@@ -187,13 +156,11 @@ class OpenAIListingContentProcessor implements ListingContentProcessor {
 					input: [
 						{
 							content:
-								"You localize short-term rental listing content. Return polished, faithful en/pt/es translations. Do not invent amenities, policies, fees, access codes, or facts. Pick one allowed Font Awesome 6 icon for each amenity.",
+								"You localize short-term rental listing content. Return polished, faithful en/pt/es translations. Do not invent policies, fees, access codes, or facts.",
 							role: "system",
 						},
 						{
 							content: JSON.stringify({
-								allowedIconNames: AMENITY_ICON_NAMES,
-								amenities: amenityInputs(normalized),
 								description: normalized.description,
 								guide: guideToText(normalized.guide),
 								title: normalized.title,
@@ -235,12 +202,6 @@ class OpenAIListingContentProcessor implements ListingContentProcessor {
 			const parsed = processedContentSchema.parse(JSON.parse(outputText));
 
 			return {
-				amenities: parsed.amenities.map((amenity) => ({
-					icon: amenity.icon,
-					id: amenity.id ?? null,
-					labels: amenity.labels,
-					sourceLabel: amenity.sourceLabel,
-				})),
 				description: parsed.description,
 				guide: parsed.guide,
 				title: parsed.title,
