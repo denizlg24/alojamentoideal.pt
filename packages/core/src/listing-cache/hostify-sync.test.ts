@@ -50,13 +50,58 @@ describe("buildListingCacheProjection amenities", () => {
 		});
 
 		const amenities = projection.processedFallback.amenities;
-		expect(amenities.map((amenity) => amenity.id)).toEqual(["46", "9"]);
+		expect(amenities.map((amenity) => amenity.id)).toEqual([
+			"air-conditioning",
+			"9",
+		]);
 		expect(amenities.map((amenity) => amenity.sourceLabel)).toEqual([
 			"Air conditioning",
 			"Fire extinguisher",
 		]);
 		expect(amenities[0]?.icon.name).toBe("FaSnowflake");
 		expect(amenities[0]?.labels.en).toBe("Air conditioning");
+	});
+
+	test("collapses equivalent Hostify amenities into public groups", () => {
+		const projection = buildListingCacheProjection({
+			amenities: [
+				{ id: 2, name: "Wireless Internet" },
+				{ id: 128, name: "FREE internet access" },
+				{ id: 171, name: "Free Wireless Internet" },
+				{ id: 230, name: "High speed Internet access" },
+				{ id: 5, name: "Washer" },
+				{ id: 161, name: "washing machine" },
+				{ id: 719, name: "Washer on property" },
+				{ id: 3, name: "Kitchen" },
+				{ id: 114, name: "Full kitchen" },
+				{ id: 1, name: "TV" },
+			],
+			description: null,
+			details: null,
+			fees: [],
+			guestGuide: { success: true },
+			listing: { id: "1", name: "Test" },
+			photos: [],
+			rooms: [],
+			status: "Clean",
+			translations: [],
+		});
+
+		const amenities = projection.processedFallback.amenities;
+		expect(amenities.map((amenity) => amenity.id)).toEqual([
+			"wifi",
+			"washer",
+			"kitchen",
+			"1",
+		]);
+		expect(amenities.map((amenity) => amenity.labels.en)).toEqual([
+			"Wifi",
+			"Washer",
+			"Kitchen",
+			"TV",
+		]);
+		expect(amenities[0]?.icon.name).toBe("FaWifi");
+		expect(projection.normalized.amenities).toHaveLength(10);
 	});
 });
 

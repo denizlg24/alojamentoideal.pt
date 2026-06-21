@@ -7,6 +7,7 @@ import type {
 } from "@workspace/db";
 import { hostifyPropertyTypeLabel } from "../hostify-property-types";
 import { HOSTIFY_AMENITY_CATALOG } from "./amenity-catalog";
+import { publicAmenityGroupForInput } from "./amenity-groups";
 import { AMENITY_ICON_SET, pickAmenityIcon } from "./amenity-icons";
 import { sanitizeProviderPayload } from "./hash";
 import { versionedHash } from "./sync-version";
@@ -211,26 +212,44 @@ function sanitizeSections(
 }
 
 /**
- * Resolves each listing amenity to its canonical icon and label. Known Hostify
- * ids take their icon and English label from the static catalog so icons stay
- * consistent across listings and filtering is deterministic; unknown ids fall
- * back to the keyword heuristic over the provider's source label.
+ * Resolves each listing amenity to its public icon and label. Equivalent
+ * Hostify amenities collapse into one public key first, then known Hostify ids
+ * use the static catalog. Unknown ids fall back to the keyword heuristic over
+ * the provider's source label.
  */
 function toProcessedAmenities(amenities: unknown[]): ProcessedAmenity[] {
-	return extractAmenityInputs(amenities).map((amenity) => {
-		const entry = amenity.id ? HOSTIFY_AMENITY_CATALOG[amenity.id] : undefined;
-		const label = entry?.label ?? amenity.sourceLabel;
+	const processed: ProcessedAmenity[] = [];
+	const seen = new Set<string>();
 
-		return {
+	for (const amenity of extractAmenityInputs(amenities)) {
+		const group = publicAmenityGroupForInput(amenity);
+		const entry =
+			group ?? (amenity.id ? HOSTIFY_AMENITY_CATALOG[amenity.id] : undefined);
+		const id = group?.key ?? amenity.id;
+		const label = entry?.label ?? amenity.sourceLabel;
+		const dedupeKey = amenityDedupeKey(id, label);
+
+		if (seen.has(dedupeKey)) {
+			continue;
+		}
+		seen.add(dedupeKey);
+
+		processed.push({
 			icon: {
 				name: entry?.icon ?? pickAmenityIcon(amenity.sourceLabel),
 				set: AMENITY_ICON_SET,
 			},
-			id: amenity.id,
+			id,
 			labels: repeatLocalized(label),
-			sourceLabel: amenity.sourceLabel,
-		};
-	});
+			sourceLabel: group?.label ?? amenity.sourceLabel,
+		});
+	}
+
+	return processed;
+}
+
+function amenityDedupeKey(id: string | null, label: string): string {
+	return id ? `id:${id}` : `label:${label.toLowerCase()}`;
 }
 
 function extractAmenities(

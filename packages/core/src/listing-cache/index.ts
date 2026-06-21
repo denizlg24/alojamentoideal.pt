@@ -1,4 +1,5 @@
 export * from "./amenity-catalog";
+export * from "./amenity-groups";
 export * from "./amenity-icons";
 export * from "./config";
 export * from "./cron-auth";

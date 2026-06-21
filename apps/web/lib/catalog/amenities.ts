@@ -2,6 +2,7 @@ import { CatalogRepository, type CatalogScope } from "@workspace/core/catalog";
 import {
 	type AmenityIconName,
 	HOSTIFY_AMENITY_CATALOG,
+	PUBLIC_AMENITY_GROUP_CATALOG,
 	pickAmenityIcon,
 } from "@workspace/core/listing-cache";
 import { getDb } from "@workspace/db";
@@ -38,7 +39,9 @@ export async function getCatalogAmenityFacets(
 	const facets = await repository.amenityFacets(scope, limit);
 
 	return facets.map((facet) => {
-		const entry = HOSTIFY_AMENITY_CATALOG[facet.key];
+		const entry =
+			PUBLIC_AMENITY_GROUP_CATALOG[facet.key] ??
+			HOSTIFY_AMENITY_CATALOG[facet.key];
 		return {
 			count: facet.count,
 			icon: entry?.icon ?? pickAmenityIcon(facet.key),
