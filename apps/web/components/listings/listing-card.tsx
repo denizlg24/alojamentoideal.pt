@@ -15,10 +15,13 @@ import {
 } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
+import { Suspense } from "react";
+import type { ListingCardPrice } from "@/lib/catalog/pricing-display";
 import {
-	type ListingCardPrice,
-	listingPriceDisplay,
-} from "@/lib/catalog/pricing-display";
+	ListingCardPriceAsync,
+	ListingCardPriceSkeleton,
+	ListingCardPriceValue,
+} from "./listing-card-price";
 
 export type ListingCardLayout = "compact" | "row";
 
@@ -95,11 +98,17 @@ export function ListingCard({
 	layout = "compact",
 	listing,
 	price,
+	pricePromise,
 	stayQuery,
 }: {
 	layout?: ListingCardLayout;
 	listing: CatalogListingSummaryDto;
 	price?: ListingCardPrice;
+	/**
+	 * Streamed price, resolved inside a `<Suspense>` so the card body renders
+	 * before the (slower) pricing read completes. Takes precedence over `price`.
+	 */
+	pricePromise?: Promise<ListingCardPrice | undefined>;
 	stayQuery?: string;
 }) {
 	const href = `/homes/${listing.id}${stayQuery ?? ""}`;
@@ -110,7 +119,21 @@ export function ListingCard({
 		listing.distanceKm !== null ? `${listing.distanceKm} km away` : null;
 	const propertyTypeLabel = formatPropertyType(listing);
 	const visibleAmenityLabel = amenityLabel(listing.amenityCount);
-	const priceInfo = listingPriceDisplay(price, listing.id);
+	const priceNode = pricePromise ? (
+		<Suspense fallback={<ListingCardPriceSkeleton layout={layout} />}>
+			<ListingCardPriceAsync
+				layout={layout}
+				listingId={listing.id}
+				pricePromise={pricePromise}
+			/>
+		</Suspense>
+	) : (
+		<ListingCardPriceValue
+			layout={layout}
+			listingId={listing.id}
+			value={price}
+		/>
+	);
 	const hasStay = Boolean(stayQuery);
 
 	if (layout === "row") {
@@ -197,19 +220,7 @@ export function ListingCard({
 					</div>
 
 					<div className="flex items-center justify-between gap-3 border-border/70 border-t pt-3 md:w-40 md:flex-col md:items-end md:border-t-0 md:pt-0">
-						<p className="flex items-baseline gap-1 md:flex-col md:items-end md:gap-0">
-							<span className="flex items-baseline gap-1 font-semibold text-xl leading-none">
-								{priceInfo.lead && (
-									<span className="font-normal text-muted-foreground text-xs">
-										{priceInfo.lead}
-									</span>
-								)}
-								{priceInfo.main}
-							</span>
-							<span className="text-muted-foreground text-xs">
-								{priceInfo.sub}
-							</span>
-						</p>
+						{priceNode}
 
 						<div className="flex items-center gap-2">
 							<Button asChild size="sm" className="rounded-full">
@@ -283,15 +294,7 @@ export function ListingCard({
 
 				<CapacityRow stats={stats} />
 
-				<p className="flex items-baseline gap-1 pt-0.5 text-sm">
-					{priceInfo.lead && (
-						<span className="text-muted-foreground text-xs">
-							{priceInfo.lead}
-						</span>
-					)}
-					<span className="font-semibold">{priceInfo.main}</span>
-					<span className="text-muted-foreground text-xs">{priceInfo.sub}</span>
-				</p>
+				{priceNode}
 			</div>
 		</Link>
 	);

@@ -10,6 +10,7 @@ import {
 	parseCatalogListQuery,
 } from "@workspace/core/catalog";
 import { getListingCacheConfig } from "@workspace/core/listing-cache";
+import { Skeleton } from "@workspace/ui/components/skeleton";
 import { Suspense } from "react";
 import { SiteFooter } from "@/components/home/site-footer";
 import { SiteHeader } from "@/components/home/site-header";
@@ -44,6 +45,39 @@ import {
 } from "@/lib/catalog/pricing-display";
 
 type SearchParams = Record<string, string | string[] | undefined>;
+
+/**
+ * Resolves the streamed price map and renders the map for its breakpoint slot.
+ * Wrapped in `<Suspense>` by the caller so the map fills in after the listings
+ * paint instead of blocking them on the pricing read.
+ */
+async function StreamingMapSlot({
+	center,
+	listings,
+	pricesPromise,
+	slot,
+	stayQuery,
+	zoom,
+}: {
+	center: { latitude: number; longitude: number };
+	listings: CatalogListingSummaryDto[];
+	pricesPromise: Promise<Map<string, ListingCardPrice>>;
+	slot: "desktop" | "mobile";
+	stayQuery?: string;
+	zoom: number;
+}) {
+	const prices = await pricesPromise;
+	return (
+		<ListingsMapSlot
+			slot={slot}
+			stayQuery={stayQuery}
+			listings={listings}
+			prices={prices}
+			center={center}
+			zoom={zoom}
+		/>
+	);
+}
 
 const COPYABLE_PARAMS = [
 	"guests",
@@ -141,14 +175,20 @@ interface HomesListings {
 	limit: number;
 	offset: number;
 	priceBounds: { max: number; min: number } | null;
-	prices: Map<string, ListingCardPrice>;
+	/**
+	 * Prices are streamed: the listing cards and map render from the (cached)
+	 * catalog read first and resolve this in a nested `<Suspense>`, so the slower
+	 * pricing read stays off the page's critical path.
+	 */
+	pricesPromise: Promise<Map<string, ListingCardPrice>>;
 	total: number;
 }
 
 /**
  * Loads the homes list. With a valid stay period it runs the live date-aware
  * search (availability-filtered, quoted); otherwise it reads the cached catalog
- * and decorates it with advisory "from" prices.
+ * and decorates it with advisory "from" prices. Prices are returned as a
+ * pending promise so the caller can stream them in after the list paints.
  */
 async function loadHomesListings(
 	query: CatalogListQuery,
@@ -168,26 +208,27 @@ async function loadHomesListings(
 			limit: result.limit,
 			offset: result.offset,
 			priceBounds: result.priceBounds,
-			prices: searchPriceMap(result.items),
+			pricesPromise: Promise.resolve(searchPriceMap(result.items)),
 			total: result.total,
 		};
 	}
 
-	const result = await getCachedCatalogList(query, scope);
-	const [advisory, priceBounds] = await Promise.all([
-		getCachedAdvisoryPrices(
-			scope,
-			result.items.map((item) => item.id),
-		),
+	const [result, priceBounds] = await Promise.all([
+		getCachedCatalogList(query, scope),
 		getCachedPriceBounds(query, scope),
 	]);
+
+	const pricesPromise = getCachedAdvisoryPrices(
+		scope,
+		result.items.map((item) => item.id),
+	).then(advisoryPriceMap);
 
 	return {
 		items: result.items,
 		limit: result.limit,
 		offset: result.offset,
 		priceBounds,
-		prices: advisoryPriceMap(advisory),
+		pricesPromise,
 		total: result.total,
 	};
 }
@@ -245,14 +286,16 @@ async function HomesContent({
 				</div>
 
 				<div className="h-72 overflow-hidden rounded-2xl border shadow-sm lg:hidden">
-					<ListingsMapSlot
-						slot="mobile"
-						stayQuery={stayQuery}
-						listings={result.items}
-						prices={result.prices}
-						center={mapCenter}
-						zoom={mapZoom}
-					/>
+					<Suspense fallback={<Skeleton className="h-full w-full" />}>
+						<StreamingMapSlot
+							slot="mobile"
+							stayQuery={stayQuery}
+							listings={result.items}
+							pricesPromise={result.pricesPromise}
+							center={mapCenter}
+							zoom={mapZoom}
+						/>
+					</Suspense>
 				</div>
 
 				<div className="grid grid-cols-1 gap-6 lg:grid-cols-[1fr_minmax(340px,400px)]">
@@ -262,21 +305,23 @@ async function HomesContent({
 							limit={result.limit}
 							listings={result.items}
 							offset={result.offset}
-							prices={result.prices}
+							pricesPromise={result.pricesPromise}
 							stayQuery={stayQuery}
 							total={result.total}
 						/>
 					</HomesPendingResults>
 					<aside className="hidden lg:block">
 						<div className="sticky top-24 h-[calc(100vh-7rem)] overflow-hidden rounded-2xl border shadow-sm">
-							<ListingsMapSlot
-								slot="desktop"
-								stayQuery={stayQuery}
-								listings={result.items}
-								prices={result.prices}
-								center={mapCenter}
-								zoom={mapZoom}
-							/>
+							<Suspense fallback={<Skeleton className="h-full w-full" />}>
+								<StreamingMapSlot
+									slot="desktop"
+									stayQuery={stayQuery}
+									listings={result.items}
+									pricesPromise={result.pricesPromise}
+									center={mapCenter}
+									zoom={mapZoom}
+								/>
+							</Suspense>
 						</div>
 					</aside>
 				</div>

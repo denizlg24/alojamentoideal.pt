@@ -6,8 +6,10 @@ import type {
 	ProcessedAmenity,
 } from "@workspace/db";
 import { hostifyPropertyTypeLabel } from "../hostify-property-types";
+import { HOSTIFY_AMENITY_CATALOG } from "./amenity-catalog";
 import { AMENITY_ICON_SET, pickAmenityIcon } from "./amenity-icons";
-import { sanitizeProviderPayload, stableHash } from "./hash";
+import { sanitizeProviderPayload } from "./hash";
+import { versionedHash } from "./sync-version";
 
 export interface HostifyListingSections {
 	fees: unknown;
@@ -74,11 +76,11 @@ export function buildListingCacheProjection(
 	};
 
 	const sectionHashes: ListingSectionHashes = {
-		amenities: stableHash(amenities),
-		description: stableHash({ description }),
-		fees: stableHash(raw.fees),
-		guide: stableHash(raw.guestGuide),
-		location: stableHash({
+		amenities: versionedHash(amenities),
+		description: versionedHash({ description }),
+		fees: versionedHash(raw.fees),
+		guide: versionedHash(raw.guestGuide),
+		location: versionedHash({
 			address: readString(listing, "address"),
 			city: readString(listing, "city"),
 			country: readString(listing, "country"),
@@ -88,13 +90,13 @@ export function buildListingCacheProjection(
 			timezone: readString(listing, "timezone"),
 			zipcode: readScalarString(listing, "zipcode"),
 		}),
-		photos: stableHash(raw.photos),
-		status: stableHash(raw.status),
-		title: stableHash({
+		photos: versionedHash(raw.photos),
+		status: versionedHash(raw.status),
+		title: versionedHash({
 			name: readString(listing, "name"),
 			nickname: readString(listing, "nickname"),
 		}),
-		translations: stableHash(translations),
+		translations: versionedHash(translations),
 	};
 
 	return {
@@ -113,7 +115,7 @@ export function buildListingCacheProjection(
 		normalized,
 		personCapacity: readNumber(listing, "person_capacity"),
 		processedFallback: {
-			amenities: toFallbackAmenities(amenities),
+			amenities: toProcessedAmenities(amenities),
 			description: repeatLocalized(description),
 			guide: repeatLocalized(guideText),
 			model: null,
@@ -130,7 +132,7 @@ export function buildListingCacheProjection(
 		]),
 		raw,
 		sectionHashes,
-		sourceHash: stableHash(raw),
+		sourceHash: versionedHash(raw),
 		timezone: readString(listing, "timezone"),
 	};
 }
@@ -182,16 +184,27 @@ function sanitizeSections(
 	};
 }
 
-function toFallbackAmenities(amenities: unknown[]): ProcessedAmenity[] {
-	return extractAmenityInputs(amenities).map((amenity) => ({
-		icon: {
-			name: pickAmenityIcon(amenity.sourceLabel),
-			set: AMENITY_ICON_SET,
-		},
-		id: amenity.id,
-		labels: repeatLocalized(amenity.sourceLabel),
-		sourceLabel: amenity.sourceLabel,
-	}));
+/**
+ * Resolves each listing amenity to its canonical icon and label. Known Hostify
+ * ids take their icon and English label from the static catalog so icons stay
+ * consistent across listings and filtering is deterministic; unknown ids fall
+ * back to the keyword heuristic over the provider's source label.
+ */
+function toProcessedAmenities(amenities: unknown[]): ProcessedAmenity[] {
+	return extractAmenityInputs(amenities).map((amenity) => {
+		const entry = amenity.id ? HOSTIFY_AMENITY_CATALOG[amenity.id] : undefined;
+		const label = entry?.label ?? amenity.sourceLabel;
+
+		return {
+			icon: {
+				name: entry?.icon ?? pickAmenityIcon(amenity.sourceLabel),
+				set: AMENITY_ICON_SET,
+			},
+			id: amenity.id,
+			labels: repeatLocalized(label),
+			sourceLabel: amenity.sourceLabel,
+		};
+	});
 }
 
 function extractAmenities(listing: Record<string, unknown>): unknown[] {
