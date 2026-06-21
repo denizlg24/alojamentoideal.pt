@@ -1,4 +1,5 @@
 import type { AmenityIconName } from "@workspace/core/listing-cache";
+import type { IconType } from "react-icons";
 import {
 	FaBaby,
 	FaBabyCarriage,
@@ -92,7 +93,6 @@ import {
 	FaWind,
 	FaWineBottle,
 	FaWineGlass,
-	type IconType,
 } from "react-icons/fa6";
 
 const AMENITY_ICONS: Record<AmenityIconName, IconType> = {
