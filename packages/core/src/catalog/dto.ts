@@ -5,6 +5,7 @@ import type {
 	ProcessedAmenity,
 } from "@workspace/db";
 import { hostifyPropertyTypeLabel } from "../hostify-property-types";
+import { publicAmenityGroupForInput } from "../listing-cache/amenity-groups";
 import type { CatalogLocale } from "./params";
 
 export interface CatalogAmenityDto {
@@ -123,12 +124,14 @@ export function toCatalogListingSummary(
 ): CatalogListingSummaryDto {
 	const now = options.now ?? new Date();
 	const photos = extractPhotos(record.raw);
+	const amenities = toCatalogAmenities(
+		record.processed.amenities,
+		options.locale,
+	);
 
 	return {
-		amenities: record.processed.amenities.map((amenity) =>
-			toAmenity(amenity, options.locale),
-		),
-		amenityCount: record.processed.amenities.length,
+		amenities,
+		amenityCount: amenities.length,
 		capacity: {
 			bathrooms: record.bathrooms,
 			bedrooms: record.bedrooms,
@@ -187,12 +190,46 @@ function toAmenity(
 	amenity: ProcessedAmenity,
 	locale: CatalogLocale,
 ): CatalogAmenityDto {
+	const group = publicAmenityGroupForInput({
+		id: amenity.id,
+		sourceLabel: amenity.sourceLabel,
+	});
+
+	if (group) {
+		return {
+			icon: { name: group.icon, set: amenity.icon.set },
+			id: group.key,
+			key: group.key,
+			label: group.label,
+		};
+	}
+
 	return {
 		icon: { name: amenity.icon.name, set: amenity.icon.set },
 		id: amenity.id,
 		key: amenity.id ?? amenity.sourceLabel,
 		label: pickLocalized(amenity.labels, locale) || amenity.sourceLabel,
 	};
+}
+
+function toCatalogAmenities(
+	amenities: ProcessedAmenity[],
+	locale: CatalogLocale,
+): CatalogAmenityDto[] {
+	const seen = new Set<string>();
+	const catalogAmenities: CatalogAmenityDto[] = [];
+
+	for (const amenity of amenities) {
+		const mapped = toAmenity(amenity, locale);
+		if (seen.has(mapped.key)) {
+			continue;
+		}
+
+		seen.add(mapped.key);
+		catalogAmenities.push(mapped);
+	}
+
+	return catalogAmenities;
 }
 
 function pickPropertyType(record: CatalogListingRecord): string | null {

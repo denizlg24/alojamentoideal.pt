@@ -123,6 +123,37 @@ describe("toCatalogListingSummary", () => {
 		expect(summary.coverPhoto?.caption).toBe("Front");
 	});
 
+	test("uses grouped public amenities for amenities and count", () => {
+		const summary = toCatalogListingSummary(
+			record({
+				processed: {
+					...PROCESSED,
+					amenities: [
+						amenity("2", "Wireless Internet", "Wireless Internet"),
+						amenity("128", "FREE internet access", "FREE internet access"),
+						amenity("171", "Free Wireless Internet", "Free Wireless Internet"),
+						amenity("5", "Washer", "Washer"),
+						amenity("719", "Washer on property", "Washer on property"),
+						amenity("1", "TV", "TV"),
+					],
+				},
+			}),
+			{ locale: "en" },
+		);
+
+		expect(summary.amenityCount).toBe(3);
+		expect(summary.amenities.map((item) => item.key)).toEqual([
+			"wifi",
+			"washer",
+			"1",
+		]);
+		expect(summary.amenities.map((item) => item.label)).toEqual([
+			"Wifi",
+			"Washer",
+			"TV",
+		]);
+	});
+
 	test("falls back to raw listing property type", () => {
 		const summary = toCatalogListingSummary(
 			record({
@@ -234,6 +265,19 @@ describe("toCatalogListingSummary", () => {
 		expect(JSON.stringify(summary)).not.toContain("guestGuide");
 	});
 });
+
+function amenity(
+	id: string | null,
+	sourceLabel: string,
+	label: string,
+): AccommodationListingProcessedContent["amenities"][number] {
+	return {
+		icon: { name: "wifi", set: "fa6" },
+		id,
+		labels: { en: label, es: label, pt: label },
+		sourceLabel,
+	};
+}
 
 describe("toCatalogListingDetail", () => {
 	test("includes localized content, amenities, sorted photos and rooms", () => {
