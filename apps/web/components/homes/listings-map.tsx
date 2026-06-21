@@ -4,27 +4,11 @@ import "leaflet/dist/leaflet.css";
 import "./listings-map.css";
 import type { CatalogListingSummaryDto } from "@workspace/core/catalog";
 import L from "leaflet";
-import { ChevronLeft, ChevronRight, Star } from "lucide-react";
-import Link from "next/link";
-import {
-	type MouseEvent,
-	useCallback,
-	useEffect,
-	useMemo,
-	useRef,
-	useState,
-} from "react";
-import {
-	MapContainer,
-	Marker,
-	Popup,
-	TileLayer,
-	useMap,
-	useMapEvents,
-} from "react-leaflet";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { DEFAULT_MAP_ZOOM, PRESET_MAP_ZOOM } from "@/lib/catalog/locations";
 import {
 	type ListingCardPrice,
+	type ListingPriceDisplay,
 	listingPriceDisplay,
 } from "@/lib/catalog/pricing-display";
 
@@ -43,32 +27,17 @@ interface MappableListing {
 	listing: CatalogListingSummaryDto;
 }
 
-/**
- * Headline figure for a marker: the stay total when a date range is selected,
- * otherwise the advisory "from" nightly rate. Missing pricing stays unknown.
- */
 function markerPrice(
 	prices: Map<string, ListingCardPrice> | undefined,
 	listingId: string,
 ): number | null {
 	const price = prices?.get(listingId);
-	if (price) {
-		if (price.total != null) {
-			return Math.round(price.total);
-		}
-		if (price.nightlyFrom != null) {
-			return Math.round(price.nightlyFrom);
-		}
-	}
+	if (!price) return null;
+	if (price.total !== null) return Math.round(price.total);
+	if (price.nightlyFrom !== null) return Math.round(price.nightlyFrom);
 	return null;
 }
 
-/**
- * Price marker styled with the app theme tokens. The pulsing dot is anchored to
- * the exact coordinate, so nearby buildings remain visually distinct as the user
- * zooms in. When several listings share the exact spot, the cheapest price is
- * shown with a small count badge.
- */
 function priceIcon(price: number | null, count: number): L.DivIcon {
 	const badge =
 		count > 1
@@ -79,6 +48,7 @@ function priceIcon(price: number | null, count: number): L.DivIcon {
 	const pillHeight = 24;
 	const tailHeight = 7;
 	const height = pillHeight + tailHeight;
+
 	return L.divIcon({
 		className: "",
 		html: `<div style="display:flex;flex-direction:column;align-items:center;width:${width}px;height:${height}px;filter:drop-shadow(0 2px 3px rgba(0,0,0,0.3));">
@@ -90,33 +60,31 @@ function priceIcon(price: number | null, count: number): L.DivIcon {
 	});
 }
 
-/** Re-frames the map to the current markers whenever the result set changes. */
-function FitToMarkers({ points }: { points: [number, number][] }) {
-	const map = useMap();
-
-	useEffect(() => {
-		map.invalidateSize();
-		const [first] = points;
-		if (!first) return;
-		if (points.length === 1) {
-			map.setView(first, PRESET_MAP_ZOOM);
-			return;
-		}
-		map.fitBounds(points, { padding: [48, 48] });
-	}, [map, points]);
-
-	return null;
+function escapeHtml(value: string): string {
+	return value
+		.replaceAll("&", "&amp;")
+		.replaceAll("<", "&lt;")
+		.replaceAll(">", "&gt;")
+		.replaceAll('"', "&quot;")
+		.replaceAll("'", "&#39;");
 }
 
-function PopupCard({
-	listing,
-	price,
-	stayQuery,
-}: {
-	listing: CatalogListingSummaryDto;
-	price?: ListingCardPrice;
-	stayQuery?: string;
-}) {
+function priceHtml(priceInfo: ListingPriceDisplay): string {
+	const lead = priceInfo.lead
+		? `<span class="popup-price-lead">${escapeHtml(priceInfo.lead)}</span>`
+		: "";
+	const sub = priceInfo.sub
+		? `<span class="popup-price-sub">${escapeHtml(priceInfo.sub)}</span>`
+		: "";
+
+	return `<span class="popup-price">${lead}<span class="popup-price-main">${escapeHtml(priceInfo.main)}</span>${sub}</span>`;
+}
+
+function popupListingHtml(
+	listing: CatalogListingSummaryDto,
+	price: ListingCardPrice | undefined,
+	stayQuery: string | undefined,
+): string {
 	const photo = listing.coverPhoto;
 	const rating = listing.reviews.average;
 	const priceInfo = listingPriceDisplay(price, listing.id);
@@ -124,123 +92,29 @@ function PopupCard({
 		[listing.location.city, listing.location.country]
 			.filter(Boolean)
 			.join(", ") || null;
+	const href = `/homes/${encodeURIComponent(listing.id)}${stayQuery ?? ""}`;
+	const image = photo
+		? `<div class="popup-photo"><img src="${escapeHtml(photo.thumbnailUrl ?? photo.url)}" alt="${escapeHtml(photo.caption ?? listing.title)}" /></div>`
+		: `<div class="popup-photo popup-photo-empty">No photo</div>`;
+	const ratingHtml =
+		rating !== null
+			? `<span class="popup-rating">★ <strong>${rating.toFixed(1)}</strong> <span>(${listing.reviews.count})</span></span>`
+			: "";
+	const locationHtml = location
+		? `<span class="popup-location">${escapeHtml(location)}</span>`
+		: "";
 
-	return (
-		<Link
-			href={`/homes/${listing.id}${stayQuery ?? ""}`}
-			className="block w-50"
-		>
-			<div className="relative aspect-video w-full bg-muted">
-				{photo ? (
-					// biome-ignore lint/performance/noImgElement: Leaflet popups render outside Next's Image pipeline.
-					<img
-						src={photo.thumbnailUrl ?? photo.url}
-						alt={listing.title}
-						className="h-full w-full object-cover"
-					/>
-				) : (
-					<div className="flex h-full w-full items-center justify-center text-muted-foreground text-xs">
-						No photo
-					</div>
-				)}
-			</div>
-			<div className="flex flex-col gap-0.5 p-3">
-				{rating !== null && (
-					<span className="flex items-center gap-1 text-xs">
-						<Star className="size-3 fill-amber-500 text-amber-500" />
-						<span className="font-medium text-foreground">
-							{rating.toFixed(1)}
-						</span>
-						<span className="text-muted-foreground">
-							({listing.reviews.count})
-						</span>
-					</span>
-				)}
-				<span className="line-clamp-1 font-semibold text-foreground text-sm">
-					{listing.title}
-				</span>
-				{location && (
-					<span className="line-clamp-1 text-muted-foreground text-xs">
-						{location}
-					</span>
-				)}
-				<span className="mt-1 flex items-baseline gap-1">
-					{priceInfo.lead && (
-						<span className="text-muted-foreground text-xs">
-							{priceInfo.lead}
-						</span>
-					)}
-					<span className="font-semibold text-foreground text-sm">
-						{priceInfo.main}
-					</span>
-					<span className="text-muted-foreground text-xs">{priceInfo.sub}</span>
-				</span>
-			</div>
-		</Link>
-	);
+	return `<a href="${escapeHtml(href)}" class="popup-card">
+		${image}
+		<span class="popup-body">
+			${ratingHtml}
+			<span class="popup-title">${escapeHtml(listing.title)}</span>
+			${locationHtml}
+			${priceHtml(priceInfo)}
+		</span>
+	</a>`;
 }
 
-/**
- * Popup contents for a single map pin. When multiple listings share the exact
- * coordinate (e.g. apartments in the same building) it becomes a small carousel
- * so each home is reachable from the one marker.
- */
-function MarkerPopup({
-	listings,
-	prices,
-	stayQuery,
-}: {
-	listings: CatalogListingSummaryDto[];
-	prices?: Map<string, ListingCardPrice>;
-	stayQuery?: string;
-}) {
-	const [index, setIndex] = useState(0);
-	const count = listings.length;
-	const current = listings[Math.min(index, count - 1)];
-
-	const step = (delta: number) => (event: MouseEvent) => {
-		event.preventDefault();
-		event.stopPropagation();
-		setIndex((value) => (value + delta + count) % count);
-	};
-
-	if (!current) return null;
-
-	return (
-		<div className="relative w-50">
-			<PopupCard
-				listing={current}
-				price={prices?.get(current.id)}
-				stayQuery={stayQuery}
-			/>
-			{count > 1 && (
-				<>
-					<button
-						type="button"
-						aria-label="Previous home"
-						onClick={step(-1)}
-						className="absolute top-14 left-1.5 flex size-7 -translate-y-1/2 items-center justify-center rounded-full border bg-card/90 text-foreground shadow-sm backdrop-blur transition-colors hover:bg-card"
-					>
-						<ChevronLeft className="size-4" />
-					</button>
-					<button
-						type="button"
-						aria-label="Next home"
-						onClick={step(1)}
-						className="absolute top-14 right-1.5 flex size-7 -translate-y-1/2 items-center justify-center rounded-full border bg-card/90 text-foreground shadow-sm backdrop-blur transition-colors hover:bg-card"
-					>
-						<ChevronRight className="size-4" />
-					</button>
-					<span className="absolute top-2 right-2 rounded-full bg-black/60 px-1.5 py-0.5 font-medium text-[10px] text-white">
-						{index + 1}/{count}
-					</span>
-				</>
-			)}
-		</div>
-	);
-}
-
-/** Merge radius in screen pixels; markers closer than this collapse into one. */
 const CLUSTER_PIXEL_RADIUS = 44;
 
 interface MarkerCluster {
@@ -251,85 +125,111 @@ interface MarkerCluster {
 	minPrice: number | null;
 }
 
-/**
- * Renders the markers, clustering listings that would overlap on screen.
- * Distance is measured in projected pixels at the current zoom, so neighbouring
- * buildings merge into one pin when zoomed out and split apart as the user
- * zooms in. Same-spot listings stay reachable through the popup carousel.
- */
-function ClusteredMarkers({
+function buildClusters({
+	map,
 	mappable,
 	prices,
-	stayQuery,
 }: {
+	map: L.Map;
 	mappable: MappableListing[];
 	prices?: Map<string, ListingCardPrice>;
-	stayQuery?: string;
-}) {
-	const map = useMap();
-	const [zoom, setZoom] = useState(() => map.getZoom());
+}): MarkerCluster[] {
+	const zoom = map.getZoom();
+	const result: Array<MarkerCluster & { x: number; y: number }> = [];
 
-	useMapEvents({
-		zoomend: () => setZoom(map.getZoom()),
-	});
+	for (const entry of mappable) {
+		const point = map.project([entry.latitude, entry.longitude], zoom);
+		const price = markerPrice(prices, entry.id);
+		const hit = result.find(
+			(cluster) =>
+				Math.hypot(cluster.x - point.x, cluster.y - point.y) <
+				CLUSTER_PIXEL_RADIUS,
+		);
 
-	const clusters = useMemo<MarkerCluster[]>(() => {
-		const result: Array<MarkerCluster & { x: number; y: number }> = [];
-		for (const entry of mappable) {
-			const point = map.project([entry.latitude, entry.longitude], zoom);
-			const price = markerPrice(prices, entry.id);
-			const hit = result.find(
-				(cluster) =>
-					Math.hypot(cluster.x - point.x, cluster.y - point.y) <
-					CLUSTER_PIXEL_RADIUS,
-			);
-			if (hit) {
-				hit.listings.push(entry.listing);
-				hit.minPrice =
-					hit.minPrice === null
-						? price
-						: price === null
-							? hit.minPrice
-							: Math.min(hit.minPrice, price);
-			} else {
-				result.push({
-					key: entry.id,
-					latitude: entry.latitude,
-					listings: [entry.listing],
-					longitude: entry.longitude,
-					minPrice: price,
-					x: point.x,
-					y: point.y,
-				});
-			}
+		if (hit) {
+			hit.listings.push(entry.listing);
+			hit.minPrice =
+				hit.minPrice === null
+					? price
+					: price === null
+						? hit.minPrice
+						: Math.min(hit.minPrice, price);
+		} else {
+			result.push({
+				key: entry.id,
+				latitude: entry.latitude,
+				listings: [entry.listing],
+				longitude: entry.longitude,
+				minPrice: price,
+				x: point.x,
+				y: point.y,
+			});
 		}
-		return result;
-	}, [mappable, prices, zoom, map]);
+	}
 
-	return (
-		<>
-			{clusters.map((cluster) => (
-				<Marker
-					key={cluster.key}
-					position={[cluster.latitude, cluster.longitude]}
-					icon={priceIcon(cluster.minPrice, cluster.listings.length)}
-				>
-					<Popup
-						className="listing-popup"
-						closeButton={false}
-						minWidth={200}
-						maxWidth={200}
-					>
-						<MarkerPopup
-							listings={cluster.listings}
-							prices={prices}
-							stayQuery={stayQuery}
-						/>
-					</Popup>
-				</Marker>
-			))}
-		</>
-	);
+	return result;
+}
+
+function popupClusterElement(
+	cluster: MarkerCluster,
+	prices: Map<string, ListingCardPrice> | undefined,
+	stayQuery: string | undefined,
+): HTMLElement {
+	const wrapper = document.createElement("div");
+	wrapper.className = "popup-carousel";
+
+	let index = 0;
+	const count = cluster.listings.length;
+	const card = document.createElement("div");
+	card.className = "popup-carousel-card";
+
+	const render = () => {
+		const listing = cluster.listings[index];
+		if (!listing) return;
+		card.innerHTML = popupListingHtml(
+			listing,
+			prices?.get(listing.id),
+			stayQuery,
+		);
+	};
+
+	render();
+	wrapper.append(card);
+
+	if (count > 1) {
+		const previous = document.createElement("button");
+		previous.type = "button";
+		previous.className = "popup-carousel-button popup-carousel-previous";
+		previous.ariaLabel = "Previous home";
+		previous.textContent = "‹";
+
+		const next = document.createElement("button");
+		next.type = "button";
+		next.className = "popup-carousel-button popup-carousel-next";
+		next.ariaLabel = "Next home";
+		next.textContent = "›";
+
+		const counter = document.createElement("span");
+		counter.className = "popup-carousel-counter";
+
+		const update = () => {
+			counter.textContent = `${index + 1}/${count}`;
+			render();
+		};
+		const step = (delta: number) => (event: MouseEvent) => {
+			event.preventDefault();
+			event.stopPropagation();
+			index = (index + delta + count) % count;
+			update();
+		};
+
+		previous.addEventListener("click", step(-1));
+		next.addEventListener("click", step(1));
+		update();
+		wrapper.append(previous, next, counter);
+	}
+
+	return wrapper;
 }
 
 export function ListingsMap({
@@ -339,18 +239,19 @@ export function ListingsMap({
 	stayQuery,
 	zoom,
 }: ListingsMapProps) {
+	const [mapHandle, setMapHandle] = useState<{
+		layer: L.LayerGroup;
+		map: L.Map;
+	} | null>(null);
 	const [mounted, setMounted] = useState(false);
-	const [mapReady, setMapReady] = useState(false);
-	const instanceKey = useRef(
-		`leaflet-map-${Date.now()}-${Math.random().toString(36).slice(2)}`,
-	);
+	const containerRef = useRef<HTMLDivElement | null>(null);
+	const mapHandleRef = useRef<{
+		layer: L.LayerGroup;
+		map: L.Map;
+	} | null>(null);
 
 	useEffect(() => {
 		setMounted(true);
-	}, []);
-
-	const handleMapReady = useCallback(() => {
-		setMapReady(true);
 	}, []);
 
 	const mappable = useMemo<MappableListing[]>(
@@ -363,33 +264,79 @@ export function ListingsMap({
 		[listings],
 	);
 
-	const points = useMemo<[number, number][]>(
-		() => mappable.map((entry) => [entry.latitude, entry.longitude]),
-		[mappable],
-	);
+	useEffect(() => {
+		const container = containerRef.current;
+		if (!mounted || !container) return;
+
+		const existing = mapHandleRef.current;
+		if (existing) {
+			existing.map.setView(
+				[center.latitude, center.longitude],
+				zoom ?? DEFAULT_MAP_ZOOM,
+			);
+			existing.map.invalidateSize();
+			setMapHandle(existing);
+			return;
+		}
+
+		const map = L.map(container, {
+			center: [center.latitude, center.longitude],
+			scrollWheelZoom: true,
+			zoom: zoom ?? DEFAULT_MAP_ZOOM,
+		});
+		const layer = L.layerGroup().addTo(map);
+
+		L.tileLayer(
+			"https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png",
+		).addTo(map);
+
+		const handle = { layer, map };
+		mapHandleRef.current = handle;
+		setMapHandle(handle);
+	}, [center.latitude, center.longitude, mounted, zoom]);
+
+	useEffect(() => {
+		if (!mapHandle) return;
+		const { layer, map } = mapHandle;
+
+		const renderMarkers = () => {
+			if (!map.getPane("markerPane")) return;
+			layer.clearLayers();
+			for (const cluster of buildClusters({ map, mappable, prices })) {
+				L.marker([cluster.latitude, cluster.longitude], {
+					icon: priceIcon(cluster.minPrice, cluster.listings.length),
+				})
+					.bindPopup(popupClusterElement(cluster, prices, stayQuery), {
+						className: "listing-popup",
+						closeButton: false,
+						maxWidth: 240,
+						minWidth: 200,
+					})
+					.addTo(layer);
+			}
+		};
+
+		map.invalidateSize();
+		const points = mappable.map(
+			(entry) => [entry.latitude, entry.longitude] as [number, number],
+		);
+		const [first] = points;
+		if (first) {
+			if (points.length === 1) {
+				map.setView(first, PRESET_MAP_ZOOM);
+			} else {
+				map.fitBounds(points, { padding: [48, 48] });
+			}
+		}
+
+		renderMarkers();
+		map.on("zoomend", renderMarkers);
+		return () => {
+			map.off("zoomend", renderMarkers);
+		};
+	}, [mapHandle, mappable, prices, stayQuery]);
 
 	if (!mounted) return null;
 
-	return (
-		<MapContainer
-			key={instanceKey.current}
-			center={[center.latitude, center.longitude]}
-			zoom={zoom ?? DEFAULT_MAP_ZOOM}
-			scrollWheelZoom
-			className="h-full w-full"
-			whenReady={handleMapReady}
-		>
-			{mapReady && (
-				<>
-					<TileLayer url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png" />
-					<ClusteredMarkers
-						mappable={mappable}
-						prices={prices}
-						stayQuery={stayQuery}
-					/>
-					<FitToMarkers points={points} />
-				</>
-			)}
-		</MapContainer>
-	);
+	return <div ref={containerRef} className="h-full w-full" />;
 }
