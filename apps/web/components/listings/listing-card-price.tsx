@@ -85,16 +85,16 @@ export function ListingCardPriceSkeleton({
 }) {
 	if (layout === "row") {
 		return (
-			<span className="flex flex-col items-end gap-1">
+			<div className="flex flex-col items-end gap-1">
 				<Skeleton className="h-6 w-16" />
 				<Skeleton className="h-3 w-12" />
-			</span>
+			</div>
 		);
 	}
 
 	return (
-		<p className="flex items-baseline gap-1 pt-0.5">
+		<div className="flex items-baseline gap-1 pt-0.5">
 			<Skeleton className="h-4 w-20" />
-		</p>
+		</div>
 	);
 }

@@ -3,7 +3,7 @@
 import { cn } from "@workspace/ui/lib/utils";
 import { MapPin } from "lucide-react";
 import { useSearchParams } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { buildHomesHref, parseHomesFilters } from "@/lib/catalog/homes-filters";
 import { CATALOG_LOCATION_PRESETS } from "@/lib/catalog/locations";
 import { useHomesPending } from "./homes-pending";
@@ -35,21 +35,26 @@ function RailChip({
 }
 
 export function LocationRail() {
-	const { navigate } = useHomesPending();
+	const { isPending, navigate } = useHomesPending();
 	const searchParams = useSearchParams();
 	const committedPlace = searchParams.get("place");
 
 	// Highlight the selection optimistically so the active pill updates instantly
 	// while the navigation transition is in flight. We remember which committed
 	// value the optimistic pick was made against and drop it once the URL catches
-	// up (the render-time "previous value" pattern, no effect needed).
+	// up or the transition completes.
 	const [optimistic, setOptimistic] = useState<{
 		from: string | null;
 		place: string | null;
 	} | null>(null);
-	if (optimistic && optimistic.from !== committedPlace) {
-		setOptimistic(null);
-	}
+
+	// Clear optimistic state when the committed place changes or transition completes
+	useEffect(() => {
+		if (optimistic && (optimistic.from !== committedPlace || !isPending)) {
+			setOptimistic(null);
+		}
+	}, [committedPlace, isPending, optimistic]);
+
 	const place = optimistic ? optimistic.place : committedPlace;
 
 	const select = (id: string | null) => {

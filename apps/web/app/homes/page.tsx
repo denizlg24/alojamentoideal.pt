@@ -221,7 +221,13 @@ async function loadHomesListings(
 	const pricesPromise = getCachedAdvisoryPrices(
 		scope,
 		result.items.map((item) => item.id),
-	).then(advisoryPriceMap);
+	)
+		.then(advisoryPriceMap)
+		.catch((error) => {
+			// Log error and gracefully degrade to empty prices map
+			console.error("Failed to load advisory prices:", error);
+			return advisoryPriceMap([]);
+		});
 
 	return {
 		items: result.items,

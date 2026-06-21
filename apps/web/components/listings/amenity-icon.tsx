@@ -92,8 +92,8 @@ import {
 	FaWind,
 	FaWineBottle,
 	FaWineGlass,
+	type IconType,
 } from "react-icons/fa6";
-import type { IconType } from "react-icons/lib";
 
 const AMENITY_ICONS: Record<AmenityIconName, IconType> = {
 	FaBaby,

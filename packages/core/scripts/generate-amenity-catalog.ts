@@ -33,11 +33,24 @@ interface Entry {
 	label: string;
 }
 
+/**
+ * Decodes common HTML entities in amenity labels.
+ */
+function decodeHtmlEntities(text: string): string {
+	return text
+		.replace(/&amp;/g, "&")
+		.replace(/&lt;/g, "<")
+		.replace(/&gt;/g, ">")
+		.replace(/&quot;/g, '"')
+		.replace(/&#39;/g, "'")
+		.replace(/&apos;/g, "'");
+}
+
 const entries: Entry[] = Object.entries(raw)
 	.map(([id, label]) => ({
 		icon: AMENITY_ICON_OVERRIDES[id] ?? pickAmenityIcon(label),
 		id,
-		label: label.trim(),
+		label: decodeHtmlEntities(label).trim(),
 	}))
 	.filter((entry) => entry.id.length > 0 && entry.label.length > 0)
 	.sort((a, b) => Number(a.id) - Number(b.id));
