@@ -32,6 +32,13 @@ export interface NightlyPriceSummary {
 	listingId: string;
 }
 
+export interface ListingNight {
+	active: boolean;
+	date: string;
+	minStay: number | null;
+	price: number | null;
+}
+
 export interface StayAvailability {
 	available: boolean;
 	currency: string;
@@ -123,6 +130,45 @@ export class AccommodationPricingRepository {
 					accommodationListingNight.date,
 				],
 			});
+	}
+
+	/**
+	 * Reads the synced nightly calendar for a single listing across a date window,
+	 * powering the listing page's availability-aware date picker: inactive or
+	 * missing dates are unbookable, and `minStay` on a candidate arrival night
+	 * gates the shortest valid stay. Returned ordered by date for cheap windowing
+	 * on the client.
+	 */
+	async listNightsForListing(
+		scope: AccommodationScope,
+		listingExternalId: string,
+		input: { from: string; to: string },
+	): Promise<ListingNight[]> {
+		const rows = await this.#db
+			.select({
+				active: accommodationListingNight.active,
+				date: accommodationListingNight.date,
+				minStay: accommodationListingNight.minStay,
+				price: accommodationListingNight.price,
+			})
+			.from(accommodationListingNight)
+			.where(
+				and(
+					eq(accommodationListingNight.provider, scope.provider),
+					eq(accommodationListingNight.externalAccountId, scope.accountId),
+					eq(accommodationListingNight.listingExternalId, listingExternalId),
+					gte(accommodationListingNight.date, input.from),
+					lt(accommodationListingNight.date, input.to),
+				),
+			)
+			.orderBy(asc(accommodationListingNight.date));
+
+		return rows.map((row) => ({
+			active: row.active,
+			date: row.date,
+			minStay: row.minStay,
+			price: row.price === null ? null : Number(row.price),
+		}));
 	}
 
 	async fromPricesForListings(

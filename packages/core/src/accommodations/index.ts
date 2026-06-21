@@ -1,4 +1,5 @@
 export * from "./availability";
+export * from "./calendar";
 export * from "./config";
 export * from "./nightly-price-sync";
 export * from "./params";

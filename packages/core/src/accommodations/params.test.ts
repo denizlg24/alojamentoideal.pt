@@ -43,8 +43,28 @@ describe("parseQuoteBody", () => {
 
 		expect(parsed.success).toBe(true);
 		if (parsed.success) {
+			expect(parsed.data.adults).toBe(2);
+			expect(parsed.data.children).toBe(0);
 			expect(parsed.data.forceFresh).toBe(false);
 			expect(parsed.data.pets).toBe(0);
+		}
+	});
+
+	test("keeps adult and child counts when provided", () => {
+		const parsed = parseQuoteBody({
+			adults: 2,
+			checkIn: "2026-07-01",
+			checkOut: "2026-07-03",
+			children: 1,
+			guests: 3,
+			listingId: "123",
+		});
+
+		expect(parsed.success).toBe(true);
+		if (parsed.success) {
+			expect(parsed.data.adults).toBe(2);
+			expect(parsed.data.children).toBe(1);
+			expect(parsed.data.guests).toBe(3);
 		}
 	});
 });

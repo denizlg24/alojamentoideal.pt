@@ -3,9 +3,34 @@ import {
 	listingReview,
 	listingReviewSummary,
 } from "@workspace/db";
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNotNull, sql } from "drizzle-orm";
 
 export type ListingReviewSource = "external" | "internal";
+
+export interface ListingReviewDto {
+	accuracyRating: number | null;
+	channel: string | null;
+	checkinRating: number | null;
+	cleanRating: number | null;
+	comments: string;
+	communicationRating: number | null;
+	guestName: string | null;
+	id: string;
+	locationRating: number | null;
+	rating: number | null;
+	reviewedAt: string | null;
+	source: ListingReviewSource;
+	valueRating: number | null;
+}
+
+export interface ListingReviewCategoryAverages {
+	accuracy: number | null;
+	checkin: number | null;
+	cleanliness: number | null;
+	communication: number | null;
+	location: number | null;
+	value: number | null;
+}
 
 export interface UpsertReviewInput {
 	accountId: string;
@@ -111,6 +136,119 @@ export class ListingReviewRepository {
 					listingReview.externalId,
 				],
 			});
+	}
+
+	/**
+	 * Reads the published, commented reviews for a listing's public detail page,
+	 * newest first. Empty-comment reviews still feed the rating badge but have no
+	 * card to render, so they are filtered out here. `source` lets the UI tag each
+	 * card with its origin (external channel vs internal/direct guest).
+	 */
+	async listForListing(
+		provider: string,
+		accountId: string,
+		listingExternalId: string,
+		options: { limit: number },
+	): Promise<ListingReviewDto[]> {
+		const rows = await this.#db
+			.select({
+				accuracyRating: listingReview.accuracyRating,
+				channel: listingReview.channel,
+				checkinRating: listingReview.checkinRating,
+				cleanRating: listingReview.cleanRating,
+				comments: listingReview.comments,
+				communicationRating: listingReview.communicationRating,
+				guestName: listingReview.guestName,
+				id: listingReview.id,
+				locationRating: listingReview.locationRating,
+				rating: listingReview.rating,
+				reviewedAt: listingReview.reviewedAt,
+				source: listingReview.source,
+				valueRating: listingReview.valueRating,
+			})
+			.from(listingReview)
+			.where(
+				and(
+					eq(listingReview.provider, provider),
+					eq(listingReview.externalAccountId, accountId),
+					eq(listingReview.listingExternalId, listingExternalId),
+					eq(listingReview.status, "published"),
+					isNotNull(listingReview.comments),
+				),
+			)
+			.orderBy(desc(listingReview.reviewedAt))
+			.limit(options.limit);
+
+		return rows
+			.filter((row): row is typeof row & { comments: string } =>
+				Boolean(row.comments && row.comments.trim().length > 0),
+			)
+			.map((row) => ({
+				accuracyRating: row.accuracyRating,
+				channel: row.channel,
+				checkinRating: row.checkinRating,
+				cleanRating: row.cleanRating,
+				comments: row.comments,
+				communicationRating: row.communicationRating,
+				guestName: row.guestName,
+				id: row.id,
+				locationRating: row.locationRating,
+				rating: row.rating,
+				reviewedAt: row.reviewedAt?.toISOString() ?? null,
+				source: row.source === "internal" ? "internal" : "external",
+				valueRating: row.valueRating,
+			}));
+	}
+
+	/**
+	 * Averages each rating category across a listing's published reviews for the
+	 * reviews summary breakdown (Cleanliness, Accuracy, ...). Returns `null` per
+	 * category when no review carries that sub-rating.
+	 */
+	async categoryAveragesForListing(
+		provider: string,
+		accountId: string,
+		listingExternalId: string,
+	): Promise<ListingReviewCategoryAverages> {
+		const [row] = await this.#db
+			.select({
+				accuracy: sql<
+					number | null
+				>`avg(${listingReview.accuracyRating})::double precision`,
+				checkin: sql<
+					number | null
+				>`avg(${listingReview.checkinRating})::double precision`,
+				cleanliness: sql<
+					number | null
+				>`avg(${listingReview.cleanRating})::double precision`,
+				communication: sql<
+					number | null
+				>`avg(${listingReview.communicationRating})::double precision`,
+				location: sql<
+					number | null
+				>`avg(${listingReview.locationRating})::double precision`,
+				value: sql<
+					number | null
+				>`avg(${listingReview.valueRating})::double precision`,
+			})
+			.from(listingReview)
+			.where(
+				and(
+					eq(listingReview.provider, provider),
+					eq(listingReview.externalAccountId, accountId),
+					eq(listingReview.listingExternalId, listingExternalId),
+					eq(listingReview.status, "published"),
+				),
+			);
+
+		return {
+			accuracy: row?.accuracy ?? null,
+			checkin: row?.checkin ?? null,
+			cleanliness: row?.cleanliness ?? null,
+			communication: row?.communication ?? null,
+			location: row?.location ?? null,
+			value: row?.value ?? null,
+		};
 	}
 
 	/**

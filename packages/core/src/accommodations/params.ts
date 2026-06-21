@@ -28,6 +28,8 @@ export interface AvailabilityRequest {
 
 export interface QuoteRequest extends AvailabilityRequest {
 	accountId?: string;
+	adults: number;
+	children: number;
 	listingId: string;
 	pets: number;
 	providerId?: string;
@@ -53,8 +55,10 @@ const availabilitySchema = z.object({
 });
 
 const quoteSchema = z.object({
+	adults: z.coerce.number().int().min(1).max(30).optional(),
 	checkIn: dateString,
 	checkOut: dateString,
+	children: z.coerce.number().int().min(0).max(30).optional(),
 	forceFresh: z.boolean().optional().default(false),
 	guests: z.coerce.number().int().min(1).max(30),
 	listingId: z.string().trim().min(1),
@@ -109,6 +113,8 @@ export function parseQuoteBody(
 
 	return {
 		data: {
+			adults: parsed.data.adults ?? parsed.data.guests,
+			children: parsed.data.children ?? 0,
 			dates: dates.data,
 			forceFresh: parsed.data.forceFresh,
 			guests: parsed.data.guests,
