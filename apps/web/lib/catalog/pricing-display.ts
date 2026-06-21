@@ -2,7 +2,6 @@ import type {
 	AccommodationSearchListing,
 	NightlyPriceSummary,
 } from "@workspace/core/accommodations";
-import { placeholderNightlyPrice } from "./placeholder-price";
 
 /**
  * Client-safe pricing helpers (types, formatting, card/popup copy). Kept apart
@@ -96,19 +95,15 @@ export interface ListingPriceDisplay {
 
 /**
  * Shared price-block copy for listing cards and map popups. A live quote renders
- * the stay total; otherwise the advisory "from" nightly rate; and when no price
- * was wired at all we fall back to the deterministic placeholder.
+ * the stay total; otherwise the advisory "from" nightly rate. Missing pricing is
+ * intentionally displayed as unknown so we do not imply a rate we do not have.
  */
 export function listingPriceDisplay(
 	price: ListingCardPrice | undefined,
-	listingId: string,
+	_listingId: string,
 ): ListingPriceDisplay {
 	if (!price) {
-		return {
-			lead: null,
-			main: `€${placeholderNightlyPrice(listingId)}`,
-			sub: "per night",
-		};
+		return { lead: null, main: "---", sub: "" };
 	}
 
 	if (price.total !== null && price.nights !== null) {
@@ -128,5 +123,5 @@ export function listingPriceDisplay(
 		};
 	}
 
-	return { lead: null, main: "Unavailable", sub: "for these dates" };
+	return { lead: null, main: "---", sub: "" };
 }

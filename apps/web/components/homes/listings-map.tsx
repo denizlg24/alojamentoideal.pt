@@ -10,8 +10,8 @@ import {
 	type MouseEvent,
 	useCallback,
 	useEffect,
-	useId,
 	useMemo,
+	useRef,
 	useState,
 } from "react";
 import {
@@ -23,7 +23,6 @@ import {
 	useMapEvents,
 } from "react-leaflet";
 import { DEFAULT_MAP_ZOOM, PRESET_MAP_ZOOM } from "@/lib/catalog/locations";
-import { placeholderNightlyPrice } from "@/lib/catalog/placeholder-price";
 import {
 	type ListingCardPrice,
 	listingPriceDisplay,
@@ -46,13 +45,12 @@ interface MappableListing {
 
 /**
  * Headline figure for a marker: the stay total when a date range is selected,
- * otherwise the advisory "from" nightly rate, falling back to the deterministic
- * placeholder so a pin always shows a price.
+ * otherwise the advisory "from" nightly rate. Missing pricing stays unknown.
  */
 function markerPrice(
 	prices: Map<string, ListingCardPrice> | undefined,
 	listingId: string,
-): number {
+): number | null {
 	const price = prices?.get(listingId);
 	if (price) {
 		if (price.total != null) {
@@ -62,7 +60,7 @@ function markerPrice(
 			return Math.round(price.nightlyFrom);
 		}
 	}
-	return placeholderNightlyPrice(listingId);
+	return null;
 }
 
 /**
@@ -71,12 +69,12 @@ function markerPrice(
  * zooms in. When several listings share the exact spot, the cheapest price is
  * shown with a small count badge.
  */
-function priceIcon(price: number, count: number): L.DivIcon {
+function priceIcon(price: number | null, count: number): L.DivIcon {
 	const badge =
 		count > 1
 			? `<span style="position:absolute;top:-7px;right:-7px;display:flex;align-items:center;justify-content:center;min-width:17px;height:17px;padding:0 4px;background:var(--card);color:var(--primary);border:1px solid var(--primary);border-radius:9999px;font-size:10px;font-weight:700;line-height:1;">${count}</span>`
 			: "";
-	const label = count > 1 ? `€${price}+` : `€${price}`;
+	const label = price === null ? "---" : count > 1 ? `€${price}+` : `€${price}`;
 	const width = Math.max(46, label.length * 8 + 22);
 	const pillHeight = 24;
 	const tailHeight = 7;
@@ -250,7 +248,7 @@ interface MarkerCluster {
 	latitude: number;
 	longitude: number;
 	listings: CatalogListingSummaryDto[];
-	minPrice: number;
+	minPrice: number | null;
 }
 
 /**
@@ -287,7 +285,12 @@ function ClusteredMarkers({
 			);
 			if (hit) {
 				hit.listings.push(entry.listing);
-				hit.minPrice = Math.min(hit.minPrice, price);
+				hit.minPrice =
+					hit.minPrice === null
+						? price
+						: price === null
+							? hit.minPrice
+							: Math.min(hit.minPrice, price);
 			} else {
 				result.push({
 					key: entry.id,
@@ -338,7 +341,9 @@ export function ListingsMap({
 }: ListingsMapProps) {
 	const [mounted, setMounted] = useState(false);
 	const [mapReady, setMapReady] = useState(false);
-	const instanceKey = useId();
+	const instanceKey = useRef(
+		`leaflet-map-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+	);
 
 	useEffect(() => {
 		setMounted(true);
@@ -367,7 +372,7 @@ export function ListingsMap({
 
 	return (
 		<MapContainer
-			key={instanceKey}
+			key={instanceKey.current}
 			center={[center.latitude, center.longitude]}
 			zoom={zoom ?? DEFAULT_MAP_ZOOM}
 			scrollWheelZoom

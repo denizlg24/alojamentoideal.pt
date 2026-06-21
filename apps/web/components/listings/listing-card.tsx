@@ -196,7 +196,7 @@ export function ListingCard({
 						<CapacityRow stats={stats} />
 					</div>
 
-					<div className="flex md:items-end items-center justify-between gap-3 border-border/70 border-t pt-3 md:w-40 md:flex-col md:border-t-0 md:pt-0">
+					<div className="flex items-center justify-between gap-3 border-border/70 border-t pt-3 md:w-40 md:flex-col md:items-end md:border-t-0 md:pt-0">
 						<p className="flex items-baseline gap-1 md:flex-col md:items-end md:gap-0">
 							<span className="flex items-baseline gap-1 font-semibold text-xl leading-none">
 								{priceInfo.lead && (
