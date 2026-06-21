@@ -12,6 +12,8 @@ import { and, asc, eq, sql } from "drizzle-orm";
 import type { ListingProcessingStatus } from "./processor";
 
 export interface ListingState {
+	latitude: number | null;
+	longitude: number | null;
 	processedSourceHash: string | null;
 	processingStatus: string;
 	sourceHash: string;
@@ -51,6 +53,18 @@ export interface UpsertListingInput {
 	staleAfter: Date;
 	syncRunId: string;
 	timezone: string | null;
+}
+
+export interface RefreshListingCoordinatesInput {
+	accountId: string;
+	externalId: string;
+	fetchedAt: Date;
+	latitude: number | null;
+	longitude: number | null;
+	provider: string;
+	sectionHashes: ListingSectionHashes;
+	staleAfter: Date;
+	syncRunId: string;
 }
 
 export interface SyncRunInput {
@@ -126,6 +140,18 @@ export interface FinishSyncRunInput {
 	error?: string;
 	finishedAt: Date;
 	status: "completed" | "completed_with_errors" | "failed";
+}
+
+export interface SyncStateScopeInput {
+	accountId: string;
+	provider: string;
+	syncType: string;
+}
+
+export interface SyncStateSnapshot {
+	activeRunId: string | null;
+	lastCompletedAt: Date | null;
+	status: string;
 }
 
 export class ListingCacheRepository {
@@ -304,6 +330,33 @@ export class ListingCacheRepository {
 			);
 	}
 
+	async getSyncState(
+		input: SyncStateScopeInput,
+	): Promise<SyncStateSnapshot | null> {
+		const [row] = await this.#db
+			.select({
+				activeRunId: providerSyncState.activeRunId,
+				lastCompletedAt: providerSyncState.lastCompletedAt,
+				status: providerSyncState.status,
+			})
+			.from(providerSyncState)
+			.where(
+				and(
+					eq(providerSyncState.provider, input.provider),
+					eq(providerSyncState.externalAccountId, input.accountId),
+					eq(providerSyncState.syncType, input.syncType),
+				),
+			)
+			.limit(1);
+
+		return row ?? null;
+	}
+
+	async isSyncStateComplete(input: SyncStateScopeInput): Promise<boolean> {
+		const state = await this.getSyncState(input);
+		return state?.status === "complete" && state.lastCompletedAt !== null;
+	}
+
 	/**
 	 * Returns a stable, ordered page of cached listing external ids for a scope.
 	 * The review sync pages over these to fetch each listing's reviews; ordering
@@ -338,6 +391,8 @@ export class ListingCacheRepository {
 	): Promise<ListingState | null> {
 		const [row] = await this.#db
 			.select({
+				latitude: accommodationListing.latitude,
+				longitude: accommodationListing.longitude,
 				processedSourceHash: accommodationListing.processedSourceHash,
 				processingStatus: accommodationListing.processingStatus,
 				sourceHash: accommodationListing.sourceHash,
@@ -353,6 +408,37 @@ export class ListingCacheRepository {
 			.limit(1);
 
 		return row ?? null;
+	}
+
+	async refreshListingCoordinates(
+		input: RefreshListingCoordinatesInput,
+	): Promise<boolean> {
+		const now = new Date();
+		const [row] = await this.#db
+			.update(accommodationListing)
+			.set({
+				fetchedAt: input.fetchedAt,
+				latitude: input.latitude,
+				longitude: input.longitude,
+				sectionHashes: input.sectionHashes,
+				staleAfter: input.staleAfter,
+				syncRunId: input.syncRunId,
+				updatedAt: now,
+			})
+			.where(
+				and(
+					eq(accommodationListing.provider, input.provider),
+					eq(accommodationListing.externalAccountId, input.accountId),
+					eq(accommodationListing.externalId, input.externalId),
+					sql`(
+						${accommodationListing.latitude} is distinct from ${input.latitude}
+						or ${accommodationListing.longitude} is distinct from ${input.longitude}
+					)`,
+				),
+			)
+			.returning({ externalId: accommodationListing.externalId });
+
+		return row !== undefined;
 	}
 
 	async upsertListing(input: UpsertListingInput): Promise<void> {

@@ -21,7 +21,7 @@ missing or invalid, it returns `401`.
 | --- | --- | --- | --- |
 | `/api/cron/hostify/listings` | Pulls Hostify listing changes into the local listing cache. | Every 15 minutes, or at least hourly. | Revalidates catalog list pages and each changed listing detail tag. |
 | `/api/cron/hostify/reviews` | Pulls Hostify review changes and rating aggregates. | Every 30 minutes to 1 hour. | Revalidates catalog list pages and each listing whose review aggregate changed. |
-| `/api/cron/hostify/pricing` | Refreshes the rolling nightly advisory price cache. | Nightly, after Hostify calendar/pricing changes settle. | Revalidates advisory pricing used by homes list filters and cards. |
+| `/api/cron/hostify/pricing` | Advances the rolling nightly advisory price cache by one listing batch. | Every 15 minutes, or at least hourly. | Revalidates advisory pricing used by homes list filters and cards when nights changed. |
 
 ## Example pings
 
@@ -41,10 +41,16 @@ curl -fsS \
 
 ## Notes
 
-- Listing and review syncs are incremental and use provider sync state in the
-  database.
+- Listing, review and pricing syncs are incremental and use provider sync state
+  in the database.
+- Review and pricing syncs intentionally skip while the listing sync state is not
+  `complete`. After a fresh database reset, keep pinging `/api/cron/hostify/listings`
+  until it completes before expecting review or pricing data to fill in.
 - Pricing sync stores a forward-looking nightly price window. Its window size is
-  controlled by `ACCOMMODATION_NIGHTLY_PRICE_SYNC_DAYS`.
+  controlled by `ACCOMMODATION_NIGHTLY_PRICE_SYNC_DAYS`. Each request processes
+  up to `ACCOMMODATION_NIGHTLY_PRICE_SYNC_BATCH_SIZE` listings, then advances the
+  cursor until the pricing cycle completes and waits for
+  `ACCOMMODATION_NIGHTLY_PRICE_SYNC_INTERVAL_HOURS`.
 - Live availability and quote routes are user-facing request APIs, not scheduled
   sync routes:
   - `/api/accommodations/availability`

@@ -4,6 +4,7 @@ import {
 	type HostifyCalendarEntry,
 	type HostifyClient,
 } from "../integrations/hostify/index";
+import { ListingCacheRepository } from "../listing-cache/repository";
 import type { AccommodationsConfig } from "./config";
 import { getAccommodationsConfig } from "./config";
 import type {
@@ -13,8 +14,11 @@ import type {
 import { AccommodationPricingRepository as DefaultAccommodationPricingRepository } from "./repository";
 
 const HOSTIFY_PROVIDER = "hostify";
+const LISTING_CACHE_SYNC_TYPE = "listing_cache";
+const NIGHTLY_PRICE_SYNC_TYPE = "nightly_pricing";
 const MILLISECONDS_PER_DAY = 86_400_000;
 const MILLISECONDS_PER_HOUR = 60 * 60 * 1000;
+const MILLISECONDS_PER_MINUTE = 60 * 1000;
 
 /**
  * Hostify `/calendar` returns one entry per day and paginates. It has no total
@@ -35,6 +39,15 @@ export interface NightlyPriceSyncStats {
 	status: "completed" | "completed_with_errors" | "failed";
 }
 
+export interface NightlyPricePollResult {
+	data: NightlyPriceSyncStats | null;
+	nextPage: number | null;
+	nextRunAt: string | null;
+	page: number | null;
+	skipReason?: "listing_sync_incomplete";
+	status: "advanced" | "completed" | "failed" | "skipped";
+}
+
 export interface NightlyPriceSyncError {
 	error: string;
 	listingId: string;
@@ -45,13 +58,17 @@ interface NightlyPriceSyncOptions {
 	config: AccommodationsConfig;
 	now?: () => Date;
 	repository: AccommodationPricingRepository;
+	syncRepository: ListingCacheRepository;
 }
 
 export function createNightlyPriceSyncFromEnv(): NightlyPriceSync {
+	const db = getDb();
+
 	return new NightlyPriceSync({
 		client: createHostifyClientFromEnv(),
 		config: getAccommodationsConfig(),
-		repository: new DefaultAccommodationPricingRepository(getDb()),
+		repository: new DefaultAccommodationPricingRepository(db),
+		syncRepository: new ListingCacheRepository(db),
 	});
 }
 
@@ -71,29 +88,182 @@ export class NightlyPriceSync {
 	readonly #config: AccommodationsConfig;
 	readonly #now: () => Date;
 	readonly #repository: AccommodationPricingRepository;
+	readonly #sync: ListingCacheRepository;
 
 	constructor(options: NightlyPriceSyncOptions) {
 		this.#client = options.client;
 		this.#config = options.config;
 		this.#now = options.now ?? (() => new Date());
 		this.#repository = options.repository;
+		this.#sync = options.syncRepository;
 	}
 
 	async sync(trigger = "cron"): Promise<NightlyPriceSyncStats> {
 		const stats = emptyStats();
 		const scope = this.#scope();
-		const listingIds = await this.#repository.listActiveListingIds(
-			scope,
-			this.#config.nightlyPriceSyncMaxListings,
-		);
+		const listingIds = await this.#repository.listActiveListingIds(scope, {
+			limit: this.#config.nightlyPriceSyncMaxListings,
+		});
 		const range = syncRange(this.#now(), this.#config.nightlyPriceSyncDays);
 		const maxPages = this.#maxPages();
 
 		for (const listingId of listingIds) {
-			await this.#syncListingNights(listingId, scope, range, maxPages, stats);
+			await this.#syncListingNights(
+				listingId,
+				scope,
+				range,
+				maxPages,
+				stats,
+				null,
+			);
 		}
 
 		return finalizeStats(stats, trigger);
+	}
+
+	async pollPrices(trigger = "poll"): Promise<NightlyPricePollResult> {
+		const now = this.#now();
+		const scope = this.#scope();
+		const listingSyncReady = await this.#sync.isSyncStateComplete({
+			accountId: this.#config.hostifyAccountId,
+			provider: HOSTIFY_PROVIDER,
+			syncType: LISTING_CACHE_SYNC_TYPE,
+		});
+
+		if (!listingSyncReady) {
+			return skippedPollResult("listing_sync_incomplete");
+		}
+
+		const newRunId = crypto.randomUUID();
+		const claim = await this.#sync.claimSyncState({
+			accountId: this.#config.hostifyAccountId,
+			leaseExpiresAt: new Date(
+				now.getTime() +
+					this.#config.nightlyPriceSyncLeaseMinutes * MILLISECONDS_PER_MINUTE,
+			),
+			newRunId,
+			now,
+			provider: HOSTIFY_PROVIDER,
+			syncType: NIGHTLY_PRICE_SYNC_TYPE,
+		});
+
+		if (!claim) {
+			return skippedPollResult();
+		}
+
+		const runId = claim.activeRunId;
+		await this.#sync.createSyncRun({
+			id: runId,
+			provider: HOSTIFY_PROVIDER,
+			status: "running",
+			syncType: NIGHTLY_PRICE_SYNC_TYPE,
+			trigger,
+		});
+
+		const stats = emptyStats(runId);
+
+		try {
+			const listingIds = await this.#repository.listActiveListingIds(scope, {
+				limit: this.#config.nightlyPriceSyncBatchSize,
+				offset: (claim.nextPage - 1) * this.#config.nightlyPriceSyncBatchSize,
+			});
+			const range = syncRange(this.#now(), this.#config.nightlyPriceSyncDays);
+			const maxPages = this.#maxPages();
+
+			for (const listingId of listingIds) {
+				await this.#syncListingNights(
+					listingId,
+					scope,
+					range,
+					maxPages,
+					stats,
+					runId,
+				);
+			}
+
+			const totals = await this.#sync.incrementSyncRunStats(runId, {
+				listingsCreated: 0,
+				listingsFailed: stats.listingsFailed,
+				listingsSeen: stats.listingsSeen,
+				listingsUnchanged: 0,
+				listingsUpdated: stats.listingsSynced,
+			});
+
+			const finished =
+				listingIds.length === 0 ||
+				listingIds.length < this.#config.nightlyPriceSyncBatchSize ||
+				claim.nextPage >= this.#config.nightlyPriceSyncMaxPages;
+			const finishedAt = this.#now();
+
+			stats.status =
+				totals.listingsFailed > 0 ? "completed_with_errors" : "completed";
+
+			if (finished) {
+				await this.#sync.finishSyncRun(runId, {
+					finishedAt,
+					status: stats.status,
+				});
+				const nextRunAt = new Date(
+					finishedAt.getTime() +
+						this.#config.nightlyPriceSyncIntervalHours * MILLISECONDS_PER_HOUR,
+				);
+				await this.#sync.completeSyncState({
+					activeRunId: runId,
+					error:
+						stats.status === "completed_with_errors"
+							? `${totals.listingsFailed} listing(s) failed`
+							: undefined,
+					nextRunAt,
+					now: finishedAt,
+					provider: HOSTIFY_PROVIDER,
+				});
+
+				return {
+					data: stats,
+					nextPage: null,
+					nextRunAt: nextRunAt.toISOString(),
+					page: claim.nextPage,
+					status: "completed",
+				};
+			}
+
+			const nextPage = claim.nextPage + 1;
+			await this.#sync.advanceSyncState({
+				activeRunId: runId,
+				nextPage,
+				now: finishedAt,
+				provider: HOSTIFY_PROVIDER,
+			});
+
+			return {
+				data: stats,
+				nextPage,
+				nextRunAt: finishedAt.toISOString(),
+				page: claim.nextPage,
+				status: "advanced",
+			};
+		} catch (error) {
+			stats.status = "failed";
+			const failedAt = this.#now();
+			const message = normalizeError(error);
+			await this.#sync.finishSyncRun(runId, {
+				error: message,
+				finishedAt: failedAt,
+				status: stats.status,
+			});
+			await this.#sync.failSyncState({
+				activeRunId: runId,
+				error: message,
+				nextRunAt: new Date(
+					failedAt.getTime() +
+						this.#config.nightlyPriceSyncLeaseMinutes * MILLISECONDS_PER_MINUTE,
+				),
+				now: failedAt,
+				provider: HOSTIFY_PROVIDER,
+			});
+
+			throw error;
+		}
 	}
 
 	/**
@@ -115,6 +285,7 @@ export class NightlyPriceSync {
 			range,
 			this.#maxPages(),
 			stats,
+			null,
 		);
 
 		return finalizeStats(stats, trigger);
@@ -141,6 +312,7 @@ export class NightlyPriceSync {
 		range: { endDate: string; startDate: string },
 		maxPages: number,
 		stats: NightlyPriceSyncStats,
+		syncRunId: string | null,
 	): Promise<void> {
 		stats.listingsSeen += 1;
 		try {
@@ -150,6 +322,7 @@ export class NightlyPriceSync {
 					currency: this.#config.currency,
 					fetchedAt: this.#now(),
 					staleAfterHours: 24,
+					syncRunId,
 				}),
 			);
 
@@ -189,15 +362,30 @@ export class NightlyPriceSync {
 	}
 }
 
-function emptyStats(): NightlyPriceSyncStats {
+function emptyStats(
+	runId: string = crypto.randomUUID(),
+): NightlyPriceSyncStats {
 	return {
 		errors: [],
 		listingsFailed: 0,
 		listingsSeen: 0,
 		listingsSynced: 0,
 		nightsSynced: 0,
-		runId: crypto.randomUUID(),
+		runId,
 		status: "completed",
+	};
+}
+
+function skippedPollResult(
+	skipReason?: NightlyPricePollResult["skipReason"],
+): NightlyPricePollResult {
+	return {
+		data: null,
+		nextPage: null,
+		nextRunAt: null,
+		page: null,
+		skipReason,
+		status: "skipped",
 	};
 }
 
@@ -237,6 +425,7 @@ function toUpsertInput(
 		currency: string;
 		fetchedAt: Date;
 		staleAfterHours: number;
+		syncRunId: string | null;
 	},
 ) {
 	const status = entry.status ?? null;
@@ -260,7 +449,7 @@ function toUpsertInput(
 				options.staleAfterHours * MILLISECONDS_PER_HOUR,
 		),
 		status,
-		syncRunId: null,
+		syncRunId: options.syncRunId,
 	};
 }
 

@@ -25,13 +25,15 @@ export const GET = withApiRoute(
 		}
 
 		const sync = createNightlyPriceSyncFromEnv();
-		const result = await sync.sync("cron");
+		const result = await sync.pollPrices("poll");
 
-		revalidateTag(ADVISORY_PRICING_TAG, "max");
+		if ((result.data?.nightsSynced ?? 0) > 0) {
+			revalidateTag(ADVISORY_PRICING_TAG, "max");
+		}
 
 		return Response.json({
 			data: result,
-			success: result.status === "completed",
+			success: true,
 		});
 	},
 );

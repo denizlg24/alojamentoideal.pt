@@ -10,16 +10,17 @@ import { getListingCacheConfig } from "./config";
 import {
 	buildListingCacheProjection,
 	type HostifyListingSections,
+	type ListingCacheProjection,
 } from "./normalizer";
 import {
 	createListingContentProcessor,
 	type ListingContentProcessor,
 	listingProcessingInput,
 } from "./processor";
-import { ListingCacheRepository } from "./repository";
+import { ListingCacheRepository, type ListingState } from "./repository";
 
-const HOSTIFY_PROVIDER = "hostify";
-const LISTING_CACHE_SYNC_TYPE = "listing_cache";
+export const HOSTIFY_PROVIDER = "hostify";
+export const LISTING_CACHE_SYNC_TYPE = "listing_cache";
 const MILLISECONDS_PER_HOUR = 60 * 60 * 1000;
 const MILLISECONDS_PER_MINUTE = 60 * 1000;
 
@@ -301,9 +302,37 @@ export class HostifyListingCacheSync {
 				this.#processor.enabled &&
 				(existing?.processedSourceHash !== projection.sourceHash ||
 					existing?.processingStatus !== "processed");
+			const coordinateRefreshNeeded =
+				existing !== null && coordinatesChanged(existing, projection);
 
-			if (!sourceChanged && !processingNeeded) {
+			if (!sourceChanged && !processingNeeded && !coordinateRefreshNeeded) {
 				stats.listingsUnchanged += 1;
+				return;
+			}
+
+			if (!sourceChanged && !processingNeeded && coordinateRefreshNeeded) {
+				const fetchedAt = this.#now();
+				const updated = await this.#repository.refreshListingCoordinates({
+					accountId: this.#config.hostifyAccountId,
+					externalId: projection.externalId,
+					fetchedAt,
+					latitude: projection.latitude,
+					longitude: projection.longitude,
+					provider: HOSTIFY_PROVIDER,
+					sectionHashes: projection.sectionHashes,
+					staleAfter: new Date(
+						fetchedAt.getTime() +
+							this.#config.staleAfterHours * MILLISECONDS_PER_HOUR,
+					),
+					syncRunId: runId,
+				});
+
+				if (updated) {
+					stats.changedExternalIds.push(projection.externalId);
+					stats.listingsUpdated += 1;
+				} else {
+					stats.listingsUnchanged += 1;
+				}
 				return;
 			}
 
@@ -462,6 +491,27 @@ function asRecord(value: unknown): Record<string, unknown> {
 	return typeof value === "object" && value !== null && !Array.isArray(value)
 		? (value as Record<string, unknown>)
 		: {};
+}
+
+function coordinatesChanged(
+	existing: ListingState,
+	projection: ListingCacheProjection,
+): boolean {
+	return (
+		!sameNullableNumber(existing.latitude, projection.latitude) ||
+		!sameNullableNumber(existing.longitude, projection.longitude)
+	);
+}
+
+function sameNullableNumber(
+	left: number | null,
+	right: number | null,
+): boolean {
+	if (left === null || right === null) {
+		return left === right;
+	}
+
+	return Math.abs(left - right) < 1e-9;
 }
 
 function normalizeError(error: unknown): string {

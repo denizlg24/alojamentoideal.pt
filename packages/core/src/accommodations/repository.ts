@@ -50,7 +50,7 @@ export class AccommodationPricingRepository {
 
 	async listActiveListingIds(
 		scope: AccommodationScope,
-		limit: number,
+		input: { limit: number; offset?: number },
 	): Promise<string[]> {
 		const rows = await this.#db
 			.select({ externalId: accommodationListing.externalId })
@@ -63,7 +63,8 @@ export class AccommodationPricingRepository {
 				),
 			)
 			.orderBy(asc(accommodationListing.externalId))
-			.limit(limit);
+			.limit(input.limit)
+			.offset(input.offset ?? 0);
 
 		return rows.map((row) => row.externalId);
 	}

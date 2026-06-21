@@ -4,7 +4,11 @@ export interface AccommodationsConfig {
 	currency: string;
 	hostifyAccountId: string;
 	liveSearchCandidateLimit: number;
+	nightlyPriceSyncBatchSize: number;
 	nightlyPriceSyncDays: number;
+	nightlyPriceSyncIntervalHours: number;
+	nightlyPriceSyncLeaseMinutes: number;
+	nightlyPriceSyncMaxPages: number;
 	nightlyPriceSyncMaxListings: number;
 	quoteCacheTtlSeconds: number;
 }
@@ -13,7 +17,11 @@ interface AccommodationsEnvironment {
 	ACCOMMODATION_AVAILABILITY_CACHE_TTL_SECONDS?: string;
 	ACCOMMODATION_CURRENCY?: string;
 	ACCOMMODATION_LIVE_SEARCH_CANDIDATE_LIMIT?: string;
+	ACCOMMODATION_NIGHTLY_PRICE_SYNC_BATCH_SIZE?: string;
 	ACCOMMODATION_NIGHTLY_PRICE_SYNC_DAYS?: string;
+	ACCOMMODATION_NIGHTLY_PRICE_SYNC_INTERVAL_HOURS?: string;
+	ACCOMMODATION_NIGHTLY_PRICE_SYNC_LEASE_MINUTES?: string;
+	ACCOMMODATION_NIGHTLY_PRICE_SYNC_MAX_PAGES?: string;
 	ACCOMMODATION_NIGHTLY_PRICE_SYNC_MAX_LISTINGS?: string;
 	ACCOMMODATION_QUOTE_CACHE_TTL_SECONDS?: string;
 	CRON_SECRET?: string;
@@ -28,8 +36,16 @@ export function getAccommodationsConfig(
 		ACCOMMODATION_CURRENCY: process.env.ACCOMMODATION_CURRENCY,
 		ACCOMMODATION_LIVE_SEARCH_CANDIDATE_LIMIT:
 			process.env.ACCOMMODATION_LIVE_SEARCH_CANDIDATE_LIMIT,
+		ACCOMMODATION_NIGHTLY_PRICE_SYNC_BATCH_SIZE:
+			process.env.ACCOMMODATION_NIGHTLY_PRICE_SYNC_BATCH_SIZE,
 		ACCOMMODATION_NIGHTLY_PRICE_SYNC_DAYS:
 			process.env.ACCOMMODATION_NIGHTLY_PRICE_SYNC_DAYS,
+		ACCOMMODATION_NIGHTLY_PRICE_SYNC_INTERVAL_HOURS:
+			process.env.ACCOMMODATION_NIGHTLY_PRICE_SYNC_INTERVAL_HOURS,
+		ACCOMMODATION_NIGHTLY_PRICE_SYNC_LEASE_MINUTES:
+			process.env.ACCOMMODATION_NIGHTLY_PRICE_SYNC_LEASE_MINUTES,
+		ACCOMMODATION_NIGHTLY_PRICE_SYNC_MAX_PAGES:
+			process.env.ACCOMMODATION_NIGHTLY_PRICE_SYNC_MAX_PAGES,
 		ACCOMMODATION_NIGHTLY_PRICE_SYNC_MAX_LISTINGS:
 			process.env.ACCOMMODATION_NIGHTLY_PRICE_SYNC_MAX_LISTINGS,
 		ACCOMMODATION_QUOTE_CACHE_TTL_SECONDS:
@@ -57,12 +73,40 @@ export function getAccommodationsConfig(
 			500,
 			100,
 		),
+		nightlyPriceSyncBatchSize: optionalInteger(
+			"ACCOMMODATION_NIGHTLY_PRICE_SYNC_BATCH_SIZE",
+			environment.ACCOMMODATION_NIGHTLY_PRICE_SYNC_BATCH_SIZE,
+			1,
+			100,
+			10,
+		),
 		nightlyPriceSyncDays: optionalInteger(
 			"ACCOMMODATION_NIGHTLY_PRICE_SYNC_DAYS",
 			environment.ACCOMMODATION_NIGHTLY_PRICE_SYNC_DAYS,
 			1,
 			730,
 			540,
+		),
+		nightlyPriceSyncIntervalHours: optionalInteger(
+			"ACCOMMODATION_NIGHTLY_PRICE_SYNC_INTERVAL_HOURS",
+			environment.ACCOMMODATION_NIGHTLY_PRICE_SYNC_INTERVAL_HOURS,
+			1,
+			24 * 30,
+			24,
+		),
+		nightlyPriceSyncLeaseMinutes: optionalInteger(
+			"ACCOMMODATION_NIGHTLY_PRICE_SYNC_LEASE_MINUTES",
+			environment.ACCOMMODATION_NIGHTLY_PRICE_SYNC_LEASE_MINUTES,
+			1,
+			120,
+			10,
+		),
+		nightlyPriceSyncMaxPages: optionalInteger(
+			"ACCOMMODATION_NIGHTLY_PRICE_SYNC_MAX_PAGES",
+			environment.ACCOMMODATION_NIGHTLY_PRICE_SYNC_MAX_PAGES,
+			1,
+			500,
+			50,
 		),
 		nightlyPriceSyncMaxListings: optionalInteger(
 			"ACCOMMODATION_NIGHTLY_PRICE_SYNC_MAX_LISTINGS",

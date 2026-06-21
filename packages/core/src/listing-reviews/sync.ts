@@ -11,6 +11,7 @@ import { buildListingReviewProjection } from "./normalizer";
 import { ListingReviewRepository } from "./repository";
 
 const HOSTIFY_PROVIDER = "hostify";
+const LISTING_CACHE_SYNC_TYPE = "listing_cache";
 const LISTING_REVIEW_SYNC_TYPE = "listing_reviews";
 const MILLISECONDS_PER_HOUR = 60 * 60 * 1000;
 const MILLISECONDS_PER_MINUTE = 60 * 1000;
@@ -44,6 +45,7 @@ export interface HostifyReviewPollResult {
 	nextPage: number | null;
 	nextRunAt: string | null;
 	page: number | null;
+	skipReason?: "listing_sync_incomplete";
 	status: "advanced" | "completed" | "failed" | "skipped";
 }
 
@@ -86,6 +88,16 @@ export class HostifyListingReviewSync {
 
 	async pollReviews(trigger = "poll"): Promise<HostifyReviewPollResult> {
 		const now = this.#now();
+		const listingSyncReady = await this.#sync.isSyncStateComplete({
+			accountId: this.#config.hostifyAccountId,
+			provider: HOSTIFY_PROVIDER,
+			syncType: LISTING_CACHE_SYNC_TYPE,
+		});
+
+		if (!listingSyncReady) {
+			return skippedPollResult("listing_sync_incomplete");
+		}
+
 		const newRunId = crypto.randomUUID();
 		const claim = await this.#sync.claimSyncState({
 			accountId: this.#config.hostifyAccountId,
@@ -99,13 +111,7 @@ export class HostifyListingReviewSync {
 		});
 
 		if (!claim) {
-			return {
-				data: null,
-				nextPage: null,
-				nextRunAt: null,
-				page: null,
-				status: "skipped",
-			};
+			return skippedPollResult();
 		}
 
 		const runId = claim.activeRunId;
@@ -340,6 +346,19 @@ function emptyStats(runId: string): HostifyReviewSyncStats {
 		reviewsSeen: 0,
 		runId,
 		status: "completed",
+	};
+}
+
+function skippedPollResult(
+	skipReason?: HostifyReviewPollResult["skipReason"],
+): HostifyReviewPollResult {
+	return {
+		data: null,
+		nextPage: null,
+		nextRunAt: null,
+		page: null,
+		skipReason,
+		status: "skipped",
 	};
 }
 

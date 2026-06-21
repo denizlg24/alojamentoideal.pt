@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import type { ListingCacheConfig } from "./config";
 import { HostifyListingCacheSync } from "./hostify-sync";
+import { buildListingCacheProjection } from "./normalizer";
 import type {
 	AdvanceSyncStateInput,
 	ClaimedSyncState,
@@ -9,6 +10,8 @@ import type {
 	FailSyncStateInput,
 	IncrementSyncRunStatsInput,
 	ListingCacheRepository,
+	ListingState,
+	RefreshListingCoordinatesInput,
 	SyncRunInput,
 	UpsertListingInput,
 } from "./repository";
@@ -67,6 +70,43 @@ describe("HostifyListingCacheSync.pollListings", () => {
 		expect(skipped.status).toBe("skipped");
 		expect(client.listQueries).toEqual([{ page: 1, per_page: 2 }]);
 	});
+
+	test("refreshes missing coordinates when source content is unchanged", async () => {
+		const hostifyListing = listing("1", {
+			latitude: 41.1579,
+			longitude: -8.6291,
+		});
+		const projection = buildListingCacheProjection({
+			fees: [],
+			guestGuide: { success: true },
+			listing: hostifyListing,
+			photos: [],
+			status: "Clean",
+			translations: [],
+		});
+		const repository = new FakeListingCacheRepository();
+		repository.listingStates.set("1", {
+			latitude: null,
+			longitude: null,
+			processedSourceHash: null,
+			processingStatus: "skipped",
+			sourceHash: projection.sourceHash,
+		});
+		const client = new FakeHostifyClient({
+			1: [hostifyListing],
+		});
+		const sync = createSync({ client, repository });
+
+		const result = await sync.pollListings("poll");
+
+		expect(result.status).toBe("completed");
+		expect(result.data?.changedExternalIds).toEqual(["1"]);
+		expect(result.data?.listingsUpdated).toBe(1);
+		expect(repository.upserts).toHaveLength(0);
+		expect(repository.coordinateRefreshes).toHaveLength(1);
+		expect(repository.coordinateRefreshes[0]?.latitude).toBe(41.1579);
+		expect(repository.coordinateRefreshes[0]?.longitude).toBe(-8.6291);
+	});
 });
 
 function createSync({
@@ -96,20 +136,24 @@ function createSync({
 	});
 }
 
-function listing(id: string) {
+function listing(
+	id: string,
+	overrides: Partial<Record<string, unknown>> = {},
+): Record<string, unknown> {
 	return {
 		active: true,
 		city: "Lisbon",
 		description: `Description ${id}`,
 		id,
 		name: `Listing ${id}`,
+		...overrides,
 	};
 }
 
 class FakeHostifyClient {
 	readonly listQueries: Array<{ page: number; per_page: number }> = [];
 	readonly listings = {
-		get: async (id: string) => ({ listing: listing(id) }),
+		get: async (id: string) => ({ listing: this.findListing(id) }),
 		getFees: async () => ({ fees: [] }),
 		getGuestGuide: async () => ({ success: true }),
 		getPhotos: async () => ({ photos: [] }),
@@ -122,9 +166,23 @@ class FakeHostifyClient {
 	};
 
 	constructor(private readonly pages: Record<number, unknown[]>) {}
+
+	private findListing(id: string): unknown {
+		for (const listings of Object.values(this.pages)) {
+			const match = listings.find((value) => {
+				if (typeof value !== "object" || value === null) return false;
+				return String((value as Record<string, unknown>).id) === id;
+			});
+			if (match) return match;
+		}
+
+		return listing(id);
+	}
 }
 
 class FakeListingCacheRepository {
+	readonly coordinateRefreshes: RefreshListingCoordinatesInput[] = [];
+	readonly listingStates = new Map<string, ListingState>();
 	readonly runs: SyncRunInput[] = [];
 	readonly upserts: UpsertListingInput[] = [];
 	state: {
@@ -173,8 +231,27 @@ class FakeListingCacheRepository {
 		}
 	}
 
-	async findListingState(): Promise<null> {
-		return null;
+	async findListingState(
+		_provider: string,
+		_accountId: string,
+		externalId: string,
+	): Promise<ListingState | null> {
+		return this.listingStates.get(externalId) ?? null;
+	}
+
+	async refreshListingCoordinates(
+		input: RefreshListingCoordinatesInput,
+	): Promise<boolean> {
+		this.coordinateRefreshes.push(input);
+		const state = this.listingStates.get(input.externalId);
+		if (state) {
+			this.listingStates.set(input.externalId, {
+				...state,
+				latitude: input.latitude,
+				longitude: input.longitude,
+			});
+		}
+		return true;
 	}
 
 	async upsertListing(input: UpsertListingInput): Promise<void> {
