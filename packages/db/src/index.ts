@@ -1,5 +1,6 @@
 export { type Database, getDb, getPool } from "./client";
 export type {
+	AccommodationListingNightRawContent,
 	AccommodationListingNormalizedContent,
 	AccommodationListingProcessedContent,
 	AccommodationListingRawContent,
@@ -10,6 +11,7 @@ export type {
 export * as schemaTables from "./schema";
 export {
 	accommodationListing,
+	accommodationListingNight,
 	account,
 	listingReview,
 	listingReviewSummary,

@@ -1,6 +1,12 @@
-import { Skeleton } from "@workspace/ui/components/skeleton";
+import { getListingCacheConfig } from "@workspace/core/listing-cache";
+import {
+	ListingCard,
+	ListingCardSkeleton,
+} from "@/components/listings/listing-card";
+import { HOSTIFY_PROVIDER } from "@/lib/catalog/constants";
 import { getFeaturedListings } from "@/lib/catalog/featured";
-import { ListingCard } from "./listing-card";
+import { getCachedAdvisoryPrices } from "@/lib/catalog/pricing";
+import { advisoryPriceMap } from "@/lib/catalog/pricing-display";
 
 const FEATURED_COUNT = 6;
 
@@ -20,10 +26,22 @@ export async function FeaturedListings() {
 		);
 	}
 
+	const config = getListingCacheConfig();
+	const advisory = await getCachedAdvisoryPrices(
+		{ accountId: config.hostifyAccountId, provider: HOSTIFY_PROVIDER },
+		listings.map((listing) => listing.id),
+	);
+	const prices = advisoryPriceMap(advisory);
+
 	return (
 		<div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3">
 			{listings.map((listing) => (
-				<ListingCard key={listing.id} listing={listing} />
+				<ListingCard
+					key={listing.id}
+					layout="compact"
+					listing={listing}
+					price={prices.get(listing.id)}
+				/>
 			))}
 		</div>
 	);
@@ -33,17 +51,7 @@ export function FeaturedListingsSkeleton() {
 	return (
 		<div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3">
 			{SKELETON_KEYS.map((key) => (
-				<div key={key} className="flex flex-col gap-3">
-					<Skeleton className="aspect-[16/9] w-full rounded-lg" />
-					<div className="flex flex-col gap-2">
-						<div className="flex items-center justify-between gap-3">
-							<Skeleton className="h-5 w-1/2" />
-							<Skeleton className="h-4 w-14" />
-						</div>
-						<Skeleton className="h-4 w-1/3" />
-						<Skeleton className="mt-0.5 h-4 w-2/3" />
-					</div>
-				</div>
+				<ListingCardSkeleton key={key} layout="compact" />
 			))}
 		</div>
 	);

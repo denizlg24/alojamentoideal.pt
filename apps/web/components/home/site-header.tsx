@@ -24,7 +24,7 @@ const NAV_ITEMS = [
 	{ href: "/help", label: "Help" },
 ] as const;
 
-export function SiteHeader() {
+export function SiteHeader({ solid = false }: { solid?: boolean }) {
 	const [scrolled, setScrolled] = useState(false);
 
 	useEffect(() => {
@@ -34,11 +34,13 @@ export function SiteHeader() {
 		return () => window.removeEventListener("scroll", onScroll);
 	}, []);
 
+	const opaque = solid || scrolled;
+
 	return (
 		<header
 			className={cn(
 				"fixed inset-x-0 top-0 z-50 transition-colors duration-300",
-				scrolled ? "bg-background shadow-sm" : "bg-transparent",
+				opaque ? "bg-background shadow-sm" : "bg-transparent",
 			)}
 		>
 			<div className="mx-auto flex h-16 max-w-6xl items-center justify-between gap-4 px-4 sm:px-6">
@@ -60,7 +62,7 @@ export function SiteHeader() {
 							size="sm"
 							className={cn(
 								"font-medium",
-								scrolled
+								opaque
 									? "text-foreground/80 hover:text-foreground"
 									: "text-white/90 hover:bg-white/15 hover:text-white",
 							)}
@@ -82,7 +84,7 @@ export function SiteHeader() {
 						size="icon"
 						className={cn(
 							"rounded-full",
-							scrolled
+							opaque
 								? "text-foreground/80 hover:text-foreground"
 								: "text-white hover:bg-white/15 hover:text-white",
 						)}
@@ -101,7 +103,7 @@ export function SiteHeader() {
 							aria-label="Open menu"
 							className={cn(
 								"rounded-full md:hidden",
-								scrolled
+								opaque
 									? "text-foreground hover:text-foreground"
 									: "text-white hover:bg-white/15 hover:text-white",
 							)}

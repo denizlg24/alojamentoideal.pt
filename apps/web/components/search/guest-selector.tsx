@@ -94,12 +94,18 @@ export function GuestFields({ onChange, value }: GuestFieldsProps) {
 export function GuestSelector({
 	className,
 	onChange,
+	onOpenChange,
+	open,
 	value,
-}: GuestFieldsProps & { className?: string }) {
+}: GuestFieldsProps & {
+	className?: string;
+	onOpenChange?: (open: boolean) => void;
+	open?: boolean;
+}) {
 	const total = value.adults + value.children;
 
 	return (
-		<Popover>
+		<Popover open={open} onOpenChange={onOpenChange}>
 			<PopoverTrigger asChild>
 				<Button
 					type="button"
