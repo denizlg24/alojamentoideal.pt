@@ -541,39 +541,6 @@
           "method": "btree",
           "with": {}
         },
-        "accommodation_listing_night_listing_date_idx": {
-          "name": "accommodation_listing_night_listing_date_idx",
-          "columns": [
-            {
-              "expression": "provider",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "external_account_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "listing_external_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "date",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
         "accommodation_listing_night_date_idx": {
           "name": "accommodation_listing_night_date_idx",
           "columns": [
