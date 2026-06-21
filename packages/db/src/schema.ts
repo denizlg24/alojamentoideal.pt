@@ -316,12 +316,6 @@ export const accommodationListingNight = pgTable(
 			table.listingExternalId,
 			table.date,
 		),
-		index("accommodation_listing_night_listing_date_idx").on(
-			table.provider,
-			table.externalAccountId,
-			table.listingExternalId,
-			table.date,
-		),
 		index("accommodation_listing_night_date_idx").on(table.date),
 		index("accommodation_listing_night_stale_after_idx").on(table.staleAfter),
 	],

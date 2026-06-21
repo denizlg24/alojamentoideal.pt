@@ -43,10 +43,10 @@ export function useStaySearch(initial?: Partial<StaySearchState>) {
 		const params = new URLSearchParams();
 
 		if (state.place) params.set("place", state.place);
-		if (state.range?.from)
+		if (state.range?.from && state.range?.to) {
 			params.set("checkIn", format(state.range.from, "yyyy-MM-dd"));
-		if (state.range?.to)
 			params.set("checkOut", format(state.range.to, "yyyy-MM-dd"));
+		}
 
 		params.set("adults", String(state.adults));
 		params.set("children", String(state.children));

@@ -7,9 +7,11 @@ import {
 } from "./redis-cache";
 
 export interface AccommodationAvailabilityInput {
+	accountId?: string;
 	dates: StayDates;
 	forceFresh?: boolean;
 	guests: number;
+	providerId?: string;
 }
 
 export interface AccommodationAvailabilityResult {
@@ -101,6 +103,8 @@ function availabilityCacheKey(input: AccommodationAvailabilityInput): string {
 		"accommodation",
 		"availability",
 		"v1",
+		input.providerId ?? "default",
+		input.accountId ?? "default",
 		input.dates.checkIn,
 		input.dates.checkOut,
 		input.guests,

@@ -111,6 +111,8 @@ function quoteCacheKey(input: QuoteRequest): string {
 		"accommodation",
 		"quote",
 		"v1",
+		input.providerId ?? "default",
+		input.accountId ?? "default",
 		input.listingId,
 		input.dates.checkIn,
 		input.dates.checkOut,

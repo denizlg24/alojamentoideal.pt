@@ -164,7 +164,7 @@ export class AccommodationPricingRepository {
 
 		return new Map(
 			rows.map((row) => [
-				row.listingId,
+				`${row.listingId}:${row.currency}`,
 				{
 					currency: row.currency,
 					fromPrice: row.fromPrice === null ? null : Number(row.fromPrice),

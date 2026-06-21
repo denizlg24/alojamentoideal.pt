@@ -27,7 +27,7 @@ import {
 import { Separator } from "@workspace/ui/components/separator";
 import { Slider } from "@workspace/ui/components/slider";
 import { cn } from "@workspace/ui/lib/utils";
-import { format } from "date-fns";
+import { format, parseISO } from "date-fns";
 import {
 	ArrowDownAZ,
 	ArrowDownWideNarrow,
@@ -87,8 +87,8 @@ const AMENITY_PREVIEW_COUNT = 8;
 function toDateRange(filters: HomesFilters): DateRange | undefined {
 	if (!filters.checkIn) return undefined;
 	return {
-		from: new Date(filters.checkIn),
-		to: filters.checkOut ? new Date(filters.checkOut) : undefined,
+		from: parseISO(filters.checkIn),
+		to: filters.checkOut ? parseISO(filters.checkOut) : undefined,
 	};
 }
 
@@ -355,8 +355,8 @@ export function HomesFilterBar({
 	const summaryPlace = preset?.label ?? "Anywhere";
 	const summaryDates = visibleFilters.checkIn
 		? visibleFilters.checkOut
-			? `${format(new Date(visibleFilters.checkIn), "MMM d")} - ${format(new Date(visibleFilters.checkOut), "MMM d")}`
-			: format(new Date(visibleFilters.checkIn), "MMM d")
+			? `${format(parseISO(visibleFilters.checkIn), "MMM d")} - ${format(parseISO(visibleFilters.checkOut), "MMM d")}`
+			: format(parseISO(visibleFilters.checkIn), "MMM d")
 		: "Any week";
 	const summaryGuests =
 		visibleFilters.adults > 1 || visibleFilters.children > 0
@@ -370,9 +370,9 @@ export function HomesFilterBar({
 		});
 	}
 	if (visibleFilters.checkIn) {
-		const from = new Date(visibleFilters.checkIn);
+		const from = parseISO(visibleFilters.checkIn);
 		const to = visibleFilters.checkOut
-			? new Date(visibleFilters.checkOut)
+			? parseISO(visibleFilters.checkOut)
 			: null;
 		activeChips.push({
 			key: "dates",

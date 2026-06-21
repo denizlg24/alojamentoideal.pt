@@ -26,13 +26,25 @@ export async function readThroughJsonCache<T>(
 		return { outcome: "bypass", value: await load() };
 	}
 
+	let cached: string | null;
 	try {
-		const cached = await redis.get(key);
-		if (cached) {
-			return { outcome: "hit", value: JSON.parse(cached) as T };
-		}
+		cached = await redis.get(key);
 	} catch {
 		return { outcome: "unavailable", value: await load() };
+	}
+
+	if (cached) {
+		try {
+			return { outcome: "hit", value: JSON.parse(cached) as T };
+		} catch {
+			const value = await load();
+			try {
+				await redis.set(key, JSON.stringify(value), "EX", ttlSeconds);
+			} catch {
+				// Ignore cache write failure
+			}
+			return { outcome: "miss", value };
+		}
 	}
 
 	const value = await load();

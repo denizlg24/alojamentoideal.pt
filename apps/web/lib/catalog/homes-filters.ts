@@ -50,6 +50,14 @@ function readFloat(value: string | null): number | null {
 	return Number.isFinite(parsed) ? parsed : null;
 }
 
+function readDate(value: string | null): string | null {
+	if (value === null) return null;
+	if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
+	const date = new Date(`${value}T00:00:00.000Z`);
+	if (Number.isNaN(date.getTime())) return null;
+	return value;
+}
+
 export function parseHomesFilters(params: URLSearchParams): HomesFilters {
 	const amenities = (params.get("amenities") ?? "")
 		.split(",")
@@ -61,8 +69,8 @@ export function parseHomesFilters(params: URLSearchParams): HomesFilters {
 		amenities,
 		bathroomsMin: readFloat(params.get("bathroomsMin")),
 		bedroomsMin: readFloat(params.get("bedroomsMin")),
-		checkIn: params.get("checkIn"),
-		checkOut: params.get("checkOut"),
+		checkIn: readDate(params.get("checkIn")),
+		checkOut: readDate(params.get("checkOut")),
 		children: Math.max(0, readInt(params.get("children"), 0)),
 		place: params.get("place"),
 		priceMax: readFloat(params.get("priceMax")),

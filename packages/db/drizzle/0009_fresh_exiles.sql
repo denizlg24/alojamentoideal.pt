@@ -20,6 +20,5 @@ CREATE TABLE "accommodation_listing_night" (
 --> statement-breakpoint
 ALTER TABLE "accommodation_listing_night" ADD CONSTRAINT "accommodation_listing_night_sync_run_id_provider_sync_run_id_fk" FOREIGN KEY ("sync_run_id") REFERENCES "public"."provider_sync_run"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
 CREATE UNIQUE INDEX "accommodation_listing_night_scope_date_uidx" ON "accommodation_listing_night" USING btree ("provider","external_account_id","listing_external_id","date");--> statement-breakpoint
-CREATE INDEX "accommodation_listing_night_listing_date_idx" ON "accommodation_listing_night" USING btree ("provider","external_account_id","listing_external_id","date");--> statement-breakpoint
 CREATE INDEX "accommodation_listing_night_date_idx" ON "accommodation_listing_night" USING btree ("date");--> statement-breakpoint
 CREATE INDEX "accommodation_listing_night_stale_after_idx" ON "accommodation_listing_night" USING btree ("stale_after");

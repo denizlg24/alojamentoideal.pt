@@ -27,6 +27,10 @@ export const GET = withApiRoute(
 		const sync = createNightlyPriceSyncFromEnv();
 		const result = await sync.sync("cron");
 
+		if (result.error) {
+			return Response.json({ data: result, success: false }, { status: 500 });
+		}
+
 		revalidateTag(ADVISORY_PRICING_TAG, "max");
 
 		return Response.json({ data: result, success: true });

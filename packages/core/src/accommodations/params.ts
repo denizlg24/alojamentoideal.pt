@@ -3,7 +3,16 @@ import { z } from "zod";
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 const MAX_STAY_NIGHTS = 90;
 
-const dateString = z.string().regex(DATE_PATTERN, "Expected YYYY-MM-DD");
+const dateString = z
+	.string()
+	.regex(DATE_PATTERN, "Expected YYYY-MM-DD")
+	.refine(
+		(value) => {
+			const date = new Date(`${value}T00:00:00.000Z`);
+			return !Number.isNaN(date.getTime());
+		},
+		{ message: "Invalid calendar date" },
+	);
 
 export interface StayDates {
 	checkIn: string;
@@ -30,9 +39,14 @@ const availabilitySchema = z.object({
 	checkIn: dateString,
 	checkOut: dateString,
 	forceFresh: z
-		.union([z.literal("true"), z.literal("1")])
+		.union([
+			z.literal("true"),
+			z.literal("1"),
+			z.literal("false"),
+			z.literal("0"),
+		])
 		.optional()
-		.transform((value) => value !== undefined),
+		.transform((value) => value === "true" || value === "1"),
 	guests: z.coerce.number().int().min(1).max(30),
 });
 
