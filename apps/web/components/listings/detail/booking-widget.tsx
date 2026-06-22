@@ -49,7 +49,12 @@ interface BookingWidgetProps {
 	minNights: number;
 }
 
-function intParam(value: string | null, fallback: number, min: number, max?: number): number {
+function intParam(
+	value: string | null,
+	fallback: number,
+	min: number,
+	max?: number,
+): number {
 	const parsed = value ? Number.parseInt(value, 10) : Number.NaN;
 	if (!Number.isFinite(parsed) || parsed < min) {
 		return fallback;
