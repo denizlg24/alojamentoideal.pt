@@ -22,8 +22,12 @@ import { useStaySearch } from "./use-stay-search";
 export function StaySearch({ className }: { className?: string }) {
 	const { guestTotal, state, submit, update } = useStaySearch();
 	const guests = useMemo(
-		() => ({ adults: state.adults, children: state.children }),
-		[state.adults, state.children],
+		() => ({
+			adults: state.adults,
+			children: state.children,
+			infants: state.infants,
+		}),
+		[state.adults, state.children, state.infants],
 	);
 	const placeLabel = findLocationPreset(state.place)?.label ?? "Anywhere";
 

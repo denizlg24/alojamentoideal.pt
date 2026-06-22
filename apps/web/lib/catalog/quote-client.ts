@@ -6,6 +6,7 @@ export interface QuoteRequestParams {
 	checkOut: string;
 	children: number;
 	guests: number;
+	infants: number;
 	listingId: string;
 	signal?: AbortSignal;
 }

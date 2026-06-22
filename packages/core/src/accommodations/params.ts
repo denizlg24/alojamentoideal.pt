@@ -30,6 +30,7 @@ export interface QuoteRequest extends AvailabilityRequest {
 	accountId?: string;
 	adults: number;
 	children: number;
+	infants: number;
 	listingId: string;
 	pets: number;
 	providerId?: string;
@@ -61,6 +62,7 @@ const quoteSchema = z.object({
 	children: z.coerce.number().int().min(0).max(30).optional(),
 	forceFresh: z.boolean().optional().default(false),
 	guests: z.coerce.number().int().min(1).max(30),
+	infants: z.coerce.number().int().min(0).max(5).optional().default(0),
 	listingId: z.string().trim().min(1),
 	pets: z.coerce.number().int().min(0).max(10).optional().default(0),
 });
@@ -123,6 +125,7 @@ export function parseQuoteBody(
 			dates: dates.data,
 			forceFresh: parsed.data.forceFresh,
 			guests: parsed.data.guests,
+			infants: parsed.data.infants,
 			listingId: parsed.data.listingId,
 			pets: parsed.data.pets,
 		},

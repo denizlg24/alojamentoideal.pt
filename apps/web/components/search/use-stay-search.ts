@@ -9,6 +9,7 @@ import { capacityForGuests } from "@/lib/catalog/guests";
 export interface StaySearchState {
 	adults: number;
 	children: number;
+	infants: number;
 	place: string | null;
 	range: DateRange | undefined;
 }
@@ -16,6 +17,7 @@ export interface StaySearchState {
 const DEFAULTS: StaySearchState = {
 	adults: 1,
 	children: 0,
+	infants: 0,
 	place: null,
 	range: undefined,
 };
@@ -50,6 +52,7 @@ export function useStaySearch(initial?: Partial<StaySearchState>) {
 
 		params.set("adults", String(state.adults));
 		params.set("children", String(state.children));
+		params.set("infants", String(state.infants));
 		params.set(
 			"guests",
 			String(capacityForGuests(state.adults, state.children)),

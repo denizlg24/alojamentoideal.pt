@@ -46,8 +46,38 @@ describe("parseQuoteBody", () => {
 			expect(parsed.data.adults).toBe(2);
 			expect(parsed.data.children).toBe(0);
 			expect(parsed.data.forceFresh).toBe(false);
+			expect(parsed.data.infants).toBe(0);
 			expect(parsed.data.pets).toBe(0);
 		}
+	});
+
+	test("accepts infants without counting them toward the guest split", () => {
+		const parsed = parseQuoteBody({
+			adults: 2,
+			checkIn: "2026-07-01",
+			checkOut: "2026-07-03",
+			children: 1,
+			guests: 3,
+			infants: 2,
+			listingId: "123",
+		});
+
+		expect(parsed.success).toBe(true);
+		if (parsed.success) {
+			expect(parsed.data.infants).toBe(2);
+		}
+	});
+
+	test("rejects more than five infants", () => {
+		const parsed = parseQuoteBody({
+			checkIn: "2026-07-01",
+			checkOut: "2026-07-03",
+			guests: 2,
+			infants: 6,
+			listingId: "123",
+		});
+
+		expect(parsed.success).toBe(false);
 	});
 
 	test("derives adults from guests minus children when adults omitted", () => {

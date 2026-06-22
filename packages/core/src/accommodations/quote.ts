@@ -17,13 +17,11 @@ import {
  * `inclusiveTax` is VAT already inside `total`; tax lines have `type === "tax"`.
  */
 export interface AccommodationQuoteFee {
-	adjustedForChildren: boolean;
 	amount: number | null;
 	chargeLabel: string | null;
 	inclusiveTax: number | null;
 	isBasePrice: boolean;
 	name: string;
-	originalTotal: number | null;
 	quantity: number | null;
 	total: number;
 	type: string;
@@ -46,6 +44,7 @@ export interface AccommodationQuoteResult {
 	fees: AccommodationQuoteFee[];
 	fetchedAt: string;
 	guests: number;
+	infants: number;
 	listingId: string;
 	nightlyAverage: number | null;
 	nights: number;
@@ -109,8 +108,8 @@ export class AccommodationQuoteService {
 			start_date: input.dates.checkIn,
 		});
 		const price = response.price;
-		const fees = buildFeeLines(price, input);
-		const total = adjustedTotal(price.total, fees);
+		const fees = buildFeeLines(price);
+		const total = roundMoney(price.total);
 
 		return {
 			adults: input.adults,
@@ -123,6 +122,7 @@ export class AccommodationQuoteService {
 			fees,
 			fetchedAt: new Date().toISOString(),
 			guests: input.guests,
+			infants: input.infants,
 			listingId: input.listingId,
 			nightlyAverage:
 				input.dates.nights > 0
@@ -154,16 +154,14 @@ function quoteCacheKey(input: QuoteRequest): string {
 		input.guests,
 		input.adults,
 		input.children,
+		input.infants,
 		input.pets,
 	].join(":");
 }
 
-function buildFeeLines(
-	price: HostifyListingPrice,
-	input: QuoteRequest,
-): AccommodationQuoteFee[] {
+function buildFeeLines(price: HostifyListingPrice): AccommodationQuoteFee[] {
 	const lines = (Array.isArray(price.fees) ? price.fees : [])
-		.map((fee) => toFeeLine(fee, input))
+		.map((fee) => toFeeLine(fee))
 		.filter((line): line is AccommodationQuoteFee => line !== null);
 
 	// Some listings keep the cleaning fee out of the breakdown array and only on
@@ -174,13 +172,11 @@ function buildFeeLines(
 	);
 	if (!hasCleaning && cleaning > 0) {
 		lines.push({
-			adjustedForChildren: false,
 			amount: cleaning,
 			chargeLabel: null,
 			inclusiveTax: null,
 			isBasePrice: false,
 			name: "Cleaning fee",
-			originalTotal: null,
 			quantity: null,
 			total: cleaning,
 			type: "fee",
@@ -190,93 +186,46 @@ function buildFeeLines(
 	return lines;
 }
 
-function toFeeLine(
-	fee: HostifyListingPriceFee,
-	input: QuoteRequest,
-): AccommodationQuoteFee | null {
+function toFeeLine(fee: HostifyListingPriceFee): AccommodationQuoteFee | null {
 	const total = fee.total ?? 0;
 	const name = fee.fee_name ?? null;
 	if (name === null && total === 0) {
 		return null;
 	}
 
-	const line: AccommodationQuoteFee = {
-		adjustedForChildren: false,
+	return {
 		amount: fee.amount ?? null,
-		chargeLabel: fee.charge_type_label ?? null,
+		chargeLabel: replaceAdultWording(fee.charge_type_label ?? null),
 		inclusiveTax: fee.inclusive_tax ?? null,
 		isBasePrice: fee.is_base_price === true,
-		name: name ?? "Fee",
-		originalTotal: null,
+		name: replaceAdultWording(name) ?? "Fee",
 		quantity: fee.quantity ?? null,
 		total,
 		type: fee.fee_type ?? "fee",
 	};
-
-	return adjustAdultOnlyTax(line, input);
 }
 
-function adjustAdultOnlyTax(
-	line: AccommodationQuoteFee,
-	input: QuoteRequest,
-): AccommodationQuoteFee {
-	if (
-		input.children <= 0 ||
-		input.adults <= 0 ||
-		line.amount === null ||
-		line.amount <= 0 ||
-		line.total <= 0 ||
-		!isAdultOnlyTax(line)
-	) {
-		return line;
+/**
+ * Taxes are charged for every guest (adults and children alike), so any
+ * provider-sourced "per adult" wording is rewritten to "guest" for display.
+ */
+function replaceAdultWording<T extends string | null>(value: T): T {
+	if (value === null) {
+		return value;
 	}
-
-	const adultQuantity = input.adults * input.dates.nights;
-	if (adultQuantity <= 0) {
-		return line;
-	}
-
-	const adjustedTotal = roundMoney(line.amount * adultQuantity);
-	if (adjustedTotal >= line.total) {
-		return line;
-	}
-
-	return {
-		...line,
-		adjustedForChildren: true,
-		originalTotal: line.total,
-		quantity: adultQuantity,
-		total: adjustedTotal,
-	};
+	return value
+		.replace(/adults/gi, (match) => matchCase(match, "guests"))
+		.replace(/adult/gi, (match) => matchCase(match, "guest")) as T;
 }
 
-function isAdultOnlyTax(line: AccommodationQuoteFee): boolean {
-	if (line.type !== "tax") {
-		return false;
+function matchCase(source: string, replacement: string): string {
+	if (source === source.toUpperCase()) {
+		return replacement.toUpperCase();
 	}
-
-	const label = `${line.name} ${line.chargeLabel ?? ""}`.toLowerCase();
-	if (/\b(vat|iva|sales tax|taxa de iva)\b/i.test(label)) {
-		return false;
+	if (source[0] === source[0]?.toUpperCase()) {
+		return replacement[0]?.toUpperCase() + replacement.slice(1);
 	}
-
-	return /\b(tourist|tourism|city|municipal|occupancy|visitor|adult)\b/i.test(
-		label,
-	);
-}
-
-function adjustedTotal(
-	providerTotal: number,
-	lines: AccommodationQuoteFee[],
-): number {
-	const delta = lines.reduce((sum, line) => {
-		if (!line.adjustedForChildren || line.originalTotal === null) {
-			return sum;
-		}
-		return sum + (line.originalTotal - line.total);
-	}, 0);
-
-	return Math.max(0, roundMoney(providerTotal - delta));
+	return replacement;
 }
 
 function sumLines(
