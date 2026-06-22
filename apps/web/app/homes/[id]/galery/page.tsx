@@ -61,7 +61,7 @@ function EmptyGallery({
 			<header className="border-b">
 				<div className="mx-auto flex h-16 max-w-7xl items-center gap-3 px-4 sm:px-6">
 					<Button asChild variant="ghost" size="icon" className="rounded-full">
-						<Link href={backHref} aria-label="Back to home details">
+						<Link href={backHref} aria-label="Back to Homes">
 							<ArrowLeft className="size-5" />
 						</Link>
 					</Button>
@@ -88,6 +88,11 @@ async function GalleryContent({
 	params: ListingGalleryPageProps["params"];
 }) {
 	const { id } = await params;
+
+	if (id === "__ci_placeholder__") {
+		notFound();
+	}
+
 	const listing = await getCachedCatalogDetail(
 		id,
 		getListingCatalogScope(),

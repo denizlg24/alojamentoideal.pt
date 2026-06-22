@@ -111,10 +111,15 @@ export function parseQuoteBody(
 		return dates;
 	}
 
+	const split = resolveGuestSplit(parsed.data);
+	if (!split.success) {
+		return split;
+	}
+
 	return {
 		data: {
-			adults: parsed.data.adults ?? parsed.data.guests,
-			children: parsed.data.children ?? 0,
+			adults: split.data.adults,
+			children: split.data.children,
 			dates: dates.data,
 			forceFresh: parsed.data.forceFresh,
 			guests: parsed.data.guests,
@@ -123,6 +128,38 @@ export function parseQuoteBody(
 		},
 		success: true,
 	};
+}
+
+/**
+ * Splits the total `guests` count into adults/children. When `adults` is
+ * omitted it is derived as `guests - children` (not `guests`), so passing
+ * `children` alone does not double-count occupants and skew adult-only tax
+ * math. The resolved split must keep at least one adult and not exceed the
+ * total guest count.
+ */
+function resolveGuestSplit(input: {
+	adults?: number;
+	children?: number;
+	guests: number;
+}): AccommodationParseResult<{ adults: number; children: number }> {
+	const children = input.children ?? 0;
+	const adults = input.adults ?? input.guests - children;
+
+	if (adults < 1 || adults + children > input.guests) {
+		return {
+			error: new z.ZodError([
+				{
+					code: "custom",
+					input: input.adults,
+					message: "Adults and children must fit within the total guest count",
+					path: ["adults"],
+				},
+			]),
+			success: false,
+		};
+	}
+
+	return { data: { adults, children }, success: true };
 }
 
 function parseStayDates(

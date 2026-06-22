@@ -72,7 +72,7 @@ type QuoteFailure = {
 
 function quoteFailure(error: unknown): QuoteFailure | null {
 	if (error instanceof HostifyApiError) {
-		const message = error.providerMessage?.toLowerCase() ?? "";
+		const message = (error.providerMessage ?? error.message).toLowerCase();
 
 		if (isTooManyGuests(message)) {
 			return {

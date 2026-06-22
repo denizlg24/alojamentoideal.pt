@@ -21,7 +21,9 @@ interface ShareDialogProps {
 }
 
 export function ShareButton({ imageUrl, subtitle, title }: ShareDialogProps) {
-	const [url, setUrl] = useState("");
+	const [url, setUrl] = useState(() =>
+		typeof window !== "undefined" ? window.location.href : "",
+	);
 	const [copied, setCopied] = useState(false);
 	const [canNativeShare, setCanNativeShare] = useState(false);
 

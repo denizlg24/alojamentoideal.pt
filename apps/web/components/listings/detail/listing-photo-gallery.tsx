@@ -14,7 +14,7 @@ import {
 } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 const MAX_RAIL_ITEMS = 10;
 
@@ -97,9 +97,11 @@ export function ListingPhotoGallery({
 }: ListingPhotoGalleryProps) {
 	const [activeIndex, setActiveIndex] = useState<number | null>(null);
 	const [copied, setCopied] = useState(false);
+	const lightboxRef = useRef<HTMLDivElement>(null);
 	const stops = useMemo(() => galleryStops(photos), [photos]);
 	const activePhoto = activeIndex === null ? null : photos[activeIndex];
 	const countLabel = photoCountLabel(photos.length);
+	const isOpen = activeIndex !== null;
 
 	const closeLightbox = useCallback(() => setActiveIndex(null), []);
 	const showPrevious = useCallback(() => {
@@ -114,23 +116,50 @@ export function ListingPhotoGallery({
 	}, [photos.length]);
 
 	useEffect(() => {
-		if (activeIndex === null) return;
+		if (!isOpen) return;
 
+		const previouslyFocused = document.activeElement as HTMLElement | null;
 		const previousOverflow = document.body.style.overflow;
 		document.body.style.overflow = "hidden";
 
+		const focusable = () =>
+			Array.from(
+				lightboxRef.current?.querySelectorAll<HTMLElement>(
+					'button, [href], [tabindex]:not([tabindex="-1"])',
+				) ?? [],
+			).filter((element) => !element.hasAttribute("disabled"));
+
+		focusable()[0]?.focus();
+
 		const onKeyDown = (event: KeyboardEvent) => {
-			if (event.key === "Escape") closeLightbox();
+			if (event.key === "Escape") {
+				closeLightbox();
+				return;
+			}
 			if (event.key === "ArrowLeft") showPrevious();
 			if (event.key === "ArrowRight") showNext();
+			if (event.key === "Tab") {
+				const items = focusable();
+				const first = items[0];
+				const last = items[items.length - 1];
+				if (!first || !last) return;
+				if (event.shiftKey && document.activeElement === first) {
+					event.preventDefault();
+					last.focus();
+				} else if (!event.shiftKey && document.activeElement === last) {
+					event.preventDefault();
+					first.focus();
+				}
+			}
 		};
 
 		window.addEventListener("keydown", onKeyDown);
 		return () => {
 			document.body.style.overflow = previousOverflow;
 			window.removeEventListener("keydown", onKeyDown);
+			previouslyFocused?.focus();
 		};
-	}, [activeIndex, closeLightbox, showNext, showPrevious]);
+	}, [isOpen, closeLightbox, showNext, showPrevious]);
 
 	const shareListing = async () => {
 		const url = new URL(backHref, window.location.origin).toString();
@@ -154,7 +183,7 @@ export function ListingPhotoGallery({
 			<header className="sticky top-0 z-40 border-b bg-background/95 backdrop-blur">
 				<div className="mx-auto flex h-16 max-w-7xl items-center gap-3 px-4 sm:px-6">
 					<Button asChild variant="ghost" size="icon" className="rounded-full">
-						<Link href={backHref} aria-label="Back to home details">
+						<Link href={backHref} aria-label="Back to Homes">
 							<ArrowLeft className="size-5" />
 						</Link>
 					</Button>
@@ -264,6 +293,7 @@ export function ListingPhotoGallery({
 
 			{activePhoto && (
 				<div
+					ref={lightboxRef}
 					role="dialog"
 					aria-modal="true"
 					aria-label={`${title} photo viewer`}

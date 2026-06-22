@@ -22,7 +22,12 @@ export interface BookingAvailability {
 }
 
 function todayIso(): string {
-	return new Date().toISOString().slice(0, 10);
+	const now = new Date();
+	return new Date(
+		Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()),
+	)
+		.toISOString()
+		.slice(0, 10);
 }
 
 /**

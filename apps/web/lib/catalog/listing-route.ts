@@ -8,19 +8,12 @@ export function getListingCatalogScope(): CatalogScope {
 	return { accountId: config.hostifyAccountId, provider: HOSTIFY_PROVIDER };
 }
 
-/**
- * Prewarms the cached shell for every active listing. Under `cacheComponents`,
- * params not listed here still render on-demand, so no `dynamicParams` flag is
- * needed.
- */
 export async function generateListingStaticParams(): Promise<{ id: string }[]> {
 	try {
 		const repository = new CatalogRepository(getDb());
 		const ids = await repository.listExternalIds(getListingCatalogScope());
 		return ids.map((id) => ({ id }));
 	} catch {
-		// Without DB access at build time, fall back to on-demand rendering
-		// rather than failing the build.
-		return [];
+		return [{ id: "__ci_placeholder__" }];
 	}
 }

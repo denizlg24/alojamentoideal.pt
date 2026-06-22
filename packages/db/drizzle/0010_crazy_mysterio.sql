@@ -1,0 +1,1 @@
+ALTER TABLE "provider_sync_state" ADD COLUMN "version_hash" integer DEFAULT 0 NOT NULL;

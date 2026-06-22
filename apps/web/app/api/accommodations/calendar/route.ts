@@ -3,6 +3,8 @@ import { withApiRoute } from "@/lib/api/route";
 import { getListingBookingAvailability } from "@/lib/catalog/availability";
 import { HOSTIFY_PROVIDER } from "@/lib/catalog/constants";
 
+const MAX_MIN_NIGHTS = 5;
+
 /**
  * The synced booking calendar (bookable nights + per-date min stay + soonest
  * stay) for a single listing. Served to the client so the listing page can
@@ -23,7 +25,7 @@ export const GET = withApiRoute(
 		);
 		const minNights =
 			Number.isFinite(parsedMinNights) && parsedMinNights > 0
-				? parsedMinNights
+				? Math.min(parsedMinNights, MAX_MIN_NIGHTS)
 				: 1;
 
 		const config = getListingCacheConfig();

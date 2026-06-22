@@ -11,10 +11,13 @@ import { stableHash } from "./hash";
  * mapping, and re-run AI content processing) without a data backfill. Reverting
  * to a previous value reuses the rows already written under it.
  *
- * Pricing and review syncs page-and-upsert without content hashes, so they have
- * no equivalent lever; re-run their crons to refresh them.
+ * Pricing and review syncs page-and-upsert without content hashes, so the
+ * version is not folded into any row they write. Instead it is recorded on their
+ * `provider_sync_state` row when a cycle completes; bumping this value makes
+ * their next claim start a fresh cycle immediately (bypassing the scheduled
+ * interval) so they re-upsert everything under the new version.
  */
-export const LISTING_SYNC_VERSION = 5;
+export const LISTING_SYNC_VERSION = 6;
 
 /** Hash `value` bound to the current {@link LISTING_SYNC_VERSION}. */
 export function versionedHash(value: unknown): string {

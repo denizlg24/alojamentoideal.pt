@@ -101,6 +101,7 @@ export interface ClaimSyncStateInput {
 	now: Date;
 	provider: string;
 	syncType: string;
+	versionHash: number;
 }
 
 export interface AdvanceSyncStateInput {
@@ -116,6 +117,7 @@ export interface CompleteSyncStateInput {
 	nextRunAt: Date;
 	now: Date;
 	provider: string;
+	versionHash: number;
 }
 
 export interface FailSyncStateInput {
@@ -187,23 +189,32 @@ export class ListingCacheRepository {
 			})
 			.onConflictDoNothing();
 
+		// A row starts a fresh cycle (new run id, page reset to 1) when it is not
+		// mid-cycle, or when the code version it last ran under no longer matches
+		// the current one. The version mismatch forces every listing to be
+		// reprocessed under the new logic instead of resuming a stale cursor.
+		const startNewCycle = sql`(
+			${providerSyncState.status} in ('idle', 'complete', 'failed')
+			or ${providerSyncState.versionHash} <> ${input.versionHash}
+		)`;
+
 		const [row] = await this.#db
 			.update(providerSyncState)
 			.set({
 				activeRunId: sql<string>`case
-					when ${providerSyncState.status} in ('idle', 'complete', 'failed')
+					when ${startNewCycle}
 						then ${input.newRunId}
 					else ${providerSyncState.activeRunId}
 				end`,
 				error: null,
 				lastStartedAt: sql<Date>`case
-					when ${providerSyncState.status} in ('idle', 'complete', 'failed')
+					when ${startNewCycle}
 						then ${input.now}
 					else ${providerSyncState.lastStartedAt}
 				end`,
 				leaseExpiresAt: input.leaseExpiresAt,
 				nextPage: sql<number>`case
-					when ${providerSyncState.status} in ('idle', 'complete', 'failed')
+					when ${startNewCycle}
 						then 1
 					else ${providerSyncState.nextPage}
 				end`,
@@ -212,10 +223,13 @@ export class ListingCacheRepository {
 			})
 			.where(sql`
 				${providerSyncState.id} = ${stateId}
-				and ${providerSyncState.nextRunAt} <= ${input.now}
 				and (
 					${providerSyncState.leaseExpiresAt} is null
 					or ${providerSyncState.leaseExpiresAt} <= ${input.now}
+				)
+				and (
+					${providerSyncState.nextRunAt} <= ${input.now}
+					or ${providerSyncState.versionHash} <> ${input.versionHash}
 				)
 			`)
 			.returning({
@@ -305,6 +319,7 @@ export class ListingCacheRepository {
 				nextRunAt: input.nextRunAt,
 				status: input.error ? "failed" : "complete",
 				updatedAt: input.now,
+				versionHash: input.versionHash,
 			})
 			.where(
 				and(

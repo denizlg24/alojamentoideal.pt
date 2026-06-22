@@ -12,6 +12,7 @@ import type {
 	SyncRunInput,
 	SyncStateScopeInput,
 } from "../listing-cache";
+import { LISTING_SYNC_VERSION } from "../listing-cache/sync-version";
 import type { ListingReviewSyncConfig } from "./config";
 import type { ListingReviewRepository, UpsertReviewInput } from "./repository";
 import { HostifyListingReviewSync } from "./sync";
@@ -135,6 +136,25 @@ describe("HostifyListingReviewSync.pollReviews", () => {
 		);
 		expect(syncRepository.state.nextPage).toBe(1);
 		expect(syncRepository.state.status).toBe("complete");
+	});
+
+	test("passes the current sync version to claim and completion", async () => {
+		const syncRepository = new FakeSyncRepository({
+			listingExternalIds: ["1"],
+			listingSyncReady: true,
+		});
+		const client = new FakeHostifyClient({
+			"1": [reviewFixture("review_1", "1")],
+		});
+		const reviewRepository = new FakeReviewRepository();
+		const sync = createSync({ client, reviewRepository, syncRepository });
+
+		await sync.pollReviews("poll");
+
+		expect(syncRepository.claims[0]?.versionHash).toBe(LISTING_SYNC_VERSION);
+		expect(syncRepository.completeInputs[0]?.versionHash).toBe(
+			LISTING_SYNC_VERSION,
+		);
 	});
 });
 

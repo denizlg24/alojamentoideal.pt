@@ -100,6 +100,11 @@ async function ListingContent({
 	params: ListingPageProps["params"];
 }) {
 	const { id } = await params;
+
+	if (id === "__ci_placeholder__") {
+		notFound();
+	}
+
 	const scope = getListingCatalogScope();
 
 	const listing = await getCachedCatalogDetail(id, scope, "en");

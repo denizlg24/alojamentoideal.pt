@@ -174,6 +174,7 @@ export class ListingReviewRepository {
 					eq(listingReview.listingExternalId, listingExternalId),
 					eq(listingReview.status, "published"),
 					isNotNull(listingReview.comments),
+					sql`length(trim(${listingReview.comments})) > 0`,
 				),
 			)
 			.orderBy(desc(listingReview.reviewedAt))

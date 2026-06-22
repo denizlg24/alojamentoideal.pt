@@ -437,7 +437,7 @@ function PriceBreakdown({
 }) {
 	const nightly = quote.nightlyAverage;
 	const extraLines = quote.fees.filter(
-		(fee) => !fee.isBasePrice && fee.total > 0,
+		(fee) => !fee.isBasePrice && fee.total !== 0,
 	);
 
 	return (

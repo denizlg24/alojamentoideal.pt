@@ -33,9 +33,18 @@ if (!apiKey) {
 const baseUrl = (
 	process.env.HOSTIFY_BASE_URL ?? "https://api-rms.hostify.com/"
 ).replace(/\/?$/, "/");
-const limit = process.env.HOSTIFY_DUMP_LIMIT
-	? Number(process.env.HOSTIFY_DUMP_LIMIT)
-	: Number.POSITIVE_INFINITY;
+const limit = parseDumpLimit(process.env.HOSTIFY_DUMP_LIMIT);
+
+function parseDumpLimit(raw: string | undefined): number {
+	if (!raw) return Number.POSITIVE_INFINITY;
+	const value = Number(raw);
+	if (!Number.isInteger(value) || value <= 0) {
+		throw new Error(
+			`HOSTIFY_DUMP_LIMIT must be a positive integer (got "${raw}")`,
+		);
+	}
+	return value;
+}
 
 // A stay window a month out, long enough to exercise min-stay + fee math.
 const priceStart = isoDateInDays(30);
@@ -57,6 +66,15 @@ async function getRaw(
 		return { __error: `HTTP ${response.status}`, body: safeJson(text) };
 	}
 	return safeJson(text);
+}
+
+function isErrorPayload(value: unknown): value is { __error: string } {
+	return (
+		typeof value === "object" &&
+		value !== null &&
+		"__error" in value &&
+		typeof (value as { __error: unknown }).__error === "string"
+	);
 }
 
 function safeJson(text: string): unknown {
@@ -88,7 +106,8 @@ type Shape =
 	| { type: "null" }
 	| { type: "scalar"; scalar: string; sample: unknown }
 	| { type: "array"; items: Shape }
-	| { type: "object"; keys: Record<string, Shape> };
+	| { type: "object"; keys: Record<string, Shape> }
+	| { type: "union"; variants: Shape[] };
 
 function describe(value: unknown): Shape {
 	if (value === null || value === undefined) return { type: "null" };
@@ -116,10 +135,37 @@ function describe(value: unknown): Shape {
 function mergeShape(a: Shape, b: Shape): Shape {
 	if (a.type === "null") return b;
 	if (b.type === "null") return a;
+
+	// Flatten both sides into a variant list, folding each into a same-kind
+	// variant when one already exists. Differing kinds (object vs scalar, etc.)
+	// are preserved side by side instead of dropping the later-seen shape.
+	const variants: Shape[] = [];
+	for (const shape of [...flatten(a), ...flatten(b)]) {
+		addVariant(variants, shape);
+	}
+	return variants.length === 1 ? variants[0]! : { type: "union", variants };
+}
+
+function flatten(shape: Shape): Shape[] {
+	return shape.type === "union" ? shape.variants : [shape];
+}
+
+function addVariant(variants: Shape[], incoming: Shape): void {
+	const index = variants.findIndex(
+		(existing) => existing.type === incoming.type,
+	);
+	if (index === -1) {
+		variants.push(incoming);
+		return;
+	}
+	variants[index] = combineSameKind(variants[index]!, incoming);
+}
+
+function combineSameKind(a: Shape, b: Shape): Shape {
 	if (a.type === "object" && b.type === "object") {
 		const keys: Record<string, Shape> = { ...a.keys };
 		for (const [key, shape] of Object.entries(b.keys)) {
-			keys[key] = key in keys ? mergeShape(keys[key], shape) : shape;
+			keys[key] = key in keys ? mergeShape(keys[key]!, shape) : shape;
 		}
 		return { type: "object", keys };
 	}
@@ -131,7 +177,7 @@ function mergeShape(a: Shape, b: Shape): Shape {
 			? a
 			: { type: "scalar", scalar: `${a.scalar}|${b.scalar}`, sample: a.sample };
 	}
-	return a; // conflicting container vs scalar: keep the richer first-seen shape
+	return a;
 }
 
 const endpoints = (
@@ -173,7 +219,7 @@ async function main(): Promise<void> {
 	const record = (endpoint: string, payload: unknown) => {
 		report[endpoint] =
 			endpoint in report
-				? mergeShape(report[endpoint], describe(payload))
+				? mergeShape(report[endpoint]!, describe(payload))
 				: describe(payload);
 	};
 
@@ -186,6 +232,11 @@ async function main(): Promise<void> {
 		});
 		dump("_list", `page-${page}`, list);
 		record("list", list);
+		if (isErrorPayload(list)) {
+			throw new Error(
+				`Listings page ${page} failed: ${list.__error}. Aborting to avoid a partial _report.json.`,
+			);
+		}
 		const rows = (list as { listings?: unknown }).listings;
 		if (!Array.isArray(rows) || rows.length === 0) break;
 		for (const row of rows) {

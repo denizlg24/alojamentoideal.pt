@@ -18,6 +18,7 @@ import {
 	listingProcessingInput,
 } from "./processor";
 import { ListingCacheRepository, type ListingState } from "./repository";
+import { LISTING_SYNC_VERSION } from "./sync-version";
 
 export const HOSTIFY_PROVIDER = "hostify";
 export const LISTING_CACHE_SYNC_TYPE = "listing_cache";
@@ -139,6 +140,7 @@ export class HostifyListingCacheSync {
 			now,
 			provider: HOSTIFY_PROVIDER,
 			syncType: LISTING_CACHE_SYNC_TYPE,
+			versionHash: LISTING_SYNC_VERSION,
 		});
 
 		if (!claim) {
@@ -202,6 +204,7 @@ export class HostifyListingCacheSync {
 					nextRunAt,
 					now: finishedAt,
 					provider: HOSTIFY_PROVIDER,
+					versionHash: LISTING_SYNC_VERSION,
 				});
 
 				return {

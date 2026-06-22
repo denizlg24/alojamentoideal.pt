@@ -5,6 +5,7 @@ import {
 	type HostifyClient,
 } from "../integrations/hostify/index";
 import { ListingCacheRepository } from "../listing-cache/repository";
+import { LISTING_SYNC_VERSION } from "../listing-cache/sync-version";
 import type { AccommodationsConfig } from "./config";
 import { getAccommodationsConfig } from "./config";
 import type {
@@ -145,6 +146,7 @@ export class NightlyPriceSync {
 			now,
 			provider: HOSTIFY_PROVIDER,
 			syncType: NIGHTLY_PRICE_SYNC_TYPE,
+			versionHash: LISTING_SYNC_VERSION,
 		});
 
 		if (!claim) {
@@ -216,6 +218,7 @@ export class NightlyPriceSync {
 					nextRunAt,
 					now: finishedAt,
 					provider: HOSTIFY_PROVIDER,
+					versionHash: LISTING_SYNC_VERSION,
 				});
 
 				return {

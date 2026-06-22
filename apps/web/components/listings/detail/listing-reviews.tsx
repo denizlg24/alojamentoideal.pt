@@ -15,7 +15,7 @@ import {
 	DialogTrigger,
 } from "@workspace/ui/components/dialog";
 import { cn } from "@workspace/ui/lib/utils";
-import { format, parseISO } from "date-fns";
+import { format, isValid, parseISO } from "date-fns";
 import { Star } from "lucide-react";
 import { useState } from "react";
 
@@ -75,6 +75,11 @@ function Stars({ rating }: { rating: number | null }) {
 
 function ReviewCard({ review }: { review: ListingReviewDto }) {
 	const [expanded, setExpanded] = useState(false);
+	const reviewedDate = review.reviewedAt ? parseISO(review.reviewedAt) : null;
+	const reviewedLabel =
+		reviewedDate && isValid(reviewedDate)
+			? format(reviewedDate, "MMMM yyyy")
+			: "";
 	const long = review.comments.length > 240;
 	const text =
 		expanded || !long ? review.comments : `${review.comments.slice(0, 240)}…`;
@@ -89,11 +94,7 @@ function ReviewCard({ review }: { review: ListingReviewDto }) {
 					<span className="font-medium text-sm">
 						{review.guestName ?? "Guest"}
 					</span>
-					<span className="text-muted-foreground text-xs">
-						{review.reviewedAt
-							? format(parseISO(review.reviewedAt), "MMMM yyyy")
-							: ""}
-					</span>
+					<span className="text-muted-foreground text-xs">{reviewedLabel}</span>
 				</div>
 				<Badge variant="secondary" className="ml-auto shrink-0">
 					{channelLabel(review)}

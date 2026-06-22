@@ -41,12 +41,27 @@ export async function fetchListingQuote({
 	signal,
 	...body
 }: QuoteRequestParams): Promise<QuoteResponse> {
-	const response = await fetch("/api/accommodations/quote", {
-		body: JSON.stringify(body),
-		headers: { "content-type": "application/json" },
-		method: "POST",
-		signal,
-	});
+	let response: Response;
+	try {
+		response = await fetch("/api/accommodations/quote", {
+			body: JSON.stringify(body),
+			headers: { "content-type": "application/json" },
+			method: "POST",
+			signal,
+		});
+	} catch (error) {
+		// Aborts are caller-driven cancellations; let them propagate so the caller
+		// can ignore them rather than render a network error.
+		if (error instanceof DOMException && error.name === "AbortError") {
+			throw error;
+		}
+		return {
+			code: "network_error",
+			message: "Could not reach the pricing service. Please try again.",
+			ok: false,
+			status: 0,
+		};
+	}
 
 	if (!response.ok) {
 		const error = await readQuoteError(response);
