@@ -40,6 +40,58 @@ describe("sumCartTotals", () => {
 		expect(totals.taxMinor).toBe(600);
 	});
 
+	test("aggregates the housing base across valid items only", () => {
+		const totals = sumCartTotals(
+			[
+				{
+					currency: "EUR",
+					housingFeeMinor: 8000,
+					subtotalMinor: 10_000,
+					taxMinor: 600,
+					totalMinor: 10_600,
+					validationStatus: "valid",
+				},
+				{
+					currency: "EUR",
+					housingFeeMinor: 16_000,
+					subtotalMinor: 20_000,
+					taxMinor: 1200,
+					totalMinor: 21_200,
+					validationStatus: "valid",
+				},
+				{
+					currency: "EUR",
+					housingFeeMinor: 5000,
+					subtotalMinor: 6000,
+					taxMinor: 0,
+					totalMinor: 6000,
+					validationStatus: "unavailable",
+				},
+			],
+			"EUR",
+		);
+
+		expect(totals.housingBaseMinor).toBe(24_000);
+	});
+
+	test("treats a missing housing fee as zero", () => {
+		const totals = sumCartTotals(
+			[
+				{
+					currency: "EUR",
+					housingFeeMinor: null,
+					subtotalMinor: 10_000,
+					taxMinor: 600,
+					totalMinor: 10_600,
+					validationStatus: "valid",
+				},
+			],
+			"EUR",
+		);
+
+		expect(totals.housingBaseMinor).toBe(0);
+	});
+
 	test("keeps default currency when every item is invalid", () => {
 		const totals = sumCartTotals(
 			[

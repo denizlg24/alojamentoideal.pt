@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
 	parseAddCartItemBody,
+	parseApplyDiscountBody,
 	parseCreateCartBody,
 	parseDeleteCartItemBody,
 	parseDraftOrderBody,
@@ -26,6 +27,32 @@ describe("commerce request parsers", () => {
 		}
 		expect(parsed.data.cartId).toBe("11111111-1111-4111-8111-111111111111");
 		expect(parsed.data.idempotencyKey).toBe("create-123");
+	});
+
+	test("rejects a non-UUID cart id", () => {
+		const parsed = parseCreateCartBody({ cartId: "cart_1" });
+
+		expect(parsed.success).toBe(false);
+	});
+
+	test("accepts a discount apply request", () => {
+		const parsed = parseApplyDiscountBody({
+			code: "SAVE10",
+			idempotencyKey: "discount-123",
+		});
+
+		expect(parsed.success).toBe(true);
+		if (!parsed.success) {
+			throw parsed.error;
+		}
+		expect(parsed.data.code).toBe("SAVE10");
+		expect(parsed.data.idempotencyKey).toBe("discount-123");
+	});
+
+	test("rejects a discount request without a code", () => {
+		const parsed = parseApplyDiscountBody({ idempotencyKey: "discount-123" });
+
+		expect(parsed.success).toBe(false);
 	});
 
 	test("accepts bodyless delete-cart-item requests", () => {

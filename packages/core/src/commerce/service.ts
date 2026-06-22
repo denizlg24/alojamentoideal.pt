@@ -978,22 +978,9 @@ export class CommerceService {
 			.where(eq(cartTable.id, cartId))
 			.limit(1);
 
-		if (!row) {
+		if (!row || !isCartAccessGranted(row, owner)) {
 			throw new CommerceError("cart_not_found", "Cart not found.", 404);
 		}
-
-		if (row.userId) {
-			if (owner.userId && owner.userId === row.userId) {
-				return;
-			}
-			throw new CommerceError("cart_not_found", "Cart not found.", 404);
-		}
-
-		if (owner.cartToken && constantTimeEquals(owner.cartToken, row.cartToken)) {
-			return;
-		}
-
-		throw new CommerceError("cart_not_found", "Cart not found.", 404);
 	}
 
 	async #ensureMutableCart(
@@ -1541,6 +1528,24 @@ function constantTimeEquals(a: string, b: string): boolean {
 		return false;
 	}
 	return timingSafeEqual(aBuffer, bBuffer);
+}
+
+/**
+ * Pure access decision for a cart. Granted iff the caller is the linked user,
+ * or the cart is anonymous and the caller presents the matching secret token
+ * (compared in constant time). Exported for unit testing the access matrix.
+ */
+export function isCartAccessGranted(
+	cart: { cartToken: string; userId: string | null },
+	owner: CartOwner,
+): boolean {
+	if (cart.userId) {
+		return owner.userId !== null && owner.userId === cart.userId;
+	}
+	return (
+		owner.cartToken !== null &&
+		constantTimeEquals(owner.cartToken, cart.cartToken)
+	);
 }
 
 /** Walks the error cause chain for a Postgres error code + constraint. */
