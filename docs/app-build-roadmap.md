@@ -4,16 +4,16 @@ This is the recommended build order for Alojamento Ideal as an end-to-end app.
 The goal is to move from backend foundations to a usable customer booking flow,
 then into operations, automation, and polish.
 
-## Status (as of 2026-06-21)
+## Status (as of 2026-06-22)
 
 Legend: ✅ done · 🟡 in progress / partial · ⬜ not started
 
 | # | Milestone | Status | Notes |
 |---|---|---|---|
 | 0 | Foundations (cache, sync, platform) | ✅ | Hostify incremental sync cron, content processing, and the `accommodation_listing` projection with FTS + trigram + geo search index. Rate limiting (Redis) and observability (Sentry errors + PostgreSQL analytics) wired through `withApiRoute`. |
-| 1 | Catalog Browsing | 🟡 | Catalog read API done: `GET /api/catalog/listings` (filter/sort/paginate) and `/api/catalog/listings/[externalId]` (localized detail), with Next.js `use cache` + cron-driven `revalidateTag` invalidation. Frontend: `/homes` grid, filter bar (dates/guests/rooms/rating/amenities), and Leaflet map shipped. Detail page and broader polish still pending. |
-| 2 | Live Availability and Quote | 🟡 | Browsing half done: homes availability filtering and the "from X for Y nights" base-price estimate are served from the synced nightly calendar in Postgres (`AccommodationPricingRepository.availabilityForStay`), so no Hostify call sits on the grid. Remaining: live Hostify price/availability revalidation at checkout and short-lived quote storage (see Debt: always re-validate before booking). |
-| 3 | Cart and Checkout Shell | ⬜ | Draft order from quote; no provider side effects yet. |
+| 1 | Catalog Browsing | ✅ | Catalog read API done: `GET /api/catalog/listings` (filter/sort/paginate) and `/api/catalog/listings/[externalId]` (localized detail), with Next.js `use cache` + cron-driven `revalidateTag` invalidation. Frontend: `/homes` grid, filter bar (dates/guests/rooms/rating/amenities), and Leaflet map. Detail page (`/homes/[id]`) shipped with gallery + full-screen gallery route, amenities dialog, reviews (synced via cron), location map, share button, room/sleeping layout, and skeleton fallbacks. |
+| 2 | Live Availability and Quote | ✅ | Detail-page booking widget runs live Hostify quotes via `POST /api/accommodations/quote` (`AccommodationQuoteService`, Redis short-lived quote cache w/ `forceFresh` bypass), debounced + stale-abort. Availability calendar from `/api/accommodations/calendar`, date/guest pickers, guest-type/tax overhaul, min-stay + capacity enforcement, price breakdown (fees + VAT), and clear unavailable/provider-error states. Re-validation immediately before booking moves into checkout (M3/M4); see Open debt. |
+| 3 | Cart and Checkout Shell | 🟡 | Booking widget exposes CTAs only: `Reserve` links to `/homes/[id]/book` (route not built) and `Add to cart` is a UI stub (toggles "Added" with no persistence). No draft order, cart store, or quote-id binding yet; no provider side effects. |
 | 4 | Payment Foundation | ⬜ | Stripe PaymentIntent from server-side order total; payment attempts + idempotency. |
 | 5 | Provider Reservation Saga | ⬜ | Durable Hostify reservation confirm/compensate workflow. |
 | 6 | Customer Order Experience | ⬜ | Confirmation page + email from durable state. |
@@ -23,14 +23,34 @@ Legend: ✅ done · 🟡 in progress / partial · ⬜ not started
 | 10 | Fiscal Documents, Messaging, Post-Stay | ⬜ | Invoices/credit notes, messaging, reconciliation. |
 | 11 | Analytics and Optimization | 🟡 | Per-request analytics events persisted to PostgreSQL and errors to Sentry. Commercial funnel events (search → view → quote → checkout → payment → confirm) **not built**. |
 
-Current focus: finish milestone 1 by building the catalog browsing frontend on
-top of the stable catalog read API.
+Current focus: milestones 1 and 2 are complete (browsing + live detail-page
+quote). Next is milestone 3: turn the booking-widget CTAs into a real cart and
+draft-order flow (`/homes/[id]/book`), binding a server-validated quote id so
+checkout never trusts client-submitted totals.
 
 ## Technical Notes and Debt
 
 Running list of known shortcuts and follow-ups noticed during implementation.
 Keep this honest: when a debt item is paid, move the detail into the relevant
 milestone and delete it here.
+
+### Done in the detail-page + live-booking iteration (2026-06-22)
+
+- ✅ Listing detail page (`/homes/[id]`) with gallery, full-screen gallery route
+  (`/homes/[id]/galery`), clickable amenities dialog (grouped, deduped),
+  reviews + per-category averages, location map, share dialog, sleeping-room
+  layout, and SEO/OpenGraph metadata.
+- ✅ Detail-page booking widget with live Hostify quoting
+  (`useListingQuote` → `POST /api/accommodations/quote`), debounced and
+  stale-aborted, plus availability calendar (`useBookingAvailability` →
+  `/api/accommodations/calendar`) that preselects the soonest valid stay.
+- ✅ Guest-type/tax overhaul in `packages/core/src/accommodations/quote.ts`
+  (adults/children/infants → capacity, VAT-included breakdown, per-fee charge
+  labels) with refreshed `quote.test.ts` / `params.test.ts`.
+- ✅ Mobile booking UX: always-on inline stay editor + reserve drawer with
+  collapsible dates/guests; desktop sticky card with popover inputs.
+- ✅ Reviews sync cron (`/api/cron/hostify/reviews`) with batched polling and
+  rerun-on-version-hash-change.
 
 ### Done in the DB-backed homes search iteration (2026-06-21)
 
@@ -52,11 +72,12 @@ milestone and delete it here.
 
 ### Open debt
 
-- ⬜ **Always fetch live Hostify price + availability before booking.** The grid
-  estimate excludes cleaning/extra-person fees and taxes and can be stale.
-  Checkout (and ideally the detail page) must re-quote and re-validate
-  availability against Hostify before payment, and fail gracefully if the stay
-  is no longer bookable. Non-negotiable before milestone 4/5.
+- 🟡 **Always fetch live Hostify price + availability before booking.** The
+  detail page now re-quotes live against Hostify (full fees + VAT), so the grid
+  estimate is no longer the last word. Remaining: checkout must re-validate the
+  quote id and availability against Hostify immediately before payment and fail
+  gracefully if the stay is no longer bookable. Non-negotiable before
+  milestone 4/5.
 - ⬜ **Hostify reservation webhook → cache invalidation.** Build the webhook
   endpoint that calls `resyncAccommodationListing(listingId)` so out-of-band
   bookings (other channels/OTAs) correct our availability without waiting for
