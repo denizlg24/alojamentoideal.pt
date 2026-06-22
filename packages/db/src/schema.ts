@@ -1,5 +1,6 @@
 import { sql } from "drizzle-orm";
 import {
+	bigint,
 	boolean,
 	customType,
 	date,
@@ -7,6 +8,7 @@ import {
 	index,
 	integer,
 	jsonb,
+	numeric,
 	pgTable,
 	text,
 	timestamp,
@@ -471,6 +473,359 @@ export const listingReviewSummary = pgTable(
 	],
 );
 
+export interface AccommodationQuoteFeeSnapshot {
+	amountMinor: number | null;
+	chargeLabel: string | null;
+	inclusiveTaxMinor: number | null;
+	isBasePrice: boolean;
+	name: string;
+	providerPayload: Record<string, unknown> | null;
+	quantity: number | null;
+	totalMinor: number;
+	type: string;
+}
+
+export interface CommerceCatalogSnapshot {
+	city: string | null;
+	country: string | null;
+	imageUrl: string | null;
+	listingId: string;
+	locationLabel: string | null;
+	provider: string;
+	title: string;
+}
+
+export interface OrderBillingAddressSnapshot {
+	city?: string;
+	country?: string;
+	line1?: string;
+	line2?: string;
+	postalCode?: string;
+	region?: string;
+	// Preserve provider/frontend address details not yet promoted to first-class fields.
+	[key: string]: unknown;
+}
+
+/**
+ * Provenance and resolved value of a Stripe coupon currently applied to a cart
+ * or frozen onto an order. Stripe owns the coupon/promotion-code rules; this
+ * captures the authoritative server-side resolution at apply time so totals can
+ * be recomputed without re-hitting Stripe on every mutation.
+ */
+export interface AppliedDiscountSnapshot {
+	source: "stripe";
+	couponId: string;
+	/** The promotion code the customer entered (null for bare coupon ids). */
+	promotionCode: string | null;
+	type: "percentage" | "fixed";
+	/** Percentage coupons only. 1000 = 10%. */
+	percentBasisPoints: number | null;
+	/** Fixed coupons only, in cart currency minor units. */
+	amountMinor: number | null;
+	currency: string | null;
+}
+
+export const cart = pgTable(
+	"carts",
+	{
+		id: text("id").primaryKey(),
+		appliedDiscount: jsonb("applied_discount").$type<AppliedDiscountSnapshot>(),
+		cartToken: text("cart_token").notNull(),
+		convertedOrderId: text("converted_order_id"),
+		createdAt: timestampWithTimezone("created_at").notNull().defaultNow(),
+		currency: text("currency").notNull(),
+		discountMinor: bigint("discount_minor", { mode: "number" })
+			.notNull()
+			.default(0),
+		expiresAt: timestampWithTimezone("expires_at").notNull(),
+		itemCount: integer("item_count").notNull().default(0),
+		status: text("status").notNull().default("draft"),
+		subtotalMinor: bigint("subtotal_minor", { mode: "number" })
+			.notNull()
+			.default(0),
+		taxMinor: bigint("tax_minor", { mode: "number" }).notNull().default(0),
+		totalMinor: bigint("total_minor", { mode: "number" }).notNull().default(0),
+		updatedAt: timestampWithTimezone("updated_at").notNull().defaultNow(),
+		userId: text("user_id").references(() => user.id, {
+			onDelete: "set null",
+		}),
+	},
+	(table) => [
+		uniqueIndex("carts_cart_token_uidx").on(table.cartToken),
+		index("carts_status_expires_at_idx").on(table.status, table.expiresAt),
+		index("carts_user_id_idx").on(table.userId),
+	],
+);
+
+export const accommodationQuoteSnapshot = pgTable(
+	"accommodation_quote_snapshots",
+	{
+		id: text("id").primaryKey(),
+		adults: integer("adults").notNull(),
+		checkIn: date("check_in", { mode: "string" }).notNull(),
+		checkOut: date("check_out", { mode: "string" }).notNull(),
+		children: integer("children").notNull().default(0),
+		cleaningFeeMinor: bigint("cleaning_fee_minor", {
+			mode: "number",
+		}),
+		createdAt: timestampWithTimezone("created_at").notNull().defaultNow(),
+		currency: text("currency").notNull(),
+		expiresAt: timestampWithTimezone("expires_at").notNull(),
+		externalAccountId: text("external_account_id").notNull(),
+		feeLines: jsonb("fee_lines")
+			.$type<AccommodationQuoteFeeSnapshot[]>()
+			.notNull()
+			.default(sql`'[]'::jsonb`),
+		fetchedAt: timestampWithTimezone("fetched_at").notNull(),
+		guests: integer("guests").notNull(),
+		housingFeeMinor: bigint("housing_fee_minor", { mode: "number" }),
+		infants: integer("infants").notNull().default(0),
+		listingExternalId: text("listing_external_id").notNull(),
+		nightlyAverageMinor: bigint("nightly_average_minor", {
+			mode: "number",
+		}),
+		nights: integer("nights").notNull(),
+		pets: integer("pets").notNull().default(0),
+		provider: text("provider").notNull(),
+		providerPayload: jsonb("provider_payload").$type<Record<string, unknown>>(),
+		subtotalMinor: bigint("subtotal_minor", { mode: "number" }).notNull(),
+		taxMinor: bigint("tax_minor", { mode: "number" }).notNull().default(0),
+		totalMinor: bigint("total_minor", { mode: "number" }).notNull(),
+		validationStatus: text("validation_status").notNull().default("valid"),
+	},
+	(table) => [
+		index("accommodation_quote_snapshots_scope_dates_idx").on(
+			table.provider,
+			table.externalAccountId,
+			table.listingExternalId,
+			table.checkIn,
+			table.checkOut,
+		),
+		index("accommodation_quote_snapshots_expires_at_idx").on(table.expiresAt),
+		index("accommodation_quote_snapshots_validation_status_idx").on(
+			table.validationStatus,
+		),
+	],
+);
+
+export const cartItem = pgTable(
+	"cart_items",
+	{
+		id: text("id").primaryKey(),
+		cartId: text("cart_id")
+			.notNull()
+			.references(() => cart.id, { onDelete: "cascade" }),
+		clientMutationId: text("client_mutation_id"),
+		createdAt: timestampWithTimezone("created_at").notNull().defaultNow(),
+		position: integer("position").notNull(),
+		quoteSnapshotId: text("quote_snapshot_id")
+			.notNull()
+			.references(() => accommodationQuoteSnapshot.id, {
+				onDelete: "restrict",
+			}),
+		removedAt: timestampWithTimezone("removed_at"),
+		status: text("status").notNull().default("active"),
+		type: text("type").notNull().default("accommodation"),
+		updatedAt: timestampWithTimezone("updated_at").notNull().defaultNow(),
+	},
+	(table) => [
+		index("cart_items_cart_status_idx").on(table.cartId, table.status),
+		uniqueIndex("cart_items_cart_position_uidx").on(
+			table.cartId,
+			table.position,
+		),
+		uniqueIndex("cart_items_client_mutation_uidx")
+			.on(table.cartId, table.clientMutationId)
+			.where(sql`${table.clientMutationId} is not null`),
+	],
+);
+
+export const order = pgTable(
+	"orders",
+	{
+		id: text("id").primaryKey(),
+		amountPaidMinor: bigint("amount_paid_minor", { mode: "number" })
+			.notNull()
+			.default(0),
+		appliedDiscount: jsonb("applied_discount").$type<AppliedDiscountSnapshot>(),
+		amountRefundedMinor: bigint("amount_refunded_minor", { mode: "number" })
+			.notNull()
+			.default(0),
+		cancelledAt: timestampWithTimezone("cancelled_at"),
+		cartId: text("cart_id").references(() => cart.id, { onDelete: "set null" }),
+		checkoutExpiresAt: timestampWithTimezone("checkout_expires_at"),
+		confirmedAt: timestampWithTimezone("confirmed_at"),
+		createdAt: timestampWithTimezone("created_at").notNull().defaultNow(),
+		currency: text("currency").notNull(),
+		discountMinor: bigint("discount_minor", { mode: "number" })
+			.notNull()
+			.default(0),
+		failureCode: text("failure_code"),
+		failureDetail: text("failure_detail"),
+		publicReference: text("public_reference").notNull(),
+		status: text("status").notNull().default("draft"),
+		subtotalMinor: bigint("subtotal_minor", { mode: "number" }).notNull(),
+		taxMinor: bigint("tax_minor", { mode: "number" }).notNull().default(0),
+		totalMinor: bigint("total_minor", { mode: "number" }).notNull(),
+		updatedAt: timestampWithTimezone("updated_at").notNull().defaultNow(),
+		userId: text("user_id").references(() => user.id, {
+			onDelete: "set null",
+		}),
+	},
+	(table) => [
+		uniqueIndex("orders_public_reference_uidx").on(table.publicReference),
+		index("orders_cart_id_idx").on(table.cartId),
+		index("orders_status_created_at_idx").on(table.status, table.createdAt),
+		index("orders_user_id_idx").on(table.userId),
+	],
+);
+
+export const orderContact = pgTable(
+	"order_contacts",
+	{
+		id: text("id").primaryKey(),
+		billingAddress: jsonb("billing_address")
+			.$type<OrderBillingAddressSnapshot>()
+			.notNull()
+			.default(sql`'{}'::jsonb`),
+		companyName: text("company_name"),
+		createdAt: timestampWithTimezone("created_at").notNull().defaultNow(),
+		email: text("email").notNull(),
+		isCompany: boolean("is_company").notNull().default(false),
+		name: text("name").notNull(),
+		notes: text("notes"),
+		orderId: text("order_id")
+			.notNull()
+			.references(() => order.id, { onDelete: "cascade" }),
+		phoneE164: text("phone_e164").notNull(),
+		taxNumber: text("tax_number"),
+	},
+	(table) => [
+		uniqueIndex("order_contacts_order_id_uidx").on(table.orderId),
+		index("order_contacts_email_idx").on(table.email),
+	],
+);
+
+export const orderItem = pgTable(
+	"order_items",
+	{
+		id: text("id").primaryKey(),
+		catalogSnapshot: jsonb("catalog_snapshot")
+			.$type<CommerceCatalogSnapshot>()
+			.notNull(),
+		createdAt: timestampWithTimezone("created_at").notNull().defaultNow(),
+		currency: text("currency").notNull(),
+		discountMinor: bigint("discount_minor", { mode: "number" })
+			.notNull()
+			.default(0),
+		imageUrlSnapshot: text("image_url_snapshot"),
+		orderId: text("order_id")
+			.notNull()
+			.references(() => order.id, { onDelete: "cascade" }),
+		position: integer("position").notNull(),
+		quantity: integer("quantity").notNull().default(1),
+		sourceCartItemId: text("source_cart_item_id").references(
+			() => cartItem.id,
+			{
+				onDelete: "set null",
+			},
+		),
+		status: text("status").notNull().default("draft"),
+		subtotalMinor: bigint("subtotal_minor", { mode: "number" }).notNull(),
+		taxMinor: bigint("tax_minor", { mode: "number" }).notNull().default(0),
+		titleSnapshot: text("title_snapshot").notNull(),
+		totalMinor: bigint("total_minor", { mode: "number" }).notNull(),
+		type: text("type").notNull(),
+		updatedAt: timestampWithTimezone("updated_at").notNull().defaultNow(),
+	},
+	(table) => [
+		index("order_items_order_id_idx").on(table.orderId),
+		uniqueIndex("order_items_order_position_uidx").on(
+			table.orderId,
+			table.position,
+		),
+	],
+);
+
+export const accommodationItemDetail = pgTable(
+	"accommodation_item_details",
+	{
+		orderItemId: text("order_item_id")
+			.primaryKey()
+			.references(() => orderItem.id, { onDelete: "cascade" }),
+		adults: integer("adults").notNull().default(0),
+		checkIn: date("check_in", { mode: "string" }).notNull(),
+		checkOut: date("check_out", { mode: "string" }).notNull(),
+		children: integer("children").notNull().default(0),
+		externalAccountId: text("external_account_id").notNull(),
+		guests: integer("guests").notNull(),
+		hostifyListingId: text("hostify_listing_id").notNull(),
+		infants: integer("infants").notNull().default(0),
+		nights: integer("nights").notNull(),
+		pets: integer("pets").notNull().default(0),
+		propertyTimezone: text("property_timezone").notNull(),
+		provider: text("provider").notNull(),
+	},
+	(table) => [
+		index("accommodation_item_details_listing_idx").on(
+			table.provider,
+			table.externalAccountId,
+			table.hostifyListingId,
+		),
+	],
+);
+
+export const orderItemCharge = pgTable(
+	"order_item_charges",
+	{
+		id: text("id").primaryKey(),
+		createdAt: timestampWithTimezone("created_at").notNull().defaultNow(),
+		grossMinor: bigint("gross_minor", { mode: "number" }).notNull(),
+		kind: text("kind").notNull(),
+		name: text("name").notNull(),
+		netMinor: bigint("net_minor", { mode: "number" }).notNull(),
+		orderItemId: text("order_item_id")
+			.notNull()
+			.references(() => orderItem.id, { onDelete: "cascade" }),
+		position: integer("position").notNull(),
+		providerChargeId: text("provider_charge_id"),
+		quantity: numeric("quantity", { precision: 12, scale: 2 }).notNull(),
+		rawPayload: jsonb("raw_payload").$type<Record<string, unknown>>(),
+		taxMinor: bigint("tax_minor", { mode: "number" }).notNull().default(0),
+		taxRateBasisPoints: integer("tax_rate_basis_points"),
+		unitNetMinor: bigint("unit_net_minor", { mode: "number" }).notNull(),
+	},
+	(table) => [
+		index("order_item_charges_order_item_id_idx").on(table.orderItemId),
+		uniqueIndex("order_item_charges_item_position_uidx").on(
+			table.orderItemId,
+			table.position,
+		),
+	],
+);
+
+export const apiIdempotencyKey = pgTable(
+	"api_idempotency_keys",
+	{
+		id: text("id").primaryKey(),
+		createdAt: timestampWithTimezone("created_at").notNull().defaultNow(),
+		expiresAt: timestampWithTimezone("expires_at").notNull(),
+		key: text("key").notNull(),
+		requestHash: text("request_hash").notNull(),
+		responseSnapshot: jsonb("response_snapshot").$type<unknown>(),
+		scope: text("scope").notNull(),
+		status: text("status").notNull().default("in_progress"),
+		updatedAt: timestampWithTimezone("updated_at").notNull().defaultNow(),
+	},
+	(table) => [
+		uniqueIndex("api_idempotency_keys_scope_key_uidx").on(
+			table.scope,
+			table.key,
+		),
+		index("api_idempotency_keys_expires_at_idx").on(table.expiresAt),
+	],
+);
+
 export const schema = {
 	user,
 	session,
@@ -483,4 +838,13 @@ export const schema = {
 	observabilityEvent,
 	listingReview,
 	listingReviewSummary,
+	cart,
+	cartItem,
+	accommodationQuoteSnapshot,
+	order,
+	orderContact,
+	orderItem,
+	accommodationItemDetail,
+	orderItemCharge,
+	apiIdempotencyKey,
 };

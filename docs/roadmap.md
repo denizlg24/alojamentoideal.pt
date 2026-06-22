@@ -13,7 +13,7 @@ Legend: ✅ done · 🟡 in progress / partial · ⬜ not started
 | 0 | Foundations (cache, sync, platform) | ✅ | Hostify incremental sync cron, content processing, and the `accommodation_listing` projection with FTS + trigram + geo search index. Rate limiting (Redis) and observability (Sentry errors + PostgreSQL analytics) wired through `withApiRoute`. |
 | 1 | Catalog Browsing | ✅ | Catalog read API done: `GET /api/catalog/listings` (filter/sort/paginate) and `/api/catalog/listings/[externalId]` (localized detail), with Next.js `use cache` + cron-driven `revalidateTag` invalidation. Frontend: `/homes` grid, filter bar (dates/guests/rooms/rating/amenities), and Leaflet map. Detail page (`/homes/[id]`) shipped with gallery + full-screen gallery route, amenities dialog, reviews (synced via cron), location map, share button, room/sleeping layout, and skeleton fallbacks. |
 | 2 | Live Availability and Quote | ✅ | Detail-page booking widget runs live Hostify quotes via `POST /api/accommodations/quote` (`AccommodationQuoteService`, Redis short-lived quote cache w/ `forceFresh` bypass), debounced + stale-abort. Availability calendar from `/api/accommodations/calendar`, date/guest pickers, guest-type/tax overhaul, min-stay + capacity enforcement, price breakdown (fees + VAT), and clear unavailable/provider-error states. Re-validation immediately before booking moves into checkout (M3/M4); see Open debt. |
-| 3 | Cart and Checkout Shell | 🟡 | Booking widget exposes CTAs only: `Reserve` links to `/homes/[id]/book` (route not built) and `Add to cart` is a UI stub (toggles "Added" with no persistence). No draft order, cart store, or quote-id binding yet; no provider side effects. |
+| 3 | Cart and Checkout Shell | 🟡 | Backend foundation is in place: DB-backed cart/order schema, `CommerceService`, idempotent cart mutations, cart validation, and draft-order API routes (`POST /api/cart`, `/api/cart/[cartId]`, `/api/cart/[cartId]/items`, `/api/cart/[cartId]/items/[itemId]`, `/api/cart/[cartId]/validate`, `/api/checkout/draft-order`). Frontend remains partial: `Reserve` still links to `/homes/[id]/book` (route not built) and `Add to cart` is a UI stub with no persisted client cart store. No provider side effects. |
 | 4 | Payment Foundation | ⬜ | Stripe PaymentIntent from server-side order total; payment attempts + idempotency. |
 | 5 | Provider Reservation Saga | ⬜ | Durable Hostify reservation confirm/compensate workflow. |
 | 6 | Customer Order Experience | ⬜ | Confirmation page + email from durable state. |
@@ -24,15 +24,42 @@ Legend: ✅ done · 🟡 in progress / partial · ⬜ not started
 | 11 | Analytics and Optimization | 🟡 | Per-request analytics events persisted to PostgreSQL and errors to Sentry. Commercial funnel events (search → view → quote → checkout → payment → confirm) **not built**. |
 
 Current focus: milestones 1 and 2 are complete (browsing + live detail-page
-quote). Next is milestone 3: turn the booking-widget CTAs into a real cart and
-draft-order flow (`/homes/[id]/book`), binding a server-validated quote id so
-checkout never trusts client-submitted totals.
+quote), and milestone 3 has its backend foundation. Next is to wire the
+booking-widget CTAs into a persisted cart client and `/homes/[id]/book`
+checkout shell, then hand contact/billing details into draft-order creation.
 
 ## Technical Notes and Debt
 
 Running list of known shortcuts and follow-ups noticed during implementation.
 Keep this honest: when a debt item is paid, move the detail into the relevant
 milestone and delete it here.
+
+### Done in the cart API hardening iteration (2026-06-22)
+
+- ✅ Cart and draft-order parser coverage expanded for valid create-cart,
+  add-item, update-item, billing address, company, and notes scenarios.
+- ✅ Cart validation and draft-order revalidation now fetch quote snapshots in
+  parallel with `Promise.allSettled`, while preserving structured
+  `CommerceError` handling and validation failure reporting.
+- ✅ Draft-order charge rows now preserve negative discount `netMinor` values,
+  with regression coverage for discounts, pure tax lines, inclusive tax
+  precedence, and quantity formatting.
+- ✅ API error handling tightened: validation responses no longer need route
+  `as Response` casts, JSON parse failures are logged, duplicate error message
+  fields were removed, and missing `issues` arrays are guarded.
+- ✅ Commerce domain cleanup: cart validation failures no longer carry HTTP
+  status, draft-order contact parsing uses `safeParse` on both paths, and
+  unique order reference exhaustion now throws a `CommerceError`.
+- ✅ Validation run after the fixes:
+  `bun test ./packages/core/src/commerce`,
+  `bun run --filter @workspace/core typecheck`,
+  `bun run --filter @workspace/db typecheck`,
+  `bun run --filter web typecheck`, and targeted `biome check` all passed.
+- Skipped review findings: Next async route params are valid on the installed
+  Next `16.2.9`; changing monetary Drizzle columns to `mode: "bigint"` is a
+  coordinated serialization/type migration, not a minimal nit fix; and
+  `assertMutableCart` does not return `invalid_request`, so tests were added for
+  the real `cart_not_found` and expired-cart behavior instead.
 
 ### Done in the detail-page + live-booking iteration (2026-06-22)
 
@@ -74,10 +101,11 @@ milestone and delete it here.
 
 - 🟡 **Always fetch live Hostify price + availability before booking.** The
   detail page now re-quotes live against Hostify (full fees + VAT), so the grid
-  estimate is no longer the last word. Remaining: checkout must re-validate the
-  quote id and availability against Hostify immediately before payment and fail
-  gracefully if the stay is no longer bookable. Non-negotiable before
-  milestone 4/5.
+  estimate is no longer the last word. Cart validation and draft-order creation
+  now revalidate active items with fresh Hostify quote snapshots before
+  checkout state advances. Remaining before payment/provider side effects: wire
+  the frontend quote/cart flow to those APIs and surface stale or unavailable
+  failures gracefully.
 - ⬜ **Hostify reservation webhook → cache invalidation.** Build the webhook
   endpoint that calls `resyncAccommodationListing(listingId)` so out-of-band
   bookings (other channels/OTAs) correct our availability without waiting for

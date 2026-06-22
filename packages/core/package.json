@@ -16,6 +16,10 @@
 			"types": "./src/accommodations/index.ts",
 			"default": "./src/accommodations/index.ts"
 		},
+		"./commerce": {
+			"types": "./src/commerce/index.ts",
+			"default": "./src/commerce/index.ts"
+		},
 		"./listing-cache": {
 			"types": "./src/listing-cache/index.ts",
 			"default": "./src/listing-cache/index.ts"
