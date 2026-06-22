@@ -8,6 +8,7 @@ import {
 } from "@workspace/ui/components/popover";
 import { cn } from "@workspace/ui/lib/utils";
 import { Minus, Plus, Users } from "lucide-react";
+import { MAX_INFANTS } from "@/lib/catalog/guests";
 
 export interface GuestCounts {
 	adults: number;
@@ -22,7 +23,6 @@ interface GuestFieldsProps {
 
 const MIN_ADULTS = 1;
 const MAX_PER_CATEGORY = 20;
-const MAX_INFANTS = 5;
 
 function Stepper({
 	hint,

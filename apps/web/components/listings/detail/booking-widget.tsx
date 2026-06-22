@@ -29,7 +29,7 @@ import { useSearchParams } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import type { DateRange } from "react-day-picker";
 import { nightsBetween, parseIsoDate, toIsoDate } from "@/lib/catalog/dates";
-import { capacityForGuests } from "@/lib/catalog/guests";
+import { capacityForGuests, MAX_INFANTS } from "@/lib/catalog/guests";
 import { formatListingMoney } from "@/lib/catalog/pricing-display";
 import { GuestFields } from "../../search/guest-selector";
 import { ListingCalendar } from "./listing-calendar";
@@ -49,9 +49,12 @@ interface BookingWidgetProps {
 	minNights: number;
 }
 
-function intParam(value: string | null, fallback: number, min: number): number {
+function intParam(value: string | null, fallback: number, min: number, max?: number): number {
 	const parsed = value ? Number.parseInt(value, 10) : Number.NaN;
-	return Number.isFinite(parsed) && parsed >= min ? parsed : fallback;
+	if (!Number.isFinite(parsed) || parsed < min) {
+		return fallback;
+	}
+	return max !== undefined ? Math.min(parsed, max) : parsed;
 }
 
 // Compact stay range for the mobile summary, e.g. "Jun 23-26" within one month
@@ -108,7 +111,7 @@ function BookingWidgetInner({
 	const [guests, setGuests] = useState<GuestCounts>(() => ({
 		adults: intParam(searchParams.get("adults"), 1, 1),
 		children: intParam(searchParams.get("children"), 0, 0),
-		infants: intParam(searchParams.get("infants"), 0, 0),
+		infants: intParam(searchParams.get("infants"), 0, 0, MAX_INFANTS),
 	}));
 	const [added, setAdded] = useState(false);
 	const [datesOpen, setDatesOpen] = useState(false);

@@ -64,6 +64,9 @@ describe("parseQuoteBody", () => {
 
 		expect(parsed.success).toBe(true);
 		if (parsed.success) {
+			expect(parsed.data.adults).toBe(2);
+			expect(parsed.data.children).toBe(1);
+			expect(parsed.data.guests).toBe(3);
 			expect(parsed.data.infants).toBe(2);
 		}
 	});
