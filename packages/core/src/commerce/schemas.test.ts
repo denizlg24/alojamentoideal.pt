@@ -16,7 +16,7 @@ describe("commerce request parsers", () => {
 
 	test("accepts create-cart requests with cart and idempotency ids", () => {
 		const parsed = parseCreateCartBody({
-			cartId: "cart_1",
+			cartId: "11111111-1111-4111-8111-111111111111",
 			idempotencyKey: "create-123",
 		});
 
@@ -24,7 +24,7 @@ describe("commerce request parsers", () => {
 		if (!parsed.success) {
 			throw parsed.error;
 		}
-		expect(parsed.data.cartId).toBe("cart_1");
+		expect(parsed.data.cartId).toBe("11111111-1111-4111-8111-111111111111");
 		expect(parsed.data.idempotencyKey).toBe("create-123");
 	});
 

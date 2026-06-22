@@ -13,7 +13,9 @@ const idempotencyKey = z
 	.regex(/^[A-Za-z0-9._:-]+$/, "Use letters, numbers, dots, dashes or colons");
 
 const createCartSchema = z.object({
-	cartId: optionalIdString,
+	// Server-generated UUIDs only: unguessable, and removes the colon-collision
+	// risk in idempotency scopes such as `cart:${cartId}:items:create`.
+	cartId: z.string().uuid().optional(),
 	idempotencyKey: idempotencyKey.optional(),
 });
 

@@ -7,6 +7,16 @@ import type { StayDates } from "../accommodations";
 
 export type CartStatus = "converted" | "draft" | "expired";
 export type CartItemStatus = "active" | "removed";
+
+/**
+ * Identity used to authorize cart-scoped operations. Resolved per request from
+ * the session (when authenticated) and the secret `ai_cart` cookie. Either or
+ * both may be present; access rules live in `CommerceService`.
+ */
+export interface CartOwner {
+	userId: string | null;
+	cartToken: string | null;
+}
 export type QuoteValidationStatus =
 	| "expired"
 	| "provider_error"

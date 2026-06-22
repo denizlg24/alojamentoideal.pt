@@ -3,6 +3,7 @@ import {
 	commerceErrorResponse,
 	commerceService,
 	readJson,
+	resolveCartOwner,
 	validationResponse,
 } from "@/lib/api/commerce";
 import { withApiRoute } from "@/lib/api/route";
@@ -17,9 +18,11 @@ export const POST = withApiRoute(
 			return validationResponse(parsed, "Invalid draft order request");
 		}
 
+		const owner = await resolveCartOwner(request);
+
 		try {
 			return Response.json(
-				await commerceService().createDraftOrder(parsed.data),
+				await commerceService().createDraftOrder(parsed.data, owner),
 			);
 		} catch (error) {
 			const response = commerceErrorResponse(error);

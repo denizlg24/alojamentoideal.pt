@@ -1,3 +1,4 @@
+import { timingSafeEqual } from "node:crypto";
 import {
 	type AccommodationListingProcessedContent,
 	type AccommodationListingRawContent,
@@ -13,7 +14,7 @@ import {
 	orderItem as orderItemTable,
 	order as orderTable,
 } from "@workspace/db";
-import { and, asc, eq, sql } from "drizzle-orm";
+import { and, asc, eq, isNull, sql } from "drizzle-orm";
 import { parseQuoteBody } from "../accommodations";
 import { CommerceError, invalidRequest } from "./errors";
 import { hashIdempotencyRequest, idempotencyExpiresAt } from "./idempotency";
@@ -31,6 +32,7 @@ import type {
 	CartDto,
 	CartItemDto,
 	CartMutationResponse,
+	CartOwner,
 	CartResponse,
 	CartValidationFailure,
 	CartValidationResponse,
@@ -128,9 +130,15 @@ export class CommerceService {
 		this.#quoteTtlSeconds = options.quoteTtlSeconds;
 	}
 
-	async createCart(input: CreateCartInput): Promise<CartResponse> {
-		const payload = { cartId: input.cartId ?? null };
-		const operation = (tx: Transaction) => this.#createCart(tx, input);
+	async createCart(
+		input: CreateCartInput,
+		owner: CartOwner,
+	): Promise<CartResponse> {
+		const payload = {
+			cartId: input.cartId ?? null,
+			userId: owner.userId ?? null,
+		};
+		const operation = (tx: Transaction) => this.#createCart(tx, input, owner);
 
 		if (input.idempotencyKey) {
 			return this.#runIdempotent(
@@ -144,14 +152,55 @@ export class CommerceService {
 		return this.#db.transaction(operation);
 	}
 
-	async getCart(cartId: string): Promise<CartResponse> {
+	async getCart(cartId: string, owner: CartOwner): Promise<CartResponse> {
+		await this.#assertCartAccess(this.#db, cartId, owner);
 		return { cart: await this.#cartDto(this.#db, cartId, new Date()) };
+	}
+
+	/**
+	 * Links the anonymous cart identified by `cartToken` to the authenticated
+	 * user. Idempotent: re-claiming a cart the user already owns returns it; a
+	 * cart owned by someone else (or absent) reports as not found.
+	 */
+	async claimCart(owner: CartOwner, cartToken: string): Promise<CartResponse> {
+		const userId = owner.userId;
+		if (!userId) {
+			throw new CommerceError("cart_not_found", "Cart not found.", 404);
+		}
+
+		return this.#db.transaction(async (tx) => {
+			const now = new Date();
+			await tx
+				.update(cartTable)
+				.set({ updatedAt: now, userId })
+				.where(
+					and(
+						eq(cartTable.cartToken, cartToken),
+						isNull(cartTable.userId),
+						eq(cartTable.status, "draft"),
+					),
+				);
+
+			const [row] = await tx
+				.select({ id: cartTable.id, userId: cartTable.userId })
+				.from(cartTable)
+				.where(eq(cartTable.cartToken, cartToken))
+				.limit(1);
+
+			if (!row || row.userId !== userId) {
+				throw new CommerceError("cart_not_found", "Cart not found.", 404);
+			}
+
+			return { cart: await this.#cartDto(tx, row.id, now) };
+		});
 	}
 
 	async addItem(
 		cartId: string,
 		input: AddCartItemBody,
+		owner: CartOwner,
 	): Promise<CartMutationResponse> {
+		await this.#assertCartAccess(this.#db, cartId, owner);
 		const payload = { cartId, input };
 		const scope = `cart:${cartId}:items:create`;
 		const replay = await this.#readIdempotencyReplay<CartMutationResponse>(
@@ -173,7 +222,9 @@ export class CommerceService {
 		cartId: string,
 		itemId: string,
 		input: UpdateCartItemBody,
+		owner: CartOwner,
 	): Promise<CartMutationResponse> {
+		await this.#assertCartAccess(this.#db, cartId, owner);
 		const payload = { cartId, input, itemId };
 		const scope = `cart:${cartId}:items:${itemId}:update`;
 		const replay = await this.#readIdempotencyReplay<CartMutationResponse>(
@@ -198,7 +249,9 @@ export class CommerceService {
 		cartId: string,
 		itemId: string,
 		input: DeleteCartItemBody = {},
+		owner: CartOwner = { cartToken: null, userId: null },
 	): Promise<CartResponse> {
+		await this.#assertCartAccess(this.#db, cartId, owner);
 		const payload = { cartId, itemId };
 		const operation = (tx: Transaction) => this.#removeItem(tx, cartId, itemId);
 
@@ -214,7 +267,11 @@ export class CommerceService {
 		return this.#db.transaction(operation);
 	}
 
-	async validateCart(cartId: string): Promise<CartValidationResponse> {
+	async validateCart(
+		cartId: string,
+		owner: CartOwner,
+	): Promise<CartValidationResponse> {
+		await this.#assertCartAccess(this.#db, cartId, owner);
 		const inputs = await this.#readActiveItemInputs(cartId);
 		const { failures, snapshots } = await this.#revalidateItems(inputs);
 
@@ -240,7 +297,11 @@ export class CommerceService {
 		});
 	}
 
-	async createDraftOrder(input: DraftOrderBody): Promise<DraftOrderResponse> {
+	async createDraftOrder(
+		input: DraftOrderBody,
+		owner: CartOwner,
+	): Promise<DraftOrderResponse> {
+		await this.#assertCartAccess(this.#db, input.cartId, owner);
 		const payload = {
 			cartId: input.cartId,
 			contact: input.contact,
@@ -283,7 +344,7 @@ export class CommerceService {
 		}
 
 		const operation = (tx: Transaction) =>
-			this.#createDraftOrder(tx, input, snapshots);
+			this.#createDraftOrder(tx, input, snapshots, owner);
 
 		if (input.idempotencyKey) {
 			return this.#runIdempotent(
@@ -300,6 +361,7 @@ export class CommerceService {
 	async #createCart(
 		tx: Transaction,
 		input: CreateCartInput,
+		owner: CartOwner,
 	): Promise<CartResponse> {
 		const now = new Date();
 
@@ -310,6 +372,8 @@ export class CommerceService {
 				.where(eq(cartTable.id, input.cartId))
 				.limit(1);
 			if (existing) {
+				// A supplied id must not let a caller adopt someone else's cart.
+				await this.#assertCartAccess(tx, existing.id, owner);
 				return { cart: await this.#cartDto(tx, existing.id, now) };
 			}
 		}
@@ -322,6 +386,7 @@ export class CommerceService {
 			expiresAt: new Date(now.getTime() + CART_TTL_MS),
 			id,
 			updatedAt: now,
+			userId: owner.userId ?? null,
 		});
 
 		return { cart: await this.#cartDto(tx, id, now) };
@@ -438,6 +503,7 @@ export class CommerceService {
 		tx: Transaction,
 		input: DraftOrderBody,
 		snapshots: RevalidatedSnapshot[],
+		owner: CartOwner,
 	): Promise<DraftOrderResponse> {
 		const now = new Date();
 		await this.#ensureMutableCart(tx, input.cartId, now);
@@ -487,6 +553,7 @@ export class CommerceService {
 			taxMinor: totals.taxMinor,
 			totalMinor: totals.totalMinor,
 			updatedAt: now,
+			userId: owner.userId ?? null,
 		});
 
 		await tx.insert(orderContactTable).values({
@@ -694,6 +761,41 @@ export class CommerceService {
 			totalMinor: snapshot.totalMinor,
 			validationStatus: snapshot.validationStatus,
 		});
+	}
+
+	/**
+	 * Authorizes a cart-scoped operation. Access is granted iff the caller is the
+	 * linked user, or the cart is anonymous and the caller presents the matching
+	 * secret cart token. Denials throw `cart_not_found` (404) so cart existence
+	 * stays unenumerable.
+	 */
+	async #assertCartAccess(
+		db: DbExecutor,
+		cartId: string,
+		owner: CartOwner,
+	): Promise<void> {
+		const [row] = await db
+			.select({ cartToken: cartTable.cartToken, userId: cartTable.userId })
+			.from(cartTable)
+			.where(eq(cartTable.id, cartId))
+			.limit(1);
+
+		if (!row) {
+			throw new CommerceError("cart_not_found", "Cart not found.", 404);
+		}
+
+		if (row.userId) {
+			if (owner.userId && owner.userId === row.userId) {
+				return;
+			}
+			throw new CommerceError("cart_not_found", "Cart not found.", 404);
+		}
+
+		if (owner.cartToken && constantTimeEquals(owner.cartToken, row.cartToken)) {
+			return;
+		}
+
+		throw new CommerceError("cart_not_found", "Cart not found.", 404);
 	}
 
 	async #ensureMutableCart(
@@ -1159,6 +1261,15 @@ export class CommerceService {
 			return response;
 		});
 	}
+}
+
+function constantTimeEquals(a: string, b: string): boolean {
+	const aBuffer = Buffer.from(a);
+	const bBuffer = Buffer.from(b);
+	if (aBuffer.length !== bBuffer.length) {
+		return false;
+	}
+	return timingSafeEqual(aBuffer, bBuffer);
 }
 
 function mergeQuoteInput(

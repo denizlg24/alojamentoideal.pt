@@ -3,6 +3,7 @@ import {
 	commerceErrorResponse,
 	commerceService,
 	readJson,
+	resolveCartOwner,
 	validationResponse,
 } from "@/lib/api/commerce";
 import { withApiRoute } from "@/lib/api/route";
@@ -22,9 +23,11 @@ export const POST = withApiRoute<CartItemsRouteContext>(
 			return validationResponse(parsed, "Invalid cart item request");
 		}
 
+		const owner = await resolveCartOwner(request);
+
 		try {
 			return Response.json(
-				await commerceService().addItem(cartId, parsed.data),
+				await commerceService().addItem(cartId, parsed.data, owner),
 			);
 		} catch (error) {
 			const response = commerceErrorResponse(error);
