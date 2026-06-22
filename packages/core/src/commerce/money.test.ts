@@ -53,6 +53,8 @@ describe("normalizeAccommodationQuoteSnapshot", () => {
 		expect(snapshot.subtotalMinor).toBe(11_234);
 		expect(snapshot.feeLines[1]?.totalMinor).toBe(1234);
 		expect(snapshot.feeLines[0]?.inclusiveTaxMinor).toBe(600);
+		// Housing base = base-price net (10_000 - 600 inclusive tax); fees/tax excluded.
+		expect(snapshot.housingFeeMinor).toBe(9_400);
 	});
 
 	test("synthesizes an accommodation charge when Hostify omits a base line", () => {

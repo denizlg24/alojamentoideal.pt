@@ -12,7 +12,13 @@ import {
 	CommerceService,
 } from "@workspace/core/commerce";
 import { createHostifyClientFromEnv } from "@workspace/core/integrations/hostify";
+import {
+	createStripeClientFromEnv,
+	resolvePromotionCode,
+	StripeConfigurationError,
+} from "@workspace/core/integrations/stripe";
 import { getRedis } from "@workspace/core/redis";
+import type { AppliedDiscountSnapshot } from "@workspace/db";
 import { getDb } from "@workspace/db";
 import { getServerUser } from "@/lib/auth/session";
 import { HOSTIFY_PROVIDER } from "@/lib/catalog/constants";
@@ -114,6 +120,24 @@ export function commerceService(): CommerceService {
 			}
 		},
 		quoteTtlSeconds: config.quoteCacheTtlSeconds,
+		resolveDiscount: async (
+			code: string,
+		): Promise<AppliedDiscountSnapshot | null> => {
+			let stripe: ReturnType<typeof createStripeClientFromEnv>;
+			try {
+				stripe = createStripeClientFromEnv();
+			} catch (error) {
+				if (error instanceof StripeConfigurationError) {
+					throw new CommerceError(
+						"discount_unavailable",
+						"Discounts are not available right now.",
+						503,
+					);
+				}
+				throw error;
+			}
+			return resolvePromotionCode(stripe, code);
+		},
 	});
 }
 

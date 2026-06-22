@@ -47,6 +47,10 @@
 		"./integrations/bokun": {
 			"types": "./src/integrations/bokun/index.ts",
 			"default": "./src/integrations/bokun/index.ts"
+		},
+		"./integrations/stripe": {
+			"types": "./src/integrations/stripe/index.ts",
+			"default": "./src/integrations/stripe/index.ts"
 		}
 	},
 	"scripts": {
@@ -58,6 +62,7 @@
 		"drizzle-orm": "^0.45.2",
 		"ioredis": "^5.11.1",
 		"rate-limiter-flexible": "^11.2.0",
+		"stripe": "^22.2.3",
 		"zod": "^4.4.3"
 	},
 	"devDependencies": {

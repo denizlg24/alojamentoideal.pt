@@ -1,9 +1,12 @@
 export type CommerceErrorCode =
+	| "cart_changed"
 	| "cart_converted"
 	| "cart_expired"
 	| "cart_not_found"
 	| "cart_not_mutable"
 	| "dates_unavailable"
+	| "discount_invalid"
+	| "discount_unavailable"
 	| "empty_cart"
 	| "idempotency_in_progress"
 	| "idempotency_key_reused"

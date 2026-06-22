@@ -48,6 +48,12 @@ const deleteCartItemSchema = z.object({
 	idempotencyKey: idempotencyKey.optional(),
 });
 
+const applyDiscountSchema = z.object({
+	// Stripe promotion codes: letters, digits and dashes, case-insensitive.
+	code: z.string().trim().min(1).max(64),
+	idempotencyKey: idempotencyKey.optional(),
+});
+
 const addressLine = z.string().trim().min(1).max(200);
 const billingAddressSchema: z.ZodType<OrderBillingAddressSnapshot> = z
 	.object({
@@ -152,6 +158,11 @@ export interface DeleteCartItemBody {
 	idempotencyKey?: string;
 }
 
+export interface ApplyDiscountBody {
+	code: string;
+	idempotencyKey?: string;
+}
+
 export interface DraftOrderBody {
 	cartId: string;
 	contact: DraftOrderContactInput;
@@ -197,6 +208,12 @@ export function parseDeleteCartItemBody(
 	body: unknown,
 ): CommerceParseResult<DeleteCartItemBody> {
 	return deleteCartItemSchema.safeParse(body ?? {});
+}
+
+export function parseApplyDiscountBody(
+	body: unknown,
+): CommerceParseResult<ApplyDiscountBody> {
+	return applyDiscountSchema.safeParse(body);
 }
 
 export function parseDraftOrderBody(

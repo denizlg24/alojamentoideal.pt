@@ -1,7 +1,10 @@
+import type { AppliedDiscountSnapshot } from "@workspace/db";
 import { CommerceError } from "./errors";
 
 export interface QuoteTotalsInput {
 	currency: string;
+	/** Pre-tax housing base; null on legacy snapshots predating the column. */
+	housingFeeMinor?: number | null;
 	subtotalMinor: number;
 	taxMinor: number;
 	totalMinor: number;
@@ -10,6 +13,8 @@ export interface QuoteTotalsInput {
 
 export interface CartTotals {
 	currency: string;
+	/** Aggregate pre-tax housing base across valid items. The discountable base. */
+	housingBaseMinor: number;
 	subtotalMinor: number;
 	taxMinor: number;
 	totalMinor: number;
@@ -23,6 +28,7 @@ export function sumCartTotals(
 ): CartTotals {
 	const totals: CartTotals = {
 		currency: defaultCurrency,
+		housingBaseMinor: 0,
 		subtotalMinor: 0,
 		taxMinor: 0,
 		totalMinor: 0,
@@ -46,6 +52,7 @@ export function sumCartTotals(
 			);
 		}
 
+		totals.housingBaseMinor += item.housingFeeMinor ?? 0;
 		totals.subtotalMinor += item.subtotalMinor;
 		totals.taxMinor += item.taxMinor;
 		totals.totalMinor += item.totalMinor;
@@ -53,4 +60,36 @@ export function sumCartTotals(
 	}
 
 	return totals;
+}
+
+/**
+ * Resolves a coupon to a discount amount in minor units, applied to the housing
+ * base only and capped at it (a discount never touches fees or tax). Percentage
+ * coupons use basis points; fixed coupons must match the cart currency or they
+ * contribute nothing.
+ */
+export function computeDiscountMinor(
+	discount: AppliedDiscountSnapshot,
+	housingBaseMinor: number,
+	currency: string,
+): number {
+	if (housingBaseMinor <= 0) {
+		return 0;
+	}
+
+	let raw: number;
+	if (discount.type === "percentage") {
+		const basisPoints = discount.percentBasisPoints ?? 0;
+		raw = Math.round((housingBaseMinor * basisPoints) / 10000);
+	} else {
+		if (
+			discount.currency &&
+			discount.currency.toUpperCase() !== currency.toUpperCase()
+		) {
+			return 0;
+		}
+		raw = discount.amountMinor ?? 0;
+	}
+
+	return Math.max(0, Math.min(raw, housingBaseMinor));
 }

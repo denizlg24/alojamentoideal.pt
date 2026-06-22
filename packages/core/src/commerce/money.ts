@@ -57,6 +57,7 @@ export function normalizeAccommodationQuoteSnapshot({
 		feeLines,
 		fetchedAt,
 		guests: quote.guests,
+		housingFeeMinor: housingFeeMinor(feeLines),
 		id: quoteId,
 		infants: quote.infants,
 		listingExternalId: quote.listingId,
@@ -103,6 +104,34 @@ export function nullableMinorUnits(
 
 export function minorUnitFactor(currency: string): number {
 	return ZERO_DECIMAL_CURRENCIES.has(currency.toUpperCase()) ? 1 : 100;
+}
+
+/**
+ * Net (tax-excluded) amount of a single fee line. Shared by draft-order charge
+ * rows and the housing-base derivation so the two always agree. Inclusive tax
+ * is stripped for non-tax lines; tax lines net to zero. Negative lines (e.g.
+ * provider discounts) are preserved rather than clamped.
+ */
+export function feeLineNetMinor(
+	line: AccommodationQuoteFeeSnapshot,
+	isTaxLine: boolean,
+): number {
+	const taxMinor = isTaxLine ? line.totalMinor : (line.inclusiveTaxMinor ?? 0);
+	const rawNetMinor = line.totalMinor - taxMinor;
+	return line.totalMinor < 0 ? rawNetMinor : Math.max(0, rawNetMinor);
+}
+
+/**
+ * Pre-tax housing base: the net of the base-price (`isBasePrice`) lines. This is
+ * the only amount a discount may reduce (never fees or tax). Base-price lines
+ * are never tax lines, so they net with `isTaxLine = false`.
+ */
+export function housingFeeMinor(
+	feeLines: AccommodationQuoteFeeSnapshot[],
+): number {
+	return feeLines
+		.filter((line) => line.isBasePrice)
+		.reduce((sum, line) => sum + feeLineNetMinor(line, false), 0);
 }
 
 function normalizeFeeLines(

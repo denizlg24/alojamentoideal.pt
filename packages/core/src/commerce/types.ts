@@ -1,5 +1,6 @@
 import type {
 	AccommodationQuoteFeeSnapshot,
+	AppliedDiscountSnapshot,
 	CommerceCatalogSnapshot,
 	OrderBillingAddressSnapshot,
 } from "@workspace/db";
@@ -45,6 +46,8 @@ export interface NormalizedAccommodationQuoteSnapshot {
 	feeLines: AccommodationQuoteFeeSnapshot[];
 	fetchedAt: Date;
 	guests: number;
+	/** Pre-tax base-price (housing) net, in minor units. The discountable base. */
+	housingFeeMinor: number;
 	id: string;
 	infants: number;
 	listingExternalId: string;
@@ -96,6 +99,7 @@ export interface CartItemDto {
 }
 
 export interface CartDto {
+	appliedDiscount: AppliedDiscountSnapshot | null;
 	cartToken: string;
 	createdAt: string;
 	currency: string;

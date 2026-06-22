@@ -2,6 +2,7 @@ import { timingSafeEqual } from "node:crypto";
 import {
 	type AccommodationListingProcessedContent,
 	type AccommodationListingRawContent,
+	type AppliedDiscountSnapshot,
 	accommodationItemDetail as accommodationItemDetailTable,
 	accommodationListing as accommodationListingTable,
 	accommodationQuoteSnapshot as accommodationQuoteSnapshotTable,
@@ -18,16 +19,22 @@ import { and, asc, eq, isNull, sql } from "drizzle-orm";
 import { parseQuoteBody } from "../accommodations";
 import { CommerceError, invalidRequest } from "./errors";
 import { hashIdempotencyRequest, idempotencyExpiresAt } from "./idempotency";
-import { normalizeAccommodationQuoteSnapshot } from "./money";
-import { buildDraftOrderRows, generatePublicOrderReference } from "./orders";
+import { housingFeeMinor, normalizeAccommodationQuoteSnapshot } from "./money";
+import {
+	allocateDiscountByHousingBase,
+	buildDiscountChargeRow,
+	buildDraftOrderRows,
+	generatePublicOrderReference,
+} from "./orders";
 import type {
 	AddCartItemBody,
+	ApplyDiscountBody,
 	DeleteCartItemBody,
 	DraftOrderBody,
 	UpdateCartItemBody,
 } from "./schemas";
 import { assertMutableCart, toCartStatus } from "./state";
-import { sumCartTotals } from "./totals";
+import { computeDiscountMinor, sumCartTotals } from "./totals";
 import type {
 	CartDto,
 	CartItemDto,
@@ -60,6 +67,12 @@ export interface CommerceServiceOptions {
 		input: CommerceQuoteInput,
 	) => Promise<import("../accommodations").AccommodationQuoteResult>;
 	quoteTtlSeconds: number;
+	/**
+	 * Resolves a promotion code against the discount provider (Stripe). Returns
+	 * `null` for unknown/inactive/expired codes; throws for provider/transport
+	 * failures so the service can distinguish "invalid" from "unavailable".
+	 */
+	resolveDiscount: (code: string) => Promise<AppliedDiscountSnapshot | null>;
 }
 
 interface CreateCartInput {
@@ -88,6 +101,7 @@ interface CartJoinedRow {
 	feeLines: NormalizedAccommodationQuoteSnapshot["feeLines"];
 	fetchedAt: Date;
 	guests: number;
+	housingFeeMinor: number | null;
 	imageFallbackName: string | null;
 	infants: number;
 	itemStatus: string;
@@ -120,6 +134,7 @@ export class CommerceService {
 	readonly #provider: string;
 	readonly #quoteAccommodation: CommerceServiceOptions["quoteAccommodation"];
 	readonly #quoteTtlSeconds: number;
+	readonly #resolveDiscount: CommerceServiceOptions["resolveDiscount"];
 
 	constructor(options: CommerceServiceOptions) {
 		this.#accountId = options.accountId;
@@ -128,6 +143,7 @@ export class CommerceService {
 		this.#provider = options.provider;
 		this.#quoteAccommodation = options.quoteAccommodation;
 		this.#quoteTtlSeconds = options.quoteTtlSeconds;
+		this.#resolveDiscount = options.resolveDiscount;
 	}
 
 	async createCart(
@@ -192,6 +208,68 @@ export class CommerceService {
 			}
 
 			return { cart: await this.#cartDto(tx, row.id, now) };
+		});
+	}
+
+	async applyDiscount(
+		cartId: string,
+		input: ApplyDiscountBody,
+		owner: CartOwner,
+	): Promise<CartResponse> {
+		await this.#assertCartAccess(this.#db, cartId, owner);
+
+		const payload = { cartId, code: input.code };
+		const scope = `cart:${cartId}:discount:apply`;
+		if (input.idempotencyKey) {
+			const replay = await this.#readIdempotencyReplay<CartResponse>(
+				scope,
+				input.idempotencyKey,
+				payload,
+			);
+			if (replay) {
+				return replay;
+			}
+		}
+
+		const discount = await this.#resolveDiscount(input.code);
+		if (!discount) {
+			throw new CommerceError(
+				"discount_invalid",
+				"This promotion code is not valid.",
+				422,
+			);
+		}
+
+		const operation = (tx: Transaction) =>
+			this.#applyDiscount(tx, cartId, discount);
+
+		if (input.idempotencyKey) {
+			return this.#runIdempotent(
+				scope,
+				input.idempotencyKey,
+				payload,
+				operation,
+			);
+		}
+
+		return this.#db.transaction(operation);
+	}
+
+	async removeDiscount(
+		cartId: string,
+		owner: CartOwner,
+	): Promise<CartResponse> {
+		await this.#assertCartAccess(this.#db, cartId, owner);
+
+		return this.#db.transaction(async (tx) => {
+			const now = new Date();
+			await this.#ensureMutableCart(tx, cartId, now);
+			await tx
+				.update(cartTable)
+				.set({ appliedDiscount: null, discountMinor: 0, updatedAt: now })
+				.where(eq(cartTable.id, cartId));
+			await this.#recalculateCartTotals(tx, cartId, now);
+			return { cart: await this.#cartDto(tx, cartId, now) };
 		});
 	}
 
@@ -343,8 +421,10 @@ export class CommerceService {
 			);
 		}
 
+		const discount = await this.#revalidateCartDiscount(input.cartId);
+
 		const operation = (tx: Transaction) =>
-			this.#createDraftOrder(tx, input, snapshots, owner);
+			this.#createDraftOrder(tx, input, snapshots, owner, discount);
 
 		if (input.idempotencyKey) {
 			return this.#runIdempotent(
@@ -499,11 +579,85 @@ export class CommerceService {
 		return { cart: await this.#cartDto(tx, cartId, now) };
 	}
 
+	async #applyDiscount(
+		tx: Transaction,
+		cartId: string,
+		discount: AppliedDiscountSnapshot,
+	): Promise<CartResponse> {
+		const now = new Date();
+		await this.#ensureMutableCart(tx, cartId, now);
+
+		const [cartRow] = await tx
+			.select({ currency: cartTable.currency })
+			.from(cartTable)
+			.where(eq(cartTable.id, cartId))
+			.limit(1);
+
+		if (
+			discount.type === "fixed" &&
+			discount.currency &&
+			cartRow &&
+			discount.currency.toUpperCase() !== cartRow.currency.toUpperCase()
+		) {
+			throw new CommerceError(
+				"discount_invalid",
+				"This promotion code cannot be applied to this cart.",
+				422,
+			);
+		}
+
+		await tx
+			.update(cartTable)
+			.set({ appliedDiscount: discount, updatedAt: now })
+			.where(eq(cartTable.id, cartId));
+		await this.#recalculateCartTotals(tx, cartId, now);
+
+		return { cart: await this.#cartDto(tx, cartId, now) };
+	}
+
+	/**
+	 * Re-resolves the cart's applied coupon against the provider before checkout,
+	 * mirroring quote revalidation, so an expired/deactivated code cannot be
+	 * charged. Returns the freshly resolved snapshot, or null when no discount is
+	 * applied. Throws `discount_invalid` (409) if the code is no longer valid.
+	 */
+	async #revalidateCartDiscount(
+		cartId: string,
+	): Promise<AppliedDiscountSnapshot | null> {
+		const [row] = await this.#db
+			.select({ appliedDiscount: cartTable.appliedDiscount })
+			.from(cartTable)
+			.where(eq(cartTable.id, cartId))
+			.limit(1);
+
+		const applied = row?.appliedDiscount;
+		if (!applied) {
+			return null;
+		}
+
+		// Without a promotion code we cannot re-resolve; trust the stored snapshot.
+		if (!applied.promotionCode) {
+			return applied;
+		}
+
+		const resolved = await this.#resolveDiscount(applied.promotionCode);
+		if (!resolved) {
+			throw new CommerceError(
+				"discount_invalid",
+				"This promotion code is no longer valid.",
+				409,
+			);
+		}
+
+		return resolved;
+	}
+
 	async #createDraftOrder(
 		tx: Transaction,
 		input: DraftOrderBody,
 		snapshots: RevalidatedSnapshot[],
 		owner: CartOwner,
+		discount: AppliedDiscountSnapshot | null,
 	): Promise<DraftOrderResponse> {
 		const now = new Date();
 		await this.#ensureMutableCart(tx, input.cartId, now);
@@ -520,7 +674,10 @@ export class CommerceService {
 		}
 
 		const totals = await this.#recalculateCartTotals(tx, input.cartId, now);
-		if (totals.validItemCount === 0 || totals.totalMinor <= 0) {
+		// A fully-discounted housing cart can legitimately reach total 0; only an
+		// item-less cart is empty. (Skipping the PaymentIntent for a zero total is
+		// a Milestone-4 concern.)
+		if (totals.validItemCount === 0) {
 			throw new CommerceError(
 				"empty_cart",
 				"Add at least one valid home before checkout.",
@@ -537,21 +694,35 @@ export class CommerceService {
 			);
 		}
 
+		const housingBases = orderSources.map(
+			(source) => source.quote.housingFeeMinor,
+		);
+		const housingBaseTotal = housingBases.reduce((sum, base) => sum + base, 0);
+		const discountMinor = discount
+			? computeDiscountMinor(discount, housingBaseTotal, totals.currency)
+			: 0;
+		const discountAllocations = allocateDiscountByHousingBase(
+			housingBases,
+			discountMinor,
+		);
+
 		const orderId = crypto.randomUUID();
 		const publicReference = await this.#uniquePublicReference(tx, now);
 		const checkoutExpiresAt = new Date(now.getTime() + CHECKOUT_TTL_MS);
 
 		await tx.insert(orderTable).values({
+			appliedDiscount: discountMinor > 0 ? discount : null,
 			cartId: input.cartId,
 			checkoutExpiresAt,
 			createdAt: now,
 			currency: totals.currency,
+			discountMinor,
 			id: orderId,
 			publicReference,
 			status: "draft",
 			subtotalMinor: totals.subtotalMinor,
 			taxMinor: totals.taxMinor,
-			totalMinor: totals.totalMinor,
+			totalMinor: totals.totalMinor - discountMinor,
 			updatedAt: now,
 			userId: owner.userId ?? null,
 		});
@@ -570,15 +741,27 @@ export class CommerceService {
 			taxNumber: input.contact.taxNumber,
 		});
 
-		for (const source of orderSources) {
+		for (const [index, source] of orderSources.entries()) {
 			const rows = buildDraftOrderRows(source, input.contact);
 			const orderItemId = crypto.randomUUID();
+			const itemDiscountMinor = discountAllocations[index] ?? 0;
+			const charges =
+				discount && itemDiscountMinor > 0
+					? [
+							...rows.charges,
+							buildDiscountChargeRow(
+								discount,
+								itemDiscountMinor,
+								rows.charges.length + 1,
+							),
+						]
+					: rows.charges;
 
 			await tx.insert(orderItemTable).values({
 				catalogSnapshot: rows.item.catalogSnapshot,
 				createdAt: now,
 				currency: rows.item.currency,
-				discountMinor: rows.item.discountMinor,
+				discountMinor: itemDiscountMinor,
 				id: orderItemId,
 				imageUrlSnapshot: rows.item.imageUrlSnapshot,
 				orderId,
@@ -589,7 +772,7 @@ export class CommerceService {
 				subtotalMinor: rows.item.subtotalMinor,
 				taxMinor: rows.item.taxMinor,
 				titleSnapshot: rows.item.titleSnapshot,
-				totalMinor: rows.item.totalMinor,
+				totalMinor: rows.item.totalMinor - itemDiscountMinor,
 				type: rows.item.type,
 				updatedAt: now,
 			});
@@ -610,9 +793,9 @@ export class CommerceService {
 				provider: rows.detail.provider,
 			});
 
-			if (rows.charges.length > 0) {
+			if (charges.length > 0) {
 				await tx.insert(orderItemChargeTable).values(
-					rows.charges.map((charge) => ({
+					charges.map((charge) => ({
 						createdAt: now,
 						grossMinor: charge.grossMinor,
 						id: crypto.randomUUID(),
@@ -748,6 +931,7 @@ export class CommerceService {
 			feeLines: snapshot.feeLines,
 			fetchedAt: snapshot.fetchedAt,
 			guests: snapshot.guests,
+			housingFeeMinor: snapshot.housingFeeMinor,
 			id: snapshot.id,
 			infants: snapshot.infants,
 			listingExternalId: snapshot.listingExternalId,
@@ -953,6 +1137,7 @@ export class CommerceService {
 		const rows = await tx
 			.select({
 				currency: accommodationQuoteSnapshotTable.currency,
+				housingFeeMinor: accommodationQuoteSnapshotTable.housingFeeMinor,
 				subtotalMinor: accommodationQuoteSnapshotTable.subtotalMinor,
 				taxMinor: accommodationQuoteSnapshotTable.taxMinor,
 				totalMinor: accommodationQuoteSnapshotTable.totalMinor,
@@ -971,14 +1156,29 @@ export class CommerceService {
 			);
 
 		const totals = sumCartTotals(rows, this.#currency);
+		const [cartRow] = await tx
+			.select({ appliedDiscount: cartTable.appliedDiscount })
+			.from(cartTable)
+			.where(eq(cartTable.id, cartId))
+			.limit(1);
+
+		const discountMinor = cartRow?.appliedDiscount
+			? computeDiscountMinor(
+					cartRow.appliedDiscount,
+					totals.housingBaseMinor,
+					totals.currency,
+				)
+			: 0;
+
 		await tx
 			.update(cartTable)
 			.set({
 				currency: totals.currency,
+				discountMinor,
 				itemCount: totals.totalItems,
 				subtotalMinor: totals.subtotalMinor,
 				taxMinor: totals.taxMinor,
-				totalMinor: totals.totalMinor,
+				totalMinor: totals.totalMinor - discountMinor,
 				updatedAt: now,
 			})
 			.where(eq(cartTable.id, cartId));
@@ -1019,6 +1219,7 @@ export class CommerceService {
 				: toCartStatus(row.status);
 
 		return {
+			appliedDiscount: row.appliedDiscount,
 			cartToken: row.cartToken,
 			createdAt: row.createdAt.toISOString(),
 			currency: row.currency,
@@ -1048,6 +1249,7 @@ export class CommerceService {
 				feeLines: accommodationQuoteSnapshotTable.feeLines,
 				fetchedAt: accommodationQuoteSnapshotTable.fetchedAt,
 				guests: accommodationQuoteSnapshotTable.guests,
+				housingFeeMinor: accommodationQuoteSnapshotTable.housingFeeMinor,
 				imageFallbackName: accommodationListingTable.name,
 				infants: accommodationQuoteSnapshotTable.infants,
 				itemStatus: cartItemTable.status,
@@ -1360,6 +1562,7 @@ function quoteSnapshotFromRow(
 		feeLines: row.feeLines,
 		fetchedAt: row.fetchedAt,
 		guests: row.guests,
+		housingFeeMinor: row.housingFeeMinor ?? housingFeeMinor(row.feeLines),
 		id: row.quoteId,
 		infants: row.infants,
 		listingExternalId: row.listingExternalId,

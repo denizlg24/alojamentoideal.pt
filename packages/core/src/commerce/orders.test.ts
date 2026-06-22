@@ -342,6 +342,7 @@ function quoteSnapshot(): NormalizedAccommodationQuoteSnapshot {
 		],
 		fetchedAt: new Date("2026-06-22T12:00:00.000Z"),
 		guests: 3,
+		housingFeeMinor: 10_000,
 		id: "quote_1",
 		infants: 0,
 		listingExternalId: "123",

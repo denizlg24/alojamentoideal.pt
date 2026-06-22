@@ -1,4 +1,8 @@
-import type { AccommodationQuoteFeeSnapshot } from "@workspace/db";
+import type {
+	AccommodationQuoteFeeSnapshot,
+	AppliedDiscountSnapshot,
+} from "@workspace/db";
+import { feeLineNetMinor } from "./money";
 import type {
 	DraftOrderContactInput,
 	ListingDisplaySnapshot,
@@ -122,10 +126,9 @@ function toDraftChargeRow(
 	position: number,
 ): DraftOrderChargeRow {
 	const kind = chargeKind(line);
-	const taxMinor =
-		kind === "tax" ? line.totalMinor : (line.inclusiveTaxMinor ?? 0);
-	const rawNetMinor = line.totalMinor - taxMinor;
-	const netMinor = line.totalMinor < 0 ? rawNetMinor : Math.max(0, rawNetMinor);
+	const isTaxLine = kind === "tax";
+	const taxMinor = isTaxLine ? line.totalMinor : (line.inclusiveTaxMinor ?? 0);
+	const netMinor = feeLineNetMinor(line, isTaxLine);
 	const quantity = line.quantity ?? 1;
 
 	return {
@@ -141,6 +144,65 @@ function toDraftChargeRow(
 		taxRateBasisPoints: null,
 		unitNetMinor: Math.round(netMinor / Math.max(quantity, 1)),
 	};
+}
+
+/**
+ * Builds the negative charge row recording a coupon's allocation to one order
+ * item. References the Stripe coupon via `providerChargeId`; tax is untouched.
+ */
+export function buildDiscountChargeRow(
+	discount: AppliedDiscountSnapshot,
+	amountMinor: number,
+	position: number,
+): DraftOrderChargeRow {
+	const grossMinor = -Math.abs(amountMinor);
+	const label = discount.promotionCode ?? discount.couponId;
+
+	return {
+		grossMinor,
+		kind: "discount",
+		name: `Promotion ${label}`,
+		netMinor: grossMinor,
+		position,
+		providerChargeId: discount.couponId,
+		quantity: "1.00",
+		rawPayload: {
+			couponId: discount.couponId,
+			promotionCode: discount.promotionCode,
+			source: discount.source,
+			type: discount.type,
+		},
+		taxMinor: 0,
+		taxRateBasisPoints: null,
+		unitNetMinor: grossMinor,
+	};
+}
+
+/**
+ * Splits an order-level discount across items in proportion to each item's
+ * housing base, assigning the rounding remainder to the last item so the parts
+ * sum back to exactly `totalDiscountMinor`.
+ */
+export function allocateDiscountByHousingBase(
+	housingBases: number[],
+	totalDiscountMinor: number,
+): number[] {
+	const allocations = housingBases.map(() => 0);
+	const totalBase = housingBases.reduce((sum, base) => sum + base, 0);
+	if (totalDiscountMinor <= 0 || totalBase <= 0) {
+		return allocations;
+	}
+
+	let allocated = 0;
+	for (let index = 0; index < housingBases.length - 1; index += 1) {
+		const base = housingBases[index] ?? 0;
+		const share = Math.round((totalDiscountMinor * base) / totalBase);
+		allocations[index] = share;
+		allocated += share;
+	}
+	allocations[housingBases.length - 1] = totalDiscountMinor - allocated;
+
+	return allocations;
 }
 
 function chargeKind(line: AccommodationQuoteFeeSnapshot): string {
