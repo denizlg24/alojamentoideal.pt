@@ -354,7 +354,14 @@ export class CommerceService {
 		const { failures, snapshots } = await this.#revalidateItems(inputs);
 
 		return this.#db.transaction(async (tx) => {
-			await this.#ensureMutableCart(tx, cartId, new Date());
+			await this.#ensureMutableCart(tx, cartId, new Date(), {
+				forUpdate: true,
+			});
+			await this.#assertActiveItemSet(
+				tx,
+				cartId,
+				inputs.map((input) => input.itemId),
+			);
 			for (const snapshot of snapshots) {
 				await this.#insertQuoteSnapshot(tx, snapshot.snapshot);
 				await tx
@@ -660,7 +667,12 @@ export class CommerceService {
 		discount: AppliedDiscountSnapshot | null,
 	): Promise<DraftOrderResponse> {
 		const now = new Date();
-		await this.#ensureMutableCart(tx, input.cartId, now);
+		await this.#ensureMutableCart(tx, input.cartId, now, { forUpdate: true });
+		await this.#assertActiveItemSet(
+			tx,
+			input.cartId,
+			snapshots.map((snapshot) => snapshot.itemId),
+		);
 
 		for (const snapshot of snapshots) {
 			await this.#insertQuoteSnapshot(tx, snapshot.snapshot);
@@ -707,25 +719,27 @@ export class CommerceService {
 		);
 
 		const orderId = crypto.randomUUID();
-		const publicReference = await this.#uniquePublicReference(tx, now);
 		const checkoutExpiresAt = new Date(now.getTime() + CHECKOUT_TTL_MS);
 
-		await tx.insert(orderTable).values({
-			appliedDiscount: discountMinor > 0 ? discount : null,
-			cartId: input.cartId,
-			checkoutExpiresAt,
-			createdAt: now,
-			currency: totals.currency,
-			discountMinor,
-			id: orderId,
-			publicReference,
-			status: "draft",
-			subtotalMinor: totals.subtotalMinor,
-			taxMinor: totals.taxMinor,
-			totalMinor: totals.totalMinor - discountMinor,
-			updatedAt: now,
-			userId: owner.userId ?? null,
-		});
+		const publicReference = await this.#insertOrderWithUniqueReference(
+			tx,
+			{
+				appliedDiscount: discountMinor > 0 ? discount : null,
+				cartId: input.cartId,
+				checkoutExpiresAt,
+				createdAt: now,
+				currency: totals.currency,
+				discountMinor,
+				id: orderId,
+				status: "draft",
+				subtotalMinor: totals.subtotalMinor,
+				taxMinor: totals.taxMinor,
+				totalMinor: totals.totalMinor - discountMinor,
+				updatedAt: now,
+				userId: owner.userId ?? null,
+			},
+			now,
+		);
 
 		await tx.insert(orderContactTable).values({
 			billingAddress: input.contact.billingAddress,
@@ -986,8 +1000,9 @@ export class CommerceService {
 		db: DbExecutor,
 		cartId: string,
 		now: Date,
+		options: { forUpdate?: boolean } = {},
 	): Promise<void> {
-		const [row] = await db
+		const query = db
 			.select({
 				expiresAt: cartTable.expiresAt,
 				id: cartTable.id,
@@ -997,7 +1012,46 @@ export class CommerceService {
 			.where(eq(cartTable.id, cartId))
 			.limit(1);
 
+		// `forUpdate` locks the cart row for the rest of the transaction so the
+		// active item set cannot drift between revalidation and conversion.
+		const [row] = options.forUpdate ? await query.for("update") : await query;
+
 		assertMutableCart(row, now);
+	}
+
+	/**
+	 * Reconciles the cart's current active item set against the set that was
+	 * revalidated outside the transaction. A concurrent add/remove between the
+	 * unlocked read and the locked transaction throws `cart_changed` (409) so the
+	 * client retries against fresh state.
+	 */
+	async #assertActiveItemSet(
+		tx: Transaction,
+		cartId: string,
+		expectedItemIds: string[],
+	): Promise<void> {
+		const rows = await tx
+			.select({ id: cartItemTable.id })
+			.from(cartItemTable)
+			.where(
+				and(
+					eq(cartItemTable.cartId, cartId),
+					eq(cartItemTable.status, "active"),
+				),
+			);
+
+		const actual = new Set(rows.map((row) => row.id));
+		const drifted =
+			actual.size !== expectedItemIds.length ||
+			expectedItemIds.some((itemId) => !actual.has(itemId));
+
+		if (drifted) {
+			throw new CommerceError(
+				"cart_changed",
+				"Your cart changed; please review it and try again.",
+				409,
+			);
+		}
 	}
 
 	async #readActiveItemInput(
@@ -1345,16 +1399,31 @@ export class CommerceService {
 		return sources;
 	}
 
-	async #uniquePublicReference(tx: Transaction, now: Date): Promise<string> {
+	/**
+	 * Inserts the order row, generating the public reference at insert time and
+	 * letting the unique index settle collisions: a 23505 on a savepoint rolls
+	 * back just that attempt (not the outer transaction) and we retry with a
+	 * fresh reference. Atomic where a check-then-insert was racy.
+	 */
+	async #insertOrderWithUniqueReference(
+		tx: Transaction,
+		values: Omit<typeof orderTable.$inferInsert, "publicReference">,
+		now: Date,
+	): Promise<string> {
 		for (let attempt = 0; attempt < 8; attempt += 1) {
-			const reference = generatePublicOrderReference(now);
-			const [existing] = await tx
-				.select({ id: orderTable.id })
-				.from(orderTable)
-				.where(eq(orderTable.publicReference, reference))
-				.limit(1);
-			if (!existing) {
-				return reference;
+			const publicReference = generatePublicOrderReference(now);
+			try {
+				await tx.transaction(async (savepoint) => {
+					await savepoint
+						.insert(orderTable)
+						.values({ ...values, publicReference });
+				});
+				return publicReference;
+			} catch (error) {
+				if (isPublicReferenceConflict(error)) {
+					continue;
+				}
+				throw error;
 			}
 		}
 
@@ -1472,6 +1541,37 @@ function constantTimeEquals(a: string, b: string): boolean {
 		return false;
 	}
 	return timingSafeEqual(aBuffer, bBuffer);
+}
+
+/** Walks the error cause chain for a Postgres error code + constraint. */
+function findPostgresError(
+	error: unknown,
+): { code: string; constraint?: string } | null {
+	let current: unknown = error;
+	for (let depth = 0; depth < 6; depth += 1) {
+		if (!current || typeof current !== "object") {
+			return null;
+		}
+		const record = current as Record<string, unknown>;
+		if (typeof record.code === "string") {
+			return {
+				code: record.code,
+				constraint:
+					typeof record.constraint === "string" ? record.constraint : undefined,
+			};
+		}
+		current = record.cause;
+	}
+	return null;
+}
+
+function isPublicReferenceConflict(error: unknown): boolean {
+	const pgError = findPostgresError(error);
+	return (
+		pgError?.code === "23505" &&
+		(pgError.constraint === undefined ||
+			pgError.constraint === "orders_public_reference_uidx")
+	);
 }
 
 function mergeQuoteInput(

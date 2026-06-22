@@ -116,7 +116,7 @@ export function generatePublicOrderReference(now = new Date()): string {
 	const suffix = crypto
 		.randomUUID()
 		.replace(/-/g, "")
-		.slice(0, 6)
+		.slice(0, 8)
 		.toUpperCase();
 	return `AI-${year}-${suffix}`;
 }
