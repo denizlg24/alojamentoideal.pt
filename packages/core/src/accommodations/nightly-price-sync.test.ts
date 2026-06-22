@@ -2,11 +2,13 @@ import { describe, expect, test } from "bun:test";
 import type {
 	ClaimedSyncState,
 	ClaimSyncStateInput,
+	CompleteSyncStateInput,
 	IncrementSyncRunStatsInput,
 	ListingCacheRepository,
 	SyncRunInput,
 	SyncStateScopeInput,
 } from "../listing-cache";
+import { LISTING_SYNC_VERSION } from "../listing-cache/sync-version";
 import type { AccommodationsConfig } from "./config";
 import { NightlyPriceSync } from "./nightly-price-sync";
 import type {
@@ -78,6 +80,21 @@ describe("NightlyPriceSync.pollPrices", () => {
 				listingsUpdated: 2,
 			},
 		]);
+	});
+
+	test("passes the current sync version to claim and completion", async () => {
+		const pricing = new FakePricingRepository(["1"]);
+		const syncRepository = new FakeSyncRepository(true);
+		const client = new FakeHostifyCalendarClient();
+		const sync = createSync({ client, pricing, syncRepository });
+
+		const result = await sync.pollPrices("poll");
+
+		expect(result.status).toBe("completed");
+		expect(syncRepository.claims[0]?.versionHash).toBe(LISTING_SYNC_VERSION);
+		expect(syncRepository.completeInputs[0]?.versionHash).toBe(
+			LISTING_SYNC_VERSION,
+		);
 	});
 });
 
@@ -163,6 +180,7 @@ class FakePricingRepository {
 
 class FakeSyncRepository {
 	readonly claims: ClaimSyncStateInput[] = [];
+	readonly completeInputs: CompleteSyncStateInput[] = [];
 	readonly incrementInputs: IncrementSyncRunStatsInput[] = [];
 	readonly readinessChecks: SyncStateScopeInput[] = [];
 	readonly runs: SyncRunInput[] = [];
@@ -219,7 +237,8 @@ class FakeSyncRepository {
 	}
 
 	async finishSyncRun(): Promise<void> {}
-	async completeSyncState(): Promise<void> {
+	async completeSyncState(input: CompleteSyncStateInput): Promise<void> {
+		this.completeInputs.push(input);
 		this.state.status = "complete";
 	}
 	async failSyncState(): Promise<void> {

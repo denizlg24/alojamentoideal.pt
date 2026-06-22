@@ -12,6 +12,7 @@ import { and, asc, eq, sql } from "drizzle-orm";
 import type { ListingProcessingStatus } from "./processor";
 
 export interface ListingState {
+	active: boolean;
 	latitude: number | null;
 	longitude: number | null;
 	processedSourceHash: string | null;
@@ -57,6 +58,7 @@ export interface UpsertListingInput {
 
 export interface RefreshListingCoordinatesInput {
 	accountId: string;
+	active: boolean;
 	externalId: string;
 	fetchedAt: Date;
 	latitude: number | null;
@@ -99,6 +101,7 @@ export interface ClaimSyncStateInput {
 	now: Date;
 	provider: string;
 	syncType: string;
+	versionHash: number;
 }
 
 export interface AdvanceSyncStateInput {
@@ -114,6 +117,7 @@ export interface CompleteSyncStateInput {
 	nextRunAt: Date;
 	now: Date;
 	provider: string;
+	versionHash: number;
 }
 
 export interface FailSyncStateInput {
@@ -185,23 +189,32 @@ export class ListingCacheRepository {
 			})
 			.onConflictDoNothing();
 
+		// A row starts a fresh cycle (new run id, page reset to 1) when it is not
+		// mid-cycle, or when the code version it last ran under no longer matches
+		// the current one. The version mismatch forces every listing to be
+		// reprocessed under the new logic instead of resuming a stale cursor.
+		const startNewCycle = sql`(
+			${providerSyncState.status} in ('idle', 'complete', 'failed')
+			or ${providerSyncState.versionHash} <> ${input.versionHash}
+		)`;
+
 		const [row] = await this.#db
 			.update(providerSyncState)
 			.set({
 				activeRunId: sql<string>`case
-					when ${providerSyncState.status} in ('idle', 'complete', 'failed')
+					when ${startNewCycle}
 						then ${input.newRunId}
 					else ${providerSyncState.activeRunId}
 				end`,
 				error: null,
 				lastStartedAt: sql<Date>`case
-					when ${providerSyncState.status} in ('idle', 'complete', 'failed')
+					when ${startNewCycle}
 						then ${input.now}
 					else ${providerSyncState.lastStartedAt}
 				end`,
 				leaseExpiresAt: input.leaseExpiresAt,
 				nextPage: sql<number>`case
-					when ${providerSyncState.status} in ('idle', 'complete', 'failed')
+					when ${startNewCycle}
 						then 1
 					else ${providerSyncState.nextPage}
 				end`,
@@ -210,10 +223,13 @@ export class ListingCacheRepository {
 			})
 			.where(sql`
 				${providerSyncState.id} = ${stateId}
-				and ${providerSyncState.nextRunAt} <= ${input.now}
 				and (
 					${providerSyncState.leaseExpiresAt} is null
 					or ${providerSyncState.leaseExpiresAt} <= ${input.now}
+				)
+				and (
+					${providerSyncState.nextRunAt} <= ${input.now}
+					or ${providerSyncState.versionHash} <> ${input.versionHash}
 				)
 			`)
 			.returning({
@@ -303,6 +319,7 @@ export class ListingCacheRepository {
 				nextRunAt: input.nextRunAt,
 				status: input.error ? "failed" : "complete",
 				updatedAt: input.now,
+				versionHash: input.versionHash,
 			})
 			.where(
 				and(
@@ -394,6 +411,7 @@ export class ListingCacheRepository {
 	): Promise<ListingState | null> {
 		const [row] = await this.#db
 			.select({
+				active: accommodationListing.active,
 				latitude: accommodationListing.latitude,
 				longitude: accommodationListing.longitude,
 				processedSourceHash: accommodationListing.processedSourceHash,
@@ -420,6 +438,7 @@ export class ListingCacheRepository {
 		const [row] = await this.#db
 			.update(accommodationListing)
 			.set({
+				active: input.active,
 				fetchedAt: input.fetchedAt,
 				latitude: input.latitude,
 				longitude: input.longitude,
@@ -434,7 +453,8 @@ export class ListingCacheRepository {
 					eq(accommodationListing.externalAccountId, input.accountId),
 					eq(accommodationListing.externalId, input.externalId),
 					sql`(
-						${accommodationListing.latitude} is distinct from ${input.latitude}
+						${accommodationListing.active} is distinct from ${input.active}
+						or ${accommodationListing.latitude} is distinct from ${input.latitude}
 						or ${accommodationListing.longitude} is distinct from ${input.longitude}
 					)`,
 				),

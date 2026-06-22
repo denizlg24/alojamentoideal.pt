@@ -146,6 +146,7 @@ export const hostifyListingSchema = entitySchema.extend({
 	country: nullableStringSchema,
 	currency: nullableStringSchema,
 	description: nullableStringSchema,
+	is_listed: z.union([z.boolean(), z.number()]).nullable().optional(),
 	latitude: nullableNumberSchema,
 	longitude: nullableNumberSchema,
 	name: nullableStringSchema,
@@ -157,20 +158,67 @@ export const hostifyListingSchema = entitySchema.extend({
 	zipcode: z.union([z.number(), z.string()]).nullable().optional(),
 });
 
+/**
+ * One line of the live `/listings/price` breakdown. The base accommodation cost
+ * is the entry with `is_base_price: true` (`fee_type: "accommodation"`); city /
+ * tourist taxes arrive as `fee_type: "tax"` entries already folded into `total`.
+ * `inclusive_tax` is VAT already inside a line's `total`; `exclusive_tax` is
+ * added on top. Shape captured from the live API, not guessed.
+ */
+export const hostifyListingPriceFeeSchema = z.looseObject({
+	amount: nullableNumberSchema,
+	cap_length: nullableNumberSchema,
+	cap_type: nullableStringSchema,
+	charge_type_label: nullableStringSchema,
+	condition_type: nullableStringSchema,
+	exclusive_percent: nullableNumberSchema,
+	exclusive_tax: nullableNumberSchema,
+	// Free-form rather than the legacy enum: Hostify keeps adding fee names and a
+	// hard enum would reject the whole quote on an unseen one. We render the label.
+	fee_charge_type: nullableStringSchema,
+	fee_id: nullableIdSchema,
+	fee_name: nullableStringSchema,
+	fee_type: nullableStringSchema,
+	inclusive_percent: nullableNumberSchema,
+	inclusive_tax: nullableNumberSchema,
+	is_base_price: z.boolean().nullable().optional(),
+	property_fee_id: nullableIdSchema,
+	quantity: nullableNumberSchema,
+	total: nullableNumberSchema,
+	total_net: nullableNumberSchema,
+	total_tax: nullableNumberSchema,
+	valid_from: nullableNumberSchema,
+	valid_to: nullableNumberSchema,
+	valid_whole_stay: nullableNumberSchema,
+});
+
 export const hostifyListingPriceSchema = z.looseObject({
 	available: z.boolean(),
+	base_price: nullableNumberSchema,
+	base_price_per_night: nullableNumberSchema,
 	channel_listing_id: nullableIdSchema,
 	cleaning_fee: nullableNumberSchema,
 	extra_person: nullableNumberSchema,
 	extra_person_price: nullableNumberSchema,
+	extra_person_price_per_night: nullableNumberSchema,
+	fees: z.array(hostifyListingPriceFeeSchema).optional(),
 	guests_included: nullableNumberSchema,
+	is_listed: nullableNumberSchema,
+	iso_code: nullableStringSchema,
 	nights: z.number(),
 	person_capacity: nullableNumberSchema,
+	pets_deposit: nullableNumberSchema,
+	pets_fee: nullableNumberSchema,
 	position: nullableStringSchema,
 	price: z.number(),
 	price_markup: nullableNumberSchema,
+	security_deposit: nullableNumberSchema,
+	security_price: nullableNumberSchema,
 	symbol: nullableStringSchema,
+	tax_amount: nullableNumberSchema,
 	total: z.number(),
+	totalAfterTax: nullableNumberSchema,
+	totalPrice: nullableNumberSchema,
 	unicode: nullableStringSchema,
 });
 
@@ -510,6 +558,9 @@ export type HostifyListing = z.infer<typeof hostifyListingSchema>;
 export type HostifyListingFee = z.infer<typeof hostifyListingFeeSchema>;
 export type HostifyListingPhoto = z.infer<typeof hostifyListingPhotoSchema>;
 export type HostifyListingPrice = z.infer<typeof hostifyListingPriceSchema>;
+export type HostifyListingPriceFee = z.infer<
+	typeof hostifyListingPriceFeeSchema
+>;
 export type HostifyListingTranslation = z.infer<
 	typeof hostifyListingTranslationSchema
 >;

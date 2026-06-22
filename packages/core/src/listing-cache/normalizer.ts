@@ -81,11 +81,13 @@ export function buildListingCacheProjection(
 	const amenities = extractAmenities(listing, sections.amenities);
 	const descriptionContent = asRecord(raw.description);
 	const title = readString(listing, "name") ?? readString(listing, "nickname");
-	// Hostify keeps the listing prose in the `description` sibling, not on the
-	// `listing` object (which has no usable `description` field).
-	const description =
-		readString(descriptionContent, "description") ??
-		readString(listing, "description");
+	// Hostify keeps public listing prose in the `description` sibling. `summary`
+	// is the clean lead paragraph; `description` often repeats it plus notes.
+	const description = pickDescriptionLead(
+		descriptionContent,
+		listing,
+		translations,
+	);
 	const guideText = guideToText(raw.guestGuide);
 
 	const normalized: AccommodationListingNormalizedContent = {
@@ -124,7 +126,7 @@ export function buildListingCacheProjection(
 	};
 
 	return {
-		active: readBoolean(listing, "active") ?? true,
+		active: listingActive(listing, raw.status),
 		bathrooms: readNumber(listing, "bathrooms"),
 		bedrooms: readNumber(listing, "bedrooms"),
 		beds: readNumber(listing, "beds"),
@@ -140,7 +142,7 @@ export function buildListingCacheProjection(
 		personCapacity: readNumber(listing, "person_capacity"),
 		processedFallback: {
 			amenities: toProcessedAmenities(amenities),
-			description: repeatLocalized(description),
+			description: localizedDescriptionFallback(description, translations),
 			guide: repeatLocalized(guideText),
 			model: null,
 			title: repeatLocalized(title),
@@ -159,6 +161,149 @@ export function buildListingCacheProjection(
 		sourceHash: versionedHash(raw),
 		timezone: readString(listing, "timezone"),
 	};
+}
+
+function listingActive(
+	listing: Record<string, unknown>,
+	status: unknown,
+): boolean {
+	const isListed = readBoolean(listing, "is_listed");
+	if (isListed !== null) {
+		return isListed;
+	}
+
+	const listedStatus = readListedStatus(status);
+	if (listedStatus !== null) {
+		return listedStatus;
+	}
+
+	return readBoolean(listing, "active") ?? true;
+}
+
+function readListedStatus(value: unknown): boolean | null {
+	if (typeof value === "string") {
+		return listedStatusFromString(value);
+	}
+
+	if (!isRecord(value)) {
+		return null;
+	}
+
+	return (
+		readBoolean(value, "is_listed") ??
+		listedStatusFromString(
+			readString(value, "listing_status") ?? readString(value, "status") ?? "",
+		)
+	);
+}
+
+function pickDescriptionLead(
+	description: Record<string, unknown>,
+	listing: Record<string, unknown>,
+	translations: unknown[],
+): string | null {
+	return (
+		readDescriptionText(description) ??
+		readTranslatedDescription(translations, "en") ??
+		readAnyTranslatedDescription(translations) ??
+		readString(listing, "description")
+	);
+}
+
+function localizedDescriptionFallback(
+	fallback: string | null,
+	translations: unknown[],
+): LocalizedText {
+	const localized = repeatLocalized(fallback);
+
+	for (const locale of ["en", "es", "pt"] as const) {
+		localized[locale] =
+			readTranslatedDescription(translations, locale) ?? localized[locale];
+	}
+
+	return localized;
+}
+
+function readDescriptionText(record: Record<string, unknown>): string | null {
+	return (
+		readString(record, "summary") ??
+		readString(record, "description") ??
+		readString(record, "space")
+	);
+}
+
+function readTranslatedDescription(
+	translations: unknown[],
+	locale: keyof LocalizedText,
+): string | null {
+	for (const translation of translations) {
+		if (!isRecord(translation)) {
+			continue;
+		}
+
+		const language = readString(translation, "language");
+		if (normalizeLanguage(language) !== locale) {
+			continue;
+		}
+
+		const text = readDescriptionText(translation);
+		if (text) {
+			return text;
+		}
+	}
+
+	return null;
+}
+
+function readAnyTranslatedDescription(translations: unknown[]): string | null {
+	for (const translation of translations) {
+		if (!isRecord(translation)) {
+			continue;
+		}
+
+		const text = readDescriptionText(translation);
+		if (text) {
+			return text;
+		}
+	}
+
+	return null;
+}
+
+function normalizeLanguage(value: string | null): string | null {
+	return value?.toLowerCase().split(/[-_]/)[0] ?? null;
+}
+
+function listedStatusFromString(value: string): boolean | null {
+	const normalized = value
+		.trim()
+		.toLowerCase()
+		.replace(/[\s-]+/g, "_");
+	if (!normalized) {
+		return null;
+	}
+
+	if (
+		[
+			"archived",
+			"disabled",
+			"draft",
+			"hidden",
+			"inactive",
+			"not_listed",
+			"suspended",
+			"unlisted",
+			"unpublished",
+		].includes(normalized)
+	) {
+		return false;
+	}
+
+	if (["listed", "live", "published"].includes(normalized)) {
+		return true;
+	}
+
+	return null;
 }
 
 export function amenityInputs(

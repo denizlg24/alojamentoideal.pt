@@ -34,11 +34,20 @@ export interface CatalogRoomDto {
 	type: string | null;
 }
 
+export interface CatalogDescriptionSection {
+	body: string;
+	key: string;
+	label: string;
+}
+
 export interface CatalogLocationDto {
+	address: string | null;
 	city: string | null;
 	country: string | null;
 	latitude: number | null;
 	longitude: number | null;
+	postalCode: string | null;
+	state: string | null;
 	timezone: string | null;
 }
 
@@ -79,8 +88,13 @@ export interface CatalogListingSummaryDto {
 }
 
 export interface CatalogListingDetailDto extends CatalogListingSummaryDto {
+	/** Lead paragraph for the listing (also used for SEO/meta). */
 	description: string;
+	/** Labeled prose blocks (the space, guest access, neighborhood, ...). */
+	descriptionSections: CatalogDescriptionSection[];
 	guide: string;
+	/** Listing-level default minimum nights; per-date calendar values override it. */
+	minNights: number;
 	nickname: string | null;
 	photos: CatalogPhotoDto[];
 	rooms: CatalogRoomDto[];
@@ -143,10 +157,18 @@ export function toCatalogListingSummary(
 		freshness: toFreshness(record, now),
 		id: record.externalId,
 		location: {
+			address:
+				readRawListingString(record.raw, "address") ??
+				readRawListingString(record.raw, "street"),
 			city: record.city,
 			country: record.country,
 			latitude: record.latitude,
 			longitude: record.longitude,
+			postalCode:
+				readRawListingString(record.raw, "zipcode") ??
+				readRawListingString(record.raw, "zip_code") ??
+				readRawListingString(record.raw, "zip"),
+			state: readRawListingString(record.raw, "state"),
 			timezone: record.timezone,
 		},
 		propertyType: pickPropertyType(record),
@@ -163,14 +185,76 @@ export function toCatalogListingDetail(
 	record: CatalogListingRecord,
 	options: CatalogMapOptions,
 ): CatalogListingDetailDto {
+	const lead = pickDescriptionLead(record, options.locale);
+
 	return {
 		...toCatalogListingSummary(record, options),
-		description: pickLocalized(record.processed.description, options.locale),
+		description: lead,
+		descriptionSections: extractDescriptionSections(record.raw, lead),
 		guide: pickLocalized(record.processed.guide, options.locale),
+		minNights: readRawListingNumber(record.raw, "min_nights") ?? 2,
 		nickname: record.nickname,
 		photos: extractPhotos(record.raw),
 		rooms: extractRooms(record.raw),
 	};
+}
+
+/**
+ * Hostify splits listing prose across `description` sibling fields (Airbnb's
+ * model). These map to public, labeled sections in render order. `summary` and
+ * `description` feed the lead paragraph, so they are not repeated here.
+ */
+const DESCRIPTION_SECTIONS: { key: string; label: string }[] = [
+	{ key: "space", label: "The space" },
+	{ key: "access", label: "Guest access" },
+	{ key: "interaction", label: "During your stay" },
+	{ key: "neighborhood_overview", label: "The neighborhood" },
+	{ key: "transit", label: "Getting around" },
+	{ key: "notes", label: "Other things to note" },
+];
+
+function readDescriptionRecord(
+	raw: AccommodationListingRawContent,
+): Record<string, unknown> {
+	return isRecord(raw.description) ? raw.description : {};
+}
+
+/**
+ * The lead paragraph: the LLM-processed description when present, otherwise the
+ * raw `summary`/`description`/`space` fallback chain so the 6-in-26 listings
+ * with an empty `description` field still get a blurb.
+ */
+function pickDescriptionLead(
+	record: CatalogListingRecord,
+	locale: CatalogLocale,
+): string {
+	const processed = pickLocalized(record.processed.description, locale);
+	if (processed) {
+		return processed;
+	}
+
+	const description = readDescriptionRecord(record.raw);
+	return (
+		readString(description.summary) ??
+		readString(description.description) ??
+		readString(description.space) ??
+		""
+	);
+}
+
+function extractDescriptionSections(
+	raw: AccommodationListingRawContent,
+	lead: string,
+): CatalogDescriptionSection[] {
+	const description = readDescriptionRecord(raw);
+
+	return DESCRIPTION_SECTIONS.map(({ key, label }) => {
+		const body = readString(description[key]);
+		// Skip anything already shown as the lead paragraph.
+		return body && body !== lead ? { body, key, label } : null;
+	}).filter(
+		(section): section is CatalogDescriptionSection => section !== null,
+	);
 }
 
 function toFreshness(
@@ -257,6 +341,14 @@ function readRawListingString(
 	}
 
 	return null;
+}
+
+function readRawListingNumber(
+	raw: AccommodationListingRawContent,
+	key: string,
+): number | null {
+	const listing = raw.listing;
+	return isRecord(listing) ? readNumber(listing[key]) : null;
 }
 
 function pickTitle(

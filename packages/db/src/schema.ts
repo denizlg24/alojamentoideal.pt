@@ -192,6 +192,7 @@ export const providerSyncState = pgTable(
 		provider: text("provider").notNull(),
 		status: text("status").notNull().default("idle"),
 		syncType: text("sync_type").notNull(),
+		versionHash: integer("version_hash").notNull().default(0),
 		updatedAt: timestampWithTimezone("updated_at").notNull().defaultNow(),
 	},
 	(table) => [

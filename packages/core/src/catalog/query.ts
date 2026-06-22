@@ -153,6 +153,26 @@ export class CatalogRepository {
 		};
 	}
 
+	/**
+	 * External IDs of every active listing, for build-time prerendering
+	 * (`generateStaticParams`). Ordered for a stable build manifest.
+	 */
+	async listExternalIds(scope: CatalogScope): Promise<string[]> {
+		const rows = await this.#db
+			.select({ externalId: accommodationListing.externalId })
+			.from(accommodationListing)
+			.where(
+				and(
+					eq(accommodationListing.provider, scope.provider),
+					eq(accommodationListing.externalAccountId, scope.accountId),
+					eq(accommodationListing.active, true),
+				),
+			)
+			.orderBy(asc(accommodationListing.externalId));
+
+		return rows.map((row) => row.externalId);
+	}
+
 	async getByExternalId(
 		externalId: string,
 		scope: CatalogScope,

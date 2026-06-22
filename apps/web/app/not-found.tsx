@@ -1,47 +1,100 @@
+import { Button } from "@workspace/ui/components/button";
+import { ArrowRight, Compass } from "lucide-react";
+import type { Metadata } from "next";
 import Image from "next/image";
 import Link from "next/link";
+import { SiteFooter } from "@/components/home/site-footer";
+import { SiteHeader } from "@/components/home/site-header";
 import illustration from "@/public/404_illustration.svg";
 
+export const metadata: Metadata = {
+	title: "Page not found",
+	robots: { follow: true, index: false },
+};
+
 const HELPFUL_LINKS = [
-	{ href: "/", label: "Homepage" },
-	{ href: "/homes", label: "Homes" },
-	{ href: "/activities", label: "Activities" },
+	{
+		description: "Start fresh from the front page",
+		href: "/",
+		label: "Homepage",
+	},
+	{
+		description: "Cozy apartments along the North Coast",
+		href: "/homes",
+		label: "Homes",
+	},
+	{
+		description: "Local tours and experiences",
+		href: "/activities",
+		label: "Activities",
+	},
+	{ description: "Answers to common questions", href: "/faq", label: "FAQ" },
 ] as const;
 
 export default function NotFound() {
 	return (
-		<main className="mx-auto flex w-full max-w-6xl flex-col items-center px-4 sm:px-6">
-			<div className="my-12 flex w-full max-w-4xl flex-col items-center gap-8 md:my-20 md:grid md:grid-cols-3 md:gap-6">
-				<div className="flex w-full flex-col items-center gap-4 text-center md:col-span-2 md:items-start md:text-left">
-					<h1 className="font-bold text-4xl tracking-tight sm:text-5xl">
-						Oops!
-					</h1>
-					<h2 className="text-muted-foreground text-xl">
-						We can't seem to find the page you're looking for.
-					</h2>
-					<p className="text-muted-foreground text-sm">Error code: 404</p>
-					<div className="mt-2 flex flex-col gap-1 text-sm">
-						<p className="font-medium">Here are some helpful links instead:</p>
-						{HELPFUL_LINKS.map((link) => (
-							<Link
-								key={link.href}
-								href={link.href}
-								className="text-primary transition-colors hover:underline"
-							>
-								{link.label}
-							</Link>
-						))}
+		<div className="flex min-h-screen flex-col">
+			<SiteHeader solid />
+			<main className="flex flex-1 items-center px-4 pt-16 pb-20 sm:px-6">
+				<div className="mx-auto grid w-full max-w-5xl items-center gap-10 md:grid-cols-2 md:gap-12">
+					<div className="flex flex-col items-center text-center md:items-start md:text-left">
+						<p className="font-medium text-muted-foreground text-sm uppercase tracking-widest">
+							Error 404
+						</p>
+						<h1 className="mt-2 font-heading font-semibold text-4xl tracking-tight sm:text-5xl">
+							This page took a wrong turn
+						</h1>
+						<p className="mt-4 max-w-md text-balance text-muted-foreground">
+							The page you were looking for isn't here. It may have moved, or
+							the link might be out of date. Let's get you back to a stay that
+							feels like home.
+						</p>
+
+						<div className="mt-8 flex flex-col gap-3 sm:flex-row">
+							<Button asChild size="lg">
+								<Link href="/homes">
+									<Compass className="size-4" />
+									Explore our homes
+								</Link>
+							</Button>
+							<Button asChild size="lg" variant="outline">
+								<Link href="/">
+									Back to homepage
+									<ArrowRight className="size-4" />
+								</Link>
+							</Button>
+						</div>
+
+						<nav
+							aria-label="Helpful links"
+							className="mt-10 grid w-full max-w-md grid-cols-1 gap-2 sm:grid-cols-2"
+						>
+							{HELPFUL_LINKS.map((link) => (
+								<Link
+									key={link.href}
+									href={link.href}
+									className="group flex flex-col rounded-xl border p-3 text-left transition-colors hover:bg-accent"
+								>
+									<span className="font-medium text-sm">{link.label}</span>
+									<span className="text-muted-foreground text-xs">
+										{link.description}
+									</span>
+								</Link>
+							))}
+						</nav>
+					</div>
+
+					<div className="order-first mx-auto w-full max-w-sm md:order-last md:max-w-none">
+						<Image
+							src={illustration}
+							alt="Page not found illustration"
+							priority
+							className="h-auto w-full"
+						/>
 					</div>
 				</div>
-				<div className="w-full max-w-xs md:col-span-1 md:max-w-none">
-					<Image
-						src={illustration}
-						alt="Page not found illustration"
-						priority
-						className="h-auto w-full"
-					/>
-				</div>
-			</div>
-		</main>
+			</main>
+			<SiteFooter />
+		</div>
 	);
 }

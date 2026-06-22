@@ -43,8 +43,57 @@ describe("parseQuoteBody", () => {
 
 		expect(parsed.success).toBe(true);
 		if (parsed.success) {
+			expect(parsed.data.adults).toBe(2);
+			expect(parsed.data.children).toBe(0);
 			expect(parsed.data.forceFresh).toBe(false);
 			expect(parsed.data.pets).toBe(0);
+		}
+	});
+
+	test("derives adults from guests minus children when adults omitted", () => {
+		const parsed = parseQuoteBody({
+			checkIn: "2026-07-01",
+			checkOut: "2026-07-03",
+			children: 2,
+			guests: 4,
+			listingId: "123",
+		});
+
+		expect(parsed.success).toBe(true);
+		if (parsed.success) {
+			expect(parsed.data.adults).toBe(2);
+			expect(parsed.data.children).toBe(2);
+			expect(parsed.data.guests).toBe(4);
+		}
+	});
+
+	test("rejects a split with no room for an adult", () => {
+		const parsed = parseQuoteBody({
+			checkIn: "2026-07-01",
+			checkOut: "2026-07-03",
+			children: 2,
+			guests: 2,
+			listingId: "123",
+		});
+
+		expect(parsed.success).toBe(false);
+	});
+
+	test("keeps adult and child counts when provided", () => {
+		const parsed = parseQuoteBody({
+			adults: 2,
+			checkIn: "2026-07-01",
+			checkOut: "2026-07-03",
+			children: 1,
+			guests: 3,
+			listingId: "123",
+		});
+
+		expect(parsed.success).toBe(true);
+		if (parsed.success) {
+			expect(parsed.data.adults).toBe(2);
+			expect(parsed.data.children).toBe(1);
+			expect(parsed.data.guests).toBe(3);
 		}
 	});
 });
