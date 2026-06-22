@@ -220,6 +220,11 @@ export class ListingCacheRepository {
 				end`,
 				status: "running",
 				updatedAt: input.now,
+				// Stamp the version as soon as a fresh cycle is claimed. Otherwise a
+				// multi-page sync would re-trigger startNewCycle on every poll
+				// (resetting to page 1) because the version is only recorded at
+				// completion, which a paging cycle never reaches.
+				versionHash: input.versionHash,
 			})
 			.where(sql`
 				${providerSyncState.id} = ${stateId}

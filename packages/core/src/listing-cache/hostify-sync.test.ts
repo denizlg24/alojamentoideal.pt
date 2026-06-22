@@ -271,6 +271,38 @@ describe("HostifyListingCacheSync.pollListings", () => {
 		expect(repository.state.versionHash).toBe(LISTING_SYNC_VERSION);
 	});
 
+	test("advances page by page after a version bump instead of restarting page 1", async () => {
+		const repository = new FakeListingCacheRepository();
+		const client = new FakeHostifyClient({
+			1: [listing("1"), listing("2")],
+			2: [listing("3")],
+		});
+		const sync = createSync({ client, repository });
+
+		// A completed cycle under the previous version, then a bump lands.
+		repository.state.status = "complete";
+		repository.state.nextRunAt = new Date("2030-01-01T00:00:00.000Z");
+		repository.state.versionHash = LISTING_SYNC_VERSION - 1;
+
+		const first = await sync.pollListings("poll");
+		const second = await sync.pollListings("poll");
+
+		expect(first.status).toBe("advanced");
+		expect(first.page).toBe(1);
+		expect(second.status).toBe("completed");
+		expect(second.page).toBe(2);
+		expect(client.listQueries).toEqual([
+			{ page: 1, per_page: 2 },
+			{ page: 2, per_page: 2 },
+		]);
+		expect(repository.upserts.map((upsert) => upsert.externalId)).toEqual([
+			"1",
+			"2",
+			"3",
+		]);
+		expect(repository.state.versionHash).toBe(LISTING_SYNC_VERSION);
+	});
+
 	test("refreshes missing coordinates when source content is unchanged", async () => {
 		const hostifyListing = listing("1", {
 			latitude: 41.1579,
@@ -574,6 +606,7 @@ class FakeListingCacheRepository {
 
 		this.state.leaseExpiresAt = input.leaseExpiresAt;
 		this.state.status = "running";
+		this.state.versionHash = input.versionHash;
 
 		return {
 			activeRunId: this.state.activeRunId ?? input.newRunId,

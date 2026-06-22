@@ -67,18 +67,23 @@ export default function NotFound() {
 
 						<nav
 							aria-label="Helpful links"
-							className="mt-10 grid w-full max-w-md grid-cols-1 gap-2 sm:grid-cols-2"
+							className="mt-10 flex w-full max-w-md flex-col divide-y border-t border-b"
 						>
 							{HELPFUL_LINKS.map((link) => (
 								<Link
 									key={link.href}
 									href={link.href}
-									className="group flex flex-col rounded-xl border p-3 text-left transition-colors hover:bg-accent"
+									className="group flex items-center gap-4 py-3 text-left transition-colors hover:text-foreground"
 								>
-									<span className="font-medium text-sm">{link.label}</span>
-									<span className="text-muted-foreground text-xs">
-										{link.description}
+									<span className="flex-1">
+										<span className="block font-medium text-sm">
+											{link.label}
+										</span>
+										<span className="block text-muted-foreground text-xs">
+											{link.description}
+										</span>
 									</span>
+									<ArrowRight className="size-4 shrink-0 text-muted-foreground transition-transform group-hover:translate-x-0.5 group-hover:text-foreground" />
 								</Link>
 							))}
 						</nav>

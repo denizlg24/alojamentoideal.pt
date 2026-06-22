@@ -17,7 +17,7 @@ import { stableHash } from "./hash";
  * their next claim start a fresh cycle immediately (bypassing the scheduled
  * interval) so they re-upsert everything under the new version.
  */
-export const LISTING_SYNC_VERSION = 6;
+export const LISTING_SYNC_VERSION = 7;
 
 /** Hash `value` bound to the current {@link LISTING_SYNC_VERSION}. */
 export function versionedHash(value: unknown): string {
