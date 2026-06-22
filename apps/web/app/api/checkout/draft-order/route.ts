@@ -8,8 +8,6 @@ import {
 } from "@/lib/api/commerce";
 import { withApiRoute } from "@/lib/api/route";
 
-export const dynamic = "force-dynamic";
-
 export const POST = withApiRoute(
 	{ name: "checkout.draft_order", rateLimit: { bucket: "checkout.write" } },
 	async (request: Request): Promise<Response> => {

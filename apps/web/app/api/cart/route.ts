@@ -9,8 +9,6 @@ import {
 } from "@/lib/api/commerce";
 import { withApiRoute } from "@/lib/api/route";
 
-export const dynamic = "force-dynamic";
-
 export const POST = withApiRoute(
 	{ name: "cart.create", rateLimit: { bucket: "cart.write" } },
 	async (request: Request): Promise<Response> => {

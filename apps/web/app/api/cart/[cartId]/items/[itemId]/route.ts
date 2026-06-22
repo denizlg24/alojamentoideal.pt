@@ -11,8 +11,6 @@ import {
 } from "@/lib/api/commerce";
 import { withApiRoute } from "@/lib/api/route";
 
-export const dynamic = "force-dynamic";
-
 interface CartItemRouteContext {
 	params: Promise<{ cartId: string; itemId: string }>;
 }

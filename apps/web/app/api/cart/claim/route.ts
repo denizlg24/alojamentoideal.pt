@@ -6,8 +6,6 @@ import {
 import { withApiRoute } from "@/lib/api/route";
 import { getServerUser } from "@/lib/auth/session";
 
-export const dynamic = "force-dynamic";
-
 /**
  * Merges the anonymous cart referenced by the `ai_cart` cookie into the
  * authenticated user. Idempotent and safe to call after every login; the
