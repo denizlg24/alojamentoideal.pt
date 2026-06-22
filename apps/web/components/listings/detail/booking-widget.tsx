@@ -55,7 +55,18 @@ function guestSummary({ adults, children }: GuestCounts): string {
 	return parts.join(", ");
 }
 
-export function BookingWidget({
+export function BookingWidget(props: BookingWidgetProps) {
+	const searchParams = useSearchParams();
+	const seedKey = [
+		searchParams.get("checkIn"),
+		searchParams.get("checkOut"),
+		searchParams.get("adults"),
+		searchParams.get("children"),
+	].join("|");
+	return <BookingWidgetInner key={seedKey} {...props} />;
+}
+
+function BookingWidgetInner({
 	currency,
 	listingId,
 	maxGuests,

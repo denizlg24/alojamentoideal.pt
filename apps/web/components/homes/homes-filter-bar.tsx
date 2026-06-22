@@ -40,7 +40,7 @@ import {
 	X,
 } from "lucide-react";
 import { useSearchParams } from "next/navigation";
-import { type ReactNode, useMemo, useState } from "react";
+import { type ReactNode, useEffect, useMemo, useState } from "react";
 import type { DateRange } from "react-day-picker";
 import { AmenityIcon } from "@/components/listings/amenity-icon";
 import type { HomesAmenityFacet } from "@/lib/catalog/amenities";
@@ -147,7 +147,7 @@ export function HomesFilterBar({
 	total: number;
 }) {
 	const searchParams = useSearchParams();
-	const { navigate } = useHomesPending();
+	const { isPending, navigate } = useHomesPending();
 	const filters = useMemo(
 		() => parseHomesFilters(new URLSearchParams(searchParams.toString())),
 		[searchParams],
@@ -155,6 +155,13 @@ export function HomesFilterBar({
 	const [optimisticFilters, setOptimisticFilters] =
 		useState<HomesFilters | null>(null);
 	const visibleFilters = optimisticFilters ?? filters;
+
+	useEffect(() => {
+		if (optimisticFilters && !isPending) {
+			setOptimisticFilters(null);
+		}
+	}, [isPending, optimisticFilters]);
+
 	const committedDateRange = useMemo(
 		() => toDateRange(visibleFilters),
 		[visibleFilters],
