@@ -21,6 +21,7 @@ interface UseListingQuoteArgs {
 	children: number;
 	enabled?: boolean;
 	guests: number;
+	infants: number;
 	listingId: string;
 }
 
@@ -39,6 +40,7 @@ export function useListingQuote({
 	children,
 	enabled = true,
 	guests,
+	infants,
 	listingId,
 }: UseListingQuoteArgs): QuoteState {
 	const [state, setState] = useState<QuoteState>({ status: "idle" });
@@ -59,6 +61,7 @@ export function useListingQuote({
 				checkOut,
 				children,
 				guests,
+				infants,
 				listingId,
 				signal: controller.signal,
 			})
@@ -92,7 +95,16 @@ export function useListingQuote({
 			controller.abort();
 			clearTimeout(timer);
 		};
-	}, [adults, checkIn, checkOut, children, enabled, guests, listingId]);
+	}, [
+		adults,
+		checkIn,
+		checkOut,
+		children,
+		enabled,
+		guests,
+		infants,
+		listingId,
+	]);
 
 	return state;
 }

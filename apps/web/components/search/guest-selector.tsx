@@ -8,10 +8,12 @@ import {
 } from "@workspace/ui/components/popover";
 import { cn } from "@workspace/ui/lib/utils";
 import { Minus, Plus, Users } from "lucide-react";
+import { MAX_INFANTS } from "@/lib/catalog/guests";
 
 export interface GuestCounts {
 	adults: number;
 	children: number;
+	infants: number;
 }
 
 interface GuestFieldsProps {
@@ -25,12 +27,14 @@ const MAX_PER_CATEGORY = 20;
 function Stepper({
 	hint,
 	label,
+	max,
 	min,
 	onChange,
 	value,
 }: {
 	hint: string;
 	label: string;
+	max: number;
 	min: number;
 	onChange: (next: number) => void;
 	value: number;
@@ -59,8 +63,8 @@ function Stepper({
 					variant="outline"
 					size="icon"
 					className="size-8 rounded-full"
-					onClick={() => onChange(Math.min(MAX_PER_CATEGORY, value + 1))}
-					disabled={value >= MAX_PER_CATEGORY}
+					onClick={() => onChange(Math.min(max, value + 1))}
+					disabled={value >= max}
 					aria-label={`Increase ${label}`}
 				>
 					<Plus className="size-4" />
@@ -78,6 +82,7 @@ export function GuestFields({ onChange, value }: GuestFieldsProps) {
 				hint="Ages 13 or above"
 				value={value.adults}
 				min={MIN_ADULTS}
+				max={MAX_PER_CATEGORY}
 				onChange={(adults) => onChange({ ...value, adults })}
 			/>
 			<Stepper
@@ -85,7 +90,16 @@ export function GuestFields({ onChange, value }: GuestFieldsProps) {
 				hint="Ages 2 to 12"
 				value={value.children}
 				min={0}
+				max={MAX_PER_CATEGORY}
 				onChange={(children) => onChange({ ...value, children })}
+			/>
+			<Stepper
+				label="Infants"
+				hint="Under 2"
+				value={value.infants}
+				min={0}
+				max={MAX_INFANTS}
+				onChange={(infants) => onChange({ ...value, infants })}
 			/>
 		</div>
 	);

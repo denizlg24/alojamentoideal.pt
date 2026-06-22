@@ -1,9 +1,13 @@
 /**
+ * Maximum number of infants allowed in a booking.
+ */
+export const MAX_INFANTS = 5;
+
+/**
  * Translates a guest selection into the minimum person capacity a listing must
- * advertise. Following Hostify's convention, two children count as one adult
- * for capacity purposes, so a family of two adults and two children needs a
- * listing that sleeps three.
+ * advertise. Every adult and child counts as one occupant; infants (under 2) do
+ * not count toward occupancy and are excluded here.
  */
 export function capacityForGuests(adults: number, children: number): number {
-	return Math.max(1, adults + Math.ceil(children / 2));
+	return Math.max(1, adults + children);
 }

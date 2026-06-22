@@ -235,6 +235,7 @@ export function HomesFilterBar({
 	const currentGuests: GuestCounts = {
 		adults: visibleFilters.adults,
 		children: visibleFilters.children,
+		infants: visibleFilters.infants,
 	};
 
 	// Edit guests in a draft while the popover is open and commit once on close,
@@ -253,7 +254,8 @@ export function HomesFilterBar({
 		if (
 			next &&
 			(next.adults !== currentGuests.adults ||
-				next.children !== currentGuests.children)
+				next.children !== currentGuests.children ||
+				next.infants !== currentGuests.infants)
 		) {
 			apply({ ...visibleFilters, ...next });
 		}
@@ -370,7 +372,8 @@ export function HomesFilterBar({
 		activeChips.push({
 			key: "guests",
 			label: `${guests} ${guests === 1 ? "guest" : "guests"}`,
-			remove: () => apply({ ...visibleFilters, adults: 1, children: 0 }),
+			remove: () =>
+				apply({ ...visibleFilters, adults: 1, children: 0, infants: 0 }),
 		});
 	}
 	if (visibleFilters.ratingMin !== null) {
@@ -601,7 +604,11 @@ export function HomesFilterBar({
 								</AccordionTrigger>
 								<AccordionContent>
 									<GuestFields
-										value={{ adults: draft.adults, children: draft.children }}
+										value={{
+											adults: draft.adults,
+											children: draft.children,
+											infants: draft.infants,
+										}}
 										onChange={(next) => setDraft({ ...draft, ...next })}
 									/>
 								</AccordionContent>

@@ -7,7 +7,7 @@ const redis = {
 };
 
 describe("AccommodationQuoteService", () => {
-	test("adjusts adult-only tourist taxes when children are present", async () => {
+	test("charges tax for every guest without a child adjustment", async () => {
 		const service = new AccommodationQuoteService({
 			client: {
 				listings: {
@@ -47,21 +47,20 @@ describe("AccommodationQuoteService", () => {
 			},
 			forceFresh: false,
 			guests: 3,
+			infants: 0,
 			listingId: "123",
 			pets: 0,
 		});
 
-		expect(quote.taxTotal).toBe(8);
-		expect(quote.total).toBe(108);
+		expect(quote.taxTotal).toBe(12);
+		expect(quote.total).toBe(112);
 		expect(quote.fees[0]).toMatchObject({
-			adjustedForChildren: true,
-			originalTotal: 12,
-			quantity: 4,
-			total: 8,
+			quantity: 6,
+			total: 12,
 		});
 	});
 
-	test("does not adjust VAT-style tax lines", async () => {
+	test("rewrites per-adult wording to per-guest in fee labels", async () => {
 		const service = new AccommodationQuoteService({
 			client: {
 				listings: {
@@ -71,8 +70,8 @@ describe("AccommodationQuoteService", () => {
 							fees: [
 								{
 									amount: 2,
-									charge_type_label: "per person per night",
-									fee_name: "VAT",
+									charge_type_label: "Per adult per night",
+									fee_name: "Tourist tax per adult",
 									fee_type: "tax",
 									quantity: 6,
 									total: 12,
@@ -101,12 +100,15 @@ describe("AccommodationQuoteService", () => {
 			},
 			forceFresh: false,
 			guests: 3,
+			infants: 2,
 			listingId: "123",
 			pets: 0,
 		});
 
-		expect(quote.taxTotal).toBe(12);
-		expect(quote.total).toBe(112);
-		expect(quote.fees[0]?.adjustedForChildren).toBe(false);
+		expect(quote.infants).toBe(2);
+		expect(quote.fees[0]).toMatchObject({
+			chargeLabel: "Per guest per night",
+			name: "Tourist tax per guest",
+		});
 	});
 });

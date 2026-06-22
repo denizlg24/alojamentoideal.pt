@@ -10,7 +10,6 @@ import {
 	parseCatalogListQuery,
 } from "@workspace/core/catalog";
 import { getListingCacheConfig } from "@workspace/core/listing-cache";
-import { Skeleton } from "@workspace/ui/components/skeleton";
 import { Suspense } from "react";
 import { SiteFooter } from "@/components/home/site-footer";
 import { SiteHeader } from "@/components/home/site-header";
@@ -23,6 +22,7 @@ import { HomesSkeleton } from "@/components/homes/homes-skeleton";
 import { ListingsMapSlot } from "@/components/homes/listings-map-slot";
 import { ListingsResults } from "@/components/homes/listings-results";
 import { LocationRail } from "@/components/homes/location-rail";
+import { MapPlaceholder } from "@/components/homes/map-placeholder";
 import { searchAccommodationsLive } from "@/lib/catalog/accommodation-search";
 import { getCatalogAmenityFacets } from "@/lib/catalog/amenities";
 import { getCachedCatalogList } from "@/lib/catalog/cache";
@@ -163,7 +163,7 @@ function buildStayQuery(
 	next.set("checkIn", stay.dates.checkIn);
 	next.set("checkOut", stay.dates.checkOut);
 	next.set("guests", String(stay.guests));
-	for (const key of ["adults", "children"] as const) {
+	for (const key of ["adults", "children", "infants"] as const) {
 		const value = params.get(key);
 		if (value) next.set(key, value);
 	}
@@ -292,7 +292,7 @@ async function HomesContent({
 				</div>
 
 				<div className="h-72 overflow-hidden rounded-2xl border shadow-sm lg:hidden">
-					<Suspense fallback={<Skeleton className="h-full w-full" />}>
+					<Suspense fallback={<MapPlaceholder />}>
 						<StreamingMapSlot
 							slot="mobile"
 							stayQuery={stayQuery}
@@ -318,7 +318,7 @@ async function HomesContent({
 					</HomesPendingResults>
 					<aside className="hidden lg:block">
 						<div className="sticky top-24 h-[calc(100vh-7rem)] overflow-hidden rounded-2xl border shadow-sm">
-							<Suspense fallback={<Skeleton className="h-full w-full" />}>
+							<Suspense fallback={<MapPlaceholder />}>
 								<StreamingMapSlot
 									slot="desktop"
 									stayQuery={stayQuery}

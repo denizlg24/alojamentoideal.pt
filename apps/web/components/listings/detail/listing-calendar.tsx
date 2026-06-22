@@ -1,7 +1,9 @@
 "use client";
 
+import { Button } from "@workspace/ui/components/button";
 import { Calendar, CalendarDayButton } from "@workspace/ui/components/calendar";
 import { cn } from "@workspace/ui/lib/utils";
+import { X } from "lucide-react";
 import { useMemo } from "react";
 import type { DateRange } from "react-day-picker";
 import { toIsoDate } from "@/lib/catalog/dates";
@@ -46,31 +48,45 @@ export function ListingCalendar({
 		isListingCalendarDateUnavailable(toIsoDate(date), availableSet, selection);
 
 	return (
-		<Calendar
-			mode="range"
-			excludeDisabled
-			showOutsideDays={false}
-			numberOfMonths={numberOfMonths}
-			defaultMonth={value?.from ?? today}
-			selected={value}
-			onSelect={onChange}
-			disabled={isDisabled}
-			startMonth={today}
-			modifiers={{
-				unavailable: (date) => date >= today && isUnavailable(date),
-			}}
-			modifiersClassNames={{ unavailable: "line-through opacity-50" }}
-			components={{
-				DayButton: (props) => (
-					<CalendarDayButton
-						{...props}
-						className={cn(
-							props.className,
-							props.modifiers.unavailable && "line-through opacity-50",
-						)}
-					/>
-				),
-			}}
-		/>
+		<div className="flex flex-col gap-1">
+			<Calendar
+				mode="range"
+				excludeDisabled
+				showOutsideDays={false}
+				numberOfMonths={numberOfMonths}
+				defaultMonth={value?.from ?? today}
+				selected={value}
+				onSelect={onChange}
+				disabled={isDisabled}
+				startMonth={today}
+				modifiers={{
+					unavailable: (date) => date >= today && isUnavailable(date),
+				}}
+				modifiersClassNames={{ unavailable: "line-through opacity-50" }}
+				components={{
+					DayButton: (props) => (
+						<CalendarDayButton
+							{...props}
+							className={cn(
+								props.className,
+								props.modifiers.unavailable && "line-through opacity-50",
+							)}
+						/>
+					),
+				}}
+			/>
+			{value?.from && (
+				<Button
+					type="button"
+					variant="ghost"
+					size="sm"
+					onClick={() => onChange(undefined)}
+					className="mx-auto h-8 gap-1.5 text-muted-foreground text-xs"
+				>
+					<X className="size-3.5" />
+					Clear dates
+				</Button>
+			)}
+		</div>
 	);
 }

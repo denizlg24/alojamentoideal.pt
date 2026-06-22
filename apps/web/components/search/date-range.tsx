@@ -9,7 +9,7 @@ import {
 } from "@workspace/ui/components/popover";
 import { cn } from "@workspace/ui/lib/utils";
 import { format } from "date-fns";
-import { CalendarDays } from "lucide-react";
+import { CalendarDays, X } from "lucide-react";
 import { useMemo } from "react";
 import type { DateRange } from "react-day-picker";
 
@@ -36,15 +36,29 @@ export function StayCalendar({
 	const today = useMemo(() => startOfToday(), []);
 
 	return (
-		<Calendar
-			mode="range"
-			showOutsideDays={false}
-			numberOfMonths={numberOfMonths}
-			defaultMonth={value?.from}
-			selected={value}
-			onSelect={onChange}
-			disabled={(date) => date < today}
-		/>
+		<div className="flex flex-col gap-1">
+			<Calendar
+				mode="range"
+				showOutsideDays={false}
+				numberOfMonths={numberOfMonths}
+				defaultMonth={value?.from}
+				selected={value}
+				onSelect={onChange}
+				disabled={(date) => date < today}
+			/>
+			{value?.from && (
+				<Button
+					type="button"
+					variant="ghost"
+					size="sm"
+					onClick={() => onChange(undefined)}
+					className="mx-auto h-8 gap-1.5 text-muted-foreground text-xs"
+				>
+					<X className="size-3.5" />
+					Clear dates
+				</Button>
+			)}
+		</div>
 	);
 }
 
