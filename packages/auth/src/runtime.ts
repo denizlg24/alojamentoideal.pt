@@ -3,7 +3,7 @@ import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { admin } from "better-auth/plugins";
 import { getAuthConfig } from "./config";
-import { sendVerificationEmail } from "./email";
+import { sendResetPasswordEmail, sendVerificationEmail } from "./email";
 
 export function createAuth() {
 	const config = getAuthConfig();
@@ -21,6 +21,9 @@ export function createAuth() {
 		emailAndPassword: {
 			enabled: true,
 			requireEmailVerification: true,
+			sendResetPassword: async ({ user, url }) => {
+				await sendResetPasswordEmail({ email: user.email, url });
+			},
 		},
 		emailVerification: {
 			sendOnSignUp: true,
