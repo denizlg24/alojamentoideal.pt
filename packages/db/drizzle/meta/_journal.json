@@ -92,6 +92,13 @@
       "when": 1782164059770,
       "tag": "0012_robust_talkback",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1782168886055,
+      "tag": "0013_motionless_yellow_claw",
+      "breakpoints": true
     }
   ]
 }

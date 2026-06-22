@@ -1,4 +1,5 @@
 export { type Database, getDb, getPool } from "./client";
+export { CART_COOKIE_NAME } from "./constants";
 export type {
 	AccommodationListingNightRawContent,
 	AccommodationListingNormalizedContent,

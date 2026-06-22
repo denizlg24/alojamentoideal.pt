@@ -2,6 +2,7 @@ import { sql } from "drizzle-orm";
 import {
 	bigint,
 	boolean,
+	check,
 	customType,
 	date,
 	doublePrecision,
@@ -554,6 +555,13 @@ export const cart = pgTable(
 		uniqueIndex("carts_cart_token_uidx").on(table.cartToken),
 		index("carts_status_expires_at_idx").on(table.status, table.expiresAt),
 		index("carts_user_id_idx").on(table.userId),
+		// All monetary columns are non-negative minor units. discount_minor is a
+		// positive amount subtracted from total_minor (see computeDiscountMinor),
+		// never stored as a negative value.
+		check("carts_subtotal_minor_nonneg", sql`${table.subtotalMinor} >= 0`),
+		check("carts_tax_minor_nonneg", sql`${table.taxMinor} >= 0`),
+		check("carts_total_minor_nonneg", sql`${table.totalMinor} >= 0`),
+		check("carts_discount_minor_nonneg", sql`${table.discountMinor} >= 0`),
 	],
 );
 
@@ -604,6 +612,31 @@ export const accommodationQuoteSnapshot = pgTable(
 		index("accommodation_quote_snapshots_expires_at_idx").on(table.expiresAt),
 		index("accommodation_quote_snapshots_validation_status_idx").on(
 			table.validationStatus,
+		),
+		// Nullable fee columns: the check passes when the value is NULL.
+		check(
+			"accommodation_quote_snapshots_cleaning_fee_nonneg",
+			sql`${table.cleaningFeeMinor} >= 0`,
+		),
+		check(
+			"accommodation_quote_snapshots_housing_fee_nonneg",
+			sql`${table.housingFeeMinor} >= 0`,
+		),
+		check(
+			"accommodation_quote_snapshots_nightly_average_nonneg",
+			sql`${table.nightlyAverageMinor} >= 0`,
+		),
+		check(
+			"accommodation_quote_snapshots_subtotal_minor_nonneg",
+			sql`${table.subtotalMinor} >= 0`,
+		),
+		check(
+			"accommodation_quote_snapshots_tax_minor_nonneg",
+			sql`${table.taxMinor} >= 0`,
+		),
+		check(
+			"accommodation_quote_snapshots_total_minor_nonneg",
+			sql`${table.totalMinor} >= 0`,
 		),
 	],
 );
@@ -677,6 +710,20 @@ export const order = pgTable(
 		index("orders_cart_id_idx").on(table.cartId),
 		index("orders_status_created_at_idx").on(table.status, table.createdAt),
 		index("orders_user_id_idx").on(table.userId),
+		// Monetary columns are non-negative minor units (discount_minor is a
+		// positive amount subtracted from total_minor, mirroring carts).
+		check("orders_subtotal_minor_nonneg", sql`${table.subtotalMinor} >= 0`),
+		check("orders_tax_minor_nonneg", sql`${table.taxMinor} >= 0`),
+		check("orders_total_minor_nonneg", sql`${table.totalMinor} >= 0`),
+		check("orders_discount_minor_nonneg", sql`${table.discountMinor} >= 0`),
+		check(
+			"orders_amount_paid_minor_nonneg",
+			sql`${table.amountPaidMinor} >= 0`,
+		),
+		check(
+			"orders_amount_refunded_minor_nonneg",
+			sql`${table.amountRefundedMinor} >= 0`,
+		),
 	],
 );
 
@@ -744,6 +791,18 @@ export const orderItem = pgTable(
 			table.orderId,
 			table.position,
 		),
+		// Monetary columns are non-negative minor units (discount_minor positive,
+		// subtracted from total_minor).
+		check(
+			"order_items_subtotal_minor_nonneg",
+			sql`${table.subtotalMinor} >= 0`,
+		),
+		check("order_items_tax_minor_nonneg", sql`${table.taxMinor} >= 0`),
+		check("order_items_total_minor_nonneg", sql`${table.totalMinor} >= 0`),
+		check(
+			"order_items_discount_minor_nonneg",
+			sql`${table.discountMinor} >= 0`,
+		),
 	],
 );
 
@@ -801,6 +860,9 @@ export const orderItemCharge = pgTable(
 			table.orderItemId,
 			table.position,
 		),
+		// gross/net/unit_net are intentionally signed: discount charge rows store
+		// negative amounts (see buildDiscountChargeRow). Only tax is non-negative.
+		check("order_item_charges_tax_minor_nonneg", sql`${table.taxMinor} >= 0`),
 	],
 );
 

@@ -4,6 +4,19 @@ import { type EmailConfig, getAuthConfig } from "./config";
 const APP_NAME = "Alojamento Ideal";
 
 /**
+ * Escapes HTML-significant characters before interpolating a value into an email
+ * body. better-auth builds these URLs internally today; this is defense in depth
+ * for the day a URL carries user-controlled or special characters.
+ */
+function escapeHtml(value: string): string {
+	return value
+		.replace(/&/g, "&amp;")
+		.replace(/</g, "&lt;")
+		.replace(/>/g, "&gt;")
+		.replace(/"/g, "&quot;");
+}
+
+/**
  * Rendered email body. Template builders return this shape so brand HTML
  * (built later with Maizzle) can replace the inline bodies without touching any
  * call site.
@@ -69,8 +82,9 @@ function emailSender(): EmailSender {
 }
 
 export function buildVerificationEmail({ url }: { url: string }): EmailMessage {
+	const safeUrl = escapeHtml(url);
 	return {
-		html: `<p>Welcome to ${APP_NAME}.</p><p>Confirm your email address to finish setting up your account:</p><p><a href="${url}">Verify email</a></p><p>If you did not create an account, you can ignore this message.</p>`,
+		html: `<p>Welcome to ${APP_NAME}.</p><p>Confirm your email address to finish setting up your account:</p><p><a href="${safeUrl}">Verify email</a></p><p>If you did not create an account, you can ignore this message.</p>`,
 		subject: `Verify your ${APP_NAME} email`,
 		text: `Welcome to ${APP_NAME}.\n\nConfirm your email address to finish setting up your account:\n${url}\n\nIf you did not create an account, you can ignore this message.`,
 	};
@@ -81,8 +95,9 @@ export function buildResetPasswordEmail({
 }: {
 	url: string;
 }): EmailMessage {
+	const safeUrl = escapeHtml(url);
 	return {
-		html: `<p>We received a request to reset your ${APP_NAME} password.</p><p><a href="${url}">Choose a new password</a></p><p>If you did not request this, you can safely ignore this email.</p>`,
+		html: `<p>We received a request to reset your ${APP_NAME} password.</p><p><a href="${safeUrl}">Choose a new password</a></p><p>If you did not request this, you can safely ignore this email.</p>`,
 		subject: `Reset your ${APP_NAME} password`,
 		text: `We received a request to reset your ${APP_NAME} password.\n\nChoose a new password:\n${url}\n\nIf you did not request this, you can safely ignore this email.`,
 	};

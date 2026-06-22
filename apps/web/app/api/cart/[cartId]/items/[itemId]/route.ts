@@ -46,7 +46,14 @@ export const DELETE = withApiRoute<CartItemRouteContext>(
 	{ name: "cart.items.delete", rateLimit: { bucket: "cart.write" } },
 	async (request: Request, context): Promise<Response> => {
 		const { cartId, itemId } = await context.params;
-		const parsed = parseDeleteCartItemBody(await readJson(request));
+		// DELETE carries no body: many proxies and HTTP clients strip request
+		// bodies on DELETE, so the optional idempotency key rides a query param.
+		const idempotencyKey = new URL(request.url).searchParams.get(
+			"idempotencyKey",
+		);
+		const parsed = parseDeleteCartItemBody(
+			idempotencyKey === null ? {} : { idempotencyKey },
+		);
 		if (!parsed.success) {
 			return validationResponse(parsed, "Invalid cart item delete");
 		}

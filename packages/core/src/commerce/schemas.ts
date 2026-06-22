@@ -10,7 +10,10 @@ const idempotencyKey = z
 	.trim()
 	.min(8)
 	.max(160)
-	.regex(/^[A-Za-z0-9._:-]+$/, "Use letters, numbers, dots, dashes or colons");
+	.regex(
+		/^[A-Za-z0-9._:-]+$/,
+		"Use letters, numbers, dots, underscores, dashes or colons",
+	);
 
 const createCartSchema = z.object({
 	// Server-generated UUIDs only: unguessable, and removes the colon-collision
@@ -225,7 +228,8 @@ export function parseDraftOrderBody(
 	}
 
 	// Checkout accepts either a nested contact object or legacy flat contact
-	// fields, then normalizes both paths into the same contact snapshot.
+	// fields, then normalizes both paths into the same contact snapshot. When
+	// both are present, the nested contact object takes precedence.
 	if (parsed.data.contact) {
 		return {
 			data: {

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { buildDraftOrderRows } from "./orders";
+import { buildDraftOrderRows, generatePublicOrderReference } from "./orders";
 import type {
 	DraftOrderContactInput,
 	ListingDisplaySnapshot,
@@ -303,6 +303,30 @@ describe("buildDraftOrderRows", () => {
 
 		expect(rows.item.totalMinor).toBe(9_999_999_999);
 		expect(rows.charges[0]?.grossMinor).toBe(9_999_999_999);
+	});
+});
+
+describe("generatePublicOrderReference", () => {
+	test("formats as AI-{year}-{8 uppercase hex}", () => {
+		const reference = generatePublicOrderReference(
+			new Date("2026-06-22T12:00:00.000Z"),
+		);
+		expect(reference).toMatch(/^AI-2026-[0-9A-F]{8}$/);
+	});
+
+	test("derives the year from the supplied UTC date", () => {
+		const reference = generatePublicOrderReference(
+			new Date("2030-01-01T00:00:00.000Z"),
+		);
+		expect(reference.startsWith("AI-2030-")).toBe(true);
+	});
+
+	test("produces a distinct suffix on each call", () => {
+		const now = new Date("2026-06-22T12:00:00.000Z");
+		const references = new Set(
+			Array.from({ length: 100 }, () => generatePublicOrderReference(now)),
+		);
+		expect(references.size).toBe(100);
 	});
 });
 

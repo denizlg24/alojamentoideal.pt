@@ -121,7 +121,7 @@ export function getRateLimitConfig(
 					environment.RATE_LIMIT_CART_WRITE_WINDOW_SECONDS,
 					1,
 					86_400,
-					60,
+					defaultWindow,
 				),
 				points: optionalInteger(
 					"RATE_LIMIT_CART_WRITE_POINTS",
@@ -138,7 +138,7 @@ export function getRateLimitConfig(
 					environment.RATE_LIMIT_CHECKOUT_WRITE_WINDOW_SECONDS,
 					1,
 					86_400,
-					60,
+					defaultWindow,
 				),
 				points: optionalInteger(
 					"RATE_LIMIT_CHECKOUT_WRITE_POINTS",

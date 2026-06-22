@@ -19,13 +19,11 @@ import {
 } from "@workspace/core/integrations/stripe";
 import { getRedis } from "@workspace/core/redis";
 import type { AppliedDiscountSnapshot } from "@workspace/db";
-import { getDb } from "@workspace/db";
+import { CART_COOKIE_NAME, getDb } from "@workspace/db";
 import { getServerUser } from "@/lib/auth/session";
 import { HOSTIFY_PROVIDER } from "@/lib/catalog/constants";
 import { quoteFailure } from "./hostify-errors";
 
-/** httpOnly cookie carrying the secret cart token for anonymous ownership. */
-export const CART_COOKIE_NAME = "ai_cart";
 // Matches CART_TTL_MS in the commerce service (~14 days).
 const CART_COOKIE_MAX_AGE_SECONDS = 14 * 24 * 60 * 60;
 
@@ -52,7 +50,12 @@ export function readCartToken(request: Request): string | null {
 		}
 		const name = part.slice(0, separator).trim();
 		if (name === CART_COOKIE_NAME) {
-			return decodeURIComponent(part.slice(separator + 1).trim());
+			try {
+				return decodeURIComponent(part.slice(separator + 1).trim());
+			} catch {
+				// Malformed percent-encoding: degrade to anonymous rather than 500.
+				return null;
+			}
 		}
 	}
 
@@ -83,6 +86,11 @@ export function cartCookie(token: string): string {
 	return attributes.join("; ");
 }
 
+/**
+ * Builds a request-scoped CommerceService. Fresh instantiation per call is
+ * intentional: the service is stateless and the underlying Hostify, Redis and
+ * Postgres clients are themselves pooled/singletons, so this is cheap.
+ */
 export function commerceService(): CommerceService {
 	const config = getAccommodationsConfig();
 	const quoteService = new AccommodationQuoteService({

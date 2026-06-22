@@ -22,7 +22,9 @@ export function createStripeClientFromEnv(
 		throw new StripeConfigurationError("STRIPE_SECRET_KEY is required");
 	}
 
-	return new Stripe(secretKey);
+	// Pin to the version the installed SDK (stripe@22) is generated against so
+	// account-level API upgrades cannot silently change field names or behavior.
+	return new Stripe(secretKey, { apiVersion: "2026-05-27.dahlia" });
 }
 
 /**

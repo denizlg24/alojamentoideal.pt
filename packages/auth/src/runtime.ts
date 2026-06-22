@@ -1,13 +1,10 @@
-import { cart, getDb, schema } from "@workspace/db";
+import { CART_COOKIE_NAME, cart, getDb, schema } from "@workspace/db";
 import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { admin } from "better-auth/plugins";
 import { and, eq, isNull } from "drizzle-orm";
 import { getAuthConfig } from "./config";
 import { sendResetPasswordEmail, sendVerificationEmail } from "./email";
-
-// Mirrors CART_COOKIE_NAME in apps/web; the anonymous cart token cookie.
-const CART_COOKIE_NAME = "ai_cart";
 
 export function createAuth() {
 	const config = getAuthConfig();
@@ -49,16 +46,22 @@ export function createAuth() {
 							return;
 						}
 
-						await getDb()
-							.update(cart)
-							.set({ updatedAt: new Date(), userId: session.userId })
-							.where(
-								and(
-									eq(cart.cartToken, cartToken),
-									isNull(cart.userId),
-									eq(cart.status, "draft"),
-								),
-							);
+						try {
+							await getDb()
+								.update(cart)
+								.set({ updatedAt: new Date(), userId: session.userId })
+								.where(
+									and(
+										eq(cart.cartToken, cartToken),
+										isNull(cart.userId),
+										eq(cart.status, "draft"),
+									),
+								);
+						} catch (error) {
+							// Opportunistic only: a failed merge must never block login. The
+							// /api/cart/claim endpoint reconciles on the next request.
+							console.error("Failed to merge anonymous cart on login", error);
+						}
 					},
 				},
 			},

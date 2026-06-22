@@ -74,9 +74,28 @@ describe("assertMutableCart", () => {
 			),
 		).toThrow(CommerceError);
 	});
+
+	test("rejects carts expiring exactly at now (inclusive boundary)", () => {
+		expect(() =>
+			assertMutableCart(
+				{
+					expiresAt: new Date("2026-06-22T12:00:00.000Z"),
+					id: "cart_1",
+					status: "draft",
+				},
+				now,
+			),
+		).toThrow("This cart has expired.");
+	});
 });
 
 describe("toCartStatus", () => {
+	test("maps valid status strings to themselves", () => {
+		expect(toCartStatus("draft")).toBe("draft");
+		expect(toCartStatus("converted")).toBe("converted");
+		expect(toCartStatus("expired")).toBe("expired");
+	});
+
 	test("rejects unexpected cart status values", () => {
 		expect(() => toCartStatus("unknown")).toThrow("Unexpected cart status");
 	});

@@ -64,7 +64,7 @@ milestone and delete it here.
 ### Done in the detail-page + live-booking iteration (2026-06-22)
 
 - ✅ Listing detail page (`/homes/[id]`) with gallery, full-screen gallery route
-  (`/homes/[id]/galery`), clickable amenities dialog (grouped, deduped),
+  (`/homes/[id]/gallery`), clickable amenities dialog (grouped, deduped),
   reviews + per-category averages, location map, share dialog, sleeping-room
   layout, and SEO/OpenGraph metadata.
 - ✅ Detail-page booking widget with live Hostify quoting

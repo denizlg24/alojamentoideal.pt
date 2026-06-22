@@ -10,13 +10,13 @@ draft-order flow, plus REST routes under `apps/web/app/api/cart/*` and `apps/web
 The code is functionally solid (strict zod parsing, durable idempotency via `apiIdempotencyKey`,
 Hostify error mapping, money in minor units) but has gaps. This pass closes all of them:
 
-1. **Cart ownership / user accounts** — carts have no `userId` and no ownership check; anyone with a
+1. **Cart ownership / user accounts**: carts have no `userId` and no ownership check; anyone with a
    `cartId` can read/mutate (IDOR). Wire Better Auth identity in, hybrid guest+linked model.
-2. **Auth backend completion** — Better Auth is fully wired except email delivery is a `console.log`
+2. **Auth backend completion**: Better Auth is fully wired except email delivery is a `console.log`
    placeholder and there is no password-reset flow. Wire Resend; add reset.
-3. **Discounts through Stripe** — `cart.discountMinor`/`order.discountMinor` columns exist but are
+3. **Discounts through Stripe**: `cart.discountMinor`/`order.discountMinor` columns exist but are
    dead; `sumCartTotals` never subtracts them and `buildDraftOrderRows` hardcodes `discountMinor: 0`.
-4. **Quote-revalidation race**, **`publicReference` insert race**, **client-suppliable cartId** — the
+4. **Quote-revalidation race**, **`publicReference` insert race**, **client-suppliable cartId**: the
    three correctness items flagged in review, now fixed (not deferred).
 
 ### Decisions (confirmed with user)

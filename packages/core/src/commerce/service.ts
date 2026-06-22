@@ -326,8 +326,8 @@ export class CommerceService {
 	async removeItem(
 		cartId: string,
 		itemId: string,
-		input: DeleteCartItemBody = {},
-		owner: CartOwner = { cartToken: null, userId: null },
+		input: DeleteCartItemBody,
+		owner: CartOwner,
 	): Promise<CartResponse> {
 		await this.#assertCartAccess(this.#db, cartId, owner);
 		const payload = { cartId, itemId };
@@ -1446,7 +1446,12 @@ export class CommerceService {
 			return null;
 		}
 
-		if (existing.requestHash !== requestHash) {
+		const expectedHash = Buffer.from(existing.requestHash);
+		const actualHash = Buffer.from(requestHash);
+		if (
+			expectedHash.length !== actualHash.length ||
+			!timingSafeEqual(expectedHash, actualHash)
+		) {
 			throw new CommerceError(
 				"idempotency_key_reused",
 				"This idempotency key was already used with a different request.",
