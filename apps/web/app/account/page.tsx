@@ -1,11 +1,12 @@
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
+import { Suspense } from "react";
 import { SiteHeader } from "@/components/home/site-header";
 import { getCurrentUser } from "@/lib/auth/session";
 
 export const metadata: Metadata = { title: "Your account" };
 
-export default async function AccountPage() {
+async function AccountContent() {
 	const user = await getCurrentUser();
 	if (!user) {
 		redirect("/login?next=/account");
@@ -46,5 +47,13 @@ export default async function AccountPage() {
 				</section>
 			</main>
 		</>
+	);
+}
+
+export default function AccountPage() {
+	return (
+		<Suspense fallback={null}>
+			<AccountContent />
+		</Suspense>
 	);
 }
