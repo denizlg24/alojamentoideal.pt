@@ -18,4 +18,15 @@ ALTER TABLE "order_items" ADD CONSTRAINT "order_items_subtotal_minor_nonneg" CHE
 ALTER TABLE "order_items" ADD CONSTRAINT "order_items_tax_minor_nonneg" CHECK ("order_items"."tax_minor" >= 0);--> statement-breakpoint
 ALTER TABLE "order_items" ADD CONSTRAINT "order_items_total_minor_nonneg" CHECK ("order_items"."total_minor" >= 0);--> statement-breakpoint
 ALTER TABLE "order_items" ADD CONSTRAINT "order_items_discount_minor_nonneg" CHECK ("order_items"."discount_minor" >= 0);--> statement-breakpoint
-ALTER TABLE "order_item_charges" ADD CONSTRAINT "order_item_charges_tax_minor_nonneg" CHECK ("order_item_charges"."tax_minor" >= 0);
+ALTER TABLE "order_item_charges" ADD CONSTRAINT "order_item_charges_tax_minor_nonneg" CHECK ("order_item_charges"."tax_minor" >= 0);--> statement-breakpoint
+ALTER TABLE "order_item_charges" ADD CONSTRAINT "order_item_charges_signed_amounts_check" CHECK ((
+	"order_item_charges"."kind" = 'discount'
+	AND "order_item_charges"."gross_minor" <= 0
+	AND "order_item_charges"."net_minor" <= 0
+	AND "order_item_charges"."unit_net_minor" <= 0
+) OR (
+	"order_item_charges"."kind" <> 'discount'
+	AND "order_item_charges"."gross_minor" >= 0
+	AND "order_item_charges"."net_minor" >= 0
+	AND "order_item_charges"."unit_net_minor" >= 0
+));

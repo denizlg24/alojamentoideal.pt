@@ -19,8 +19,16 @@ describe("idempotency helpers", () => {
 		expect(first).toBe(second);
 	});
 
-	test("keeps undefined deterministic in canonical JSON", () => {
-		expect(canonicalJson({ a: undefined })).toBe('{"a":"__undefined__"}');
+	test("rejects undefined instead of colliding with literal sentinel strings", () => {
+		expect(canonicalJson({ a: "__undefined__" })).toBe('{"a":"__undefined__"}');
+		expect(() => canonicalJson({ a: undefined })).toThrow(TypeError);
+	});
+
+	test("rejects non-plain objects instead of hashing them like strings", () => {
+		const instant = "2026-06-22T12:00:00.000Z";
+
+		expect(canonicalJson({ at: instant })).toBe(`{"at":"${instant}"}`);
+		expect(() => canonicalJson({ at: new Date(instant) })).toThrow(TypeError);
 	});
 
 	test("rejects circular payloads", () => {

@@ -1,5 +1,6 @@
 import { sql } from "drizzle-orm";
 import {
+	type AnyPgColumn,
 	bigint,
 	boolean,
 	check,
@@ -532,7 +533,12 @@ export const cart = pgTable(
 		id: text("id").primaryKey(),
 		appliedDiscount: jsonb("applied_discount").$type<AppliedDiscountSnapshot>(),
 		cartToken: text("cart_token").notNull(),
-		convertedOrderId: text("converted_order_id"),
+		convertedOrderId: text("converted_order_id").references(
+			(): AnyPgColumn => order.id,
+			{
+				onDelete: "set null",
+			},
+		),
 		createdAt: timestampWithTimezone("created_at").notNull().defaultNow(),
 		currency: text("currency").notNull(),
 		discountMinor: bigint("discount_minor", { mode: "number" })
@@ -562,6 +568,10 @@ export const cart = pgTable(
 		check("carts_tax_minor_nonneg", sql`${table.taxMinor} >= 0`),
 		check("carts_total_minor_nonneg", sql`${table.totalMinor} >= 0`),
 		check("carts_discount_minor_nonneg", sql`${table.discountMinor} >= 0`),
+		check(
+			"carts_status_check",
+			sql`${table.status} in ('draft', 'converted', 'expired')`,
+		),
 	],
 );
 
@@ -638,6 +648,10 @@ export const accommodationQuoteSnapshot = pgTable(
 			"accommodation_quote_snapshots_total_minor_nonneg",
 			sql`${table.totalMinor} >= 0`,
 		),
+		check(
+			"accommodation_quote_snapshots_validation_status_check",
+			sql`${table.validationStatus} in ('valid', 'unavailable', 'provider_error')`,
+		),
 	],
 );
 
@@ -670,6 +684,14 @@ export const cartItem = pgTable(
 		uniqueIndex("cart_items_client_mutation_uidx")
 			.on(table.cartId, table.clientMutationId)
 			.where(sql`${table.clientMutationId} is not null`),
+		check(
+			"cart_items_status_check",
+			sql`${table.status} in ('active', 'removed')`,
+		),
+		check(
+			"cart_items_type_check",
+			sql`${table.type} in ('accommodation', 'activity')`,
+		),
 	],
 );
 
@@ -685,7 +707,9 @@ export const order = pgTable(
 			.notNull()
 			.default(0),
 		cancelledAt: timestampWithTimezone("cancelled_at"),
-		cartId: text("cart_id").references(() => cart.id, { onDelete: "set null" }),
+		cartId: text("cart_id").references((): AnyPgColumn => cart.id, {
+			onDelete: "set null",
+		}),
 		checkoutExpiresAt: timestampWithTimezone("checkout_expires_at"),
 		confirmedAt: timestampWithTimezone("confirmed_at"),
 		createdAt: timestampWithTimezone("created_at").notNull().defaultNow(),
@@ -723,6 +747,10 @@ export const order = pgTable(
 		check(
 			"orders_amount_refunded_minor_nonneg",
 			sql`${table.amountRefundedMinor} >= 0`,
+		),
+		check(
+			"orders_status_check",
+			sql`${table.status} in ('draft', 'pending', 'confirmed', 'cancelled', 'failed')`,
 		),
 	],
 );
@@ -803,6 +831,14 @@ export const orderItem = pgTable(
 			"order_items_discount_minor_nonneg",
 			sql`${table.discountMinor} >= 0`,
 		),
+		check(
+			"order_items_status_check",
+			sql`${table.status} in ('draft', 'pending', 'confirmed', 'cancelled', 'failed')`,
+		),
+		check(
+			"order_items_type_check",
+			sql`${table.type} in ('accommodation', 'activity')`,
+		),
 	],
 );
 
@@ -863,6 +899,20 @@ export const orderItemCharge = pgTable(
 		// gross/net/unit_net are intentionally signed: discount charge rows store
 		// negative amounts (see buildDiscountChargeRow). Only tax is non-negative.
 		check("order_item_charges_tax_minor_nonneg", sql`${table.taxMinor} >= 0`),
+		check(
+			"order_item_charges_signed_amounts_check",
+			sql`(
+				${table.kind} = 'discount'
+				and ${table.grossMinor} <= 0
+				and ${table.netMinor} <= 0
+				and ${table.unitNetMinor} <= 0
+			) or (
+				${table.kind} <> 'discount'
+				and ${table.grossMinor} >= 0
+				and ${table.netMinor} >= 0
+				and ${table.unitNetMinor} >= 0
+			)`,
+		),
 	],
 );
 
@@ -883,6 +933,10 @@ export const apiIdempotencyKey = pgTable(
 		uniqueIndex("api_idempotency_keys_scope_key_uidx").on(
 			table.scope,
 			table.key,
+		),
+		check(
+			"api_idempotency_keys_status_check",
+			sql`${table.status} in ('in_progress', 'completed', 'failed')`,
 		),
 		index("api_idempotency_keys_expires_at_idx").on(table.expiresAt),
 	],

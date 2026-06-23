@@ -51,7 +51,7 @@ The `user` table is defined earlier in the same file.
   amount derived at normalize time from the base-price (`isBasePrice`) fee lines. This is the
   discountable base; keeps totals computation off the jsonb hot path.
 
-New exported type in `@workspace/db` (or `packages/core/src/commerce/types.ts`):
+Canonical exported type in `@workspace/db`:
 ```ts
 export interface AppliedDiscountSnapshot {
   source: "stripe";

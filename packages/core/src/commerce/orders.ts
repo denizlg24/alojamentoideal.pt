@@ -196,7 +196,7 @@ export function allocateDiscountByHousingBase(
 	let allocated = 0;
 	for (let index = 0; index < housingBases.length - 1; index += 1) {
 		const base = housingBases[index] ?? 0;
-		const share = Math.round((totalDiscountMinor * base) / totalBase);
+		const share = Math.floor((totalDiscountMinor * base) / totalBase);
 		allocations[index] = share;
 		allocated += share;
 	}

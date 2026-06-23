@@ -967,7 +967,12 @@
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "policies": {},
-      "checkConstraints": {},
+      "checkConstraints": {
+        "accommodation_quote_snapshots_validation_status_check": {
+          "name": "accommodation_quote_snapshots_validation_status_check",
+          "value": "\"accommodation_quote_snapshots\".\"validation_status\" in ('valid', 'unavailable', 'provider_error')"
+        }
+      },
       "isRLSEnabled": false
     },
     "public.account": {
@@ -1181,7 +1186,12 @@
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "policies": {},
-      "checkConstraints": {},
+      "checkConstraints": {
+        "api_idempotency_keys_status_check": {
+          "name": "api_idempotency_keys_status_check",
+          "value": "\"api_idempotency_keys\".\"status\" in ('in_progress', 'completed', 'failed')"
+        }
+      },
       "isRLSEnabled": false
     },
     "public.carts": {
@@ -1353,12 +1363,30 @@
           ],
           "onDelete": "set null",
           "onUpdate": "no action"
+        },
+        "carts_converted_order_id_orders_id_fk": {
+          "name": "carts_converted_order_id_orders_id_fk",
+          "tableFrom": "carts",
+          "tableTo": "orders",
+          "columnsFrom": [
+            "converted_order_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "policies": {},
-      "checkConstraints": {},
+      "checkConstraints": {
+        "carts_status_check": {
+          "name": "carts_status_check",
+          "value": "\"carts\".\"status\" in ('draft', 'converted', 'expired')"
+        }
+      },
       "isRLSEnabled": false
     },
     "public.cart_items": {
@@ -1527,7 +1555,16 @@
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "policies": {},
-      "checkConstraints": {},
+      "checkConstraints": {
+        "cart_items_status_check": {
+          "name": "cart_items_status_check",
+          "value": "\"cart_items\".\"status\" in ('active', 'removed')"
+        },
+        "cart_items_type_check": {
+          "name": "cart_items_type_check",
+          "value": "\"cart_items\".\"type\" in ('accommodation', 'activity')"
+        }
+      },
       "isRLSEnabled": false
     },
     "public.listing_review": {
@@ -2374,7 +2411,12 @@
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "policies": {},
-      "checkConstraints": {},
+      "checkConstraints": {
+        "orders_status_check": {
+          "name": "orders_status_check",
+          "value": "\"orders\".\"status\" in ('draft', 'pending', 'confirmed', 'cancelled', 'failed')"
+        }
+      },
       "isRLSEnabled": false
     },
     "public.order_contacts": {
@@ -2686,7 +2728,16 @@
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "policies": {},
-      "checkConstraints": {},
+      "checkConstraints": {
+        "order_items_status_check": {
+          "name": "order_items_status_check",
+          "value": "\"order_items\".\"status\" in ('draft', 'pending', 'confirmed', 'cancelled', 'failed')"
+        },
+        "order_items_type_check": {
+          "name": "order_items_type_check",
+          "value": "\"order_items\".\"type\" in ('accommodation', 'activity')"
+        }
+      },
       "isRLSEnabled": false
     },
     "public.order_item_charges": {

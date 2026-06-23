@@ -991,6 +991,10 @@
         "accommodation_quote_snapshots_total_minor_nonneg": {
           "name": "accommodation_quote_snapshots_total_minor_nonneg",
           "value": "\"accommodation_quote_snapshots\".\"total_minor\" >= 0"
+        },
+        "accommodation_quote_snapshots_validation_status_check": {
+          "name": "accommodation_quote_snapshots_validation_status_check",
+          "value": "\"accommodation_quote_snapshots\".\"validation_status\" in ('valid', 'unavailable', 'provider_error')"
         }
       },
       "isRLSEnabled": false
@@ -1206,7 +1210,12 @@
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "policies": {},
-      "checkConstraints": {},
+      "checkConstraints": {
+        "api_idempotency_keys_status_check": {
+          "name": "api_idempotency_keys_status_check",
+          "value": "\"api_idempotency_keys\".\"status\" in ('in_progress', 'completed', 'failed')"
+        }
+      },
       "isRLSEnabled": false
     },
     "public.carts": {
@@ -1378,6 +1387,19 @@
           ],
           "onDelete": "set null",
           "onUpdate": "no action"
+        },
+        "carts_converted_order_id_orders_id_fk": {
+          "name": "carts_converted_order_id_orders_id_fk",
+          "tableFrom": "carts",
+          "tableTo": "orders",
+          "columnsFrom": [
+            "converted_order_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -1399,6 +1421,10 @@
         "carts_discount_minor_nonneg": {
           "name": "carts_discount_minor_nonneg",
           "value": "\"carts\".\"discount_minor\" >= 0"
+        },
+        "carts_status_check": {
+          "name": "carts_status_check",
+          "value": "\"carts\".\"status\" in ('draft', 'converted', 'expired')"
         }
       },
       "isRLSEnabled": false
@@ -1569,7 +1595,16 @@
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "policies": {},
-      "checkConstraints": {},
+      "checkConstraints": {
+        "cart_items_status_check": {
+          "name": "cart_items_status_check",
+          "value": "\"cart_items\".\"status\" in ('active', 'removed')"
+        },
+        "cart_items_type_check": {
+          "name": "cart_items_type_check",
+          "value": "\"cart_items\".\"type\" in ('accommodation', 'activity')"
+        }
+      },
       "isRLSEnabled": false
     },
     "public.listing_review": {
@@ -2440,6 +2475,10 @@
         "orders_amount_refunded_minor_nonneg": {
           "name": "orders_amount_refunded_minor_nonneg",
           "value": "\"orders\".\"amount_refunded_minor\" >= 0"
+        },
+        "orders_status_check": {
+          "name": "orders_status_check",
+          "value": "\"orders\".\"status\" in ('draft', 'pending', 'confirmed', 'cancelled', 'failed')"
         }
       },
       "isRLSEnabled": false
@@ -2769,6 +2808,14 @@
         "order_items_discount_minor_nonneg": {
           "name": "order_items_discount_minor_nonneg",
           "value": "\"order_items\".\"discount_minor\" >= 0"
+        },
+        "order_items_status_check": {
+          "name": "order_items_status_check",
+          "value": "\"order_items\".\"status\" in ('draft', 'pending', 'confirmed', 'cancelled', 'failed')"
+        },
+        "order_items_type_check": {
+          "name": "order_items_type_check",
+          "value": "\"order_items\".\"type\" in ('accommodation', 'activity')"
         }
       },
       "isRLSEnabled": false
@@ -2924,6 +2971,10 @@
         "order_item_charges_tax_minor_nonneg": {
           "name": "order_item_charges_tax_minor_nonneg",
           "value": "\"order_item_charges\".\"tax_minor\" >= 0"
+        },
+        "order_item_charges_signed_amounts_check": {
+          "name": "order_item_charges_signed_amounts_check",
+          "value": "(\n\t\t\t\t\"order_item_charges\".\"kind\" = 'discount'\n\t\t\t\tand \"order_item_charges\".\"gross_minor\" <= 0\n\t\t\t\tand \"order_item_charges\".\"net_minor\" <= 0\n\t\t\t\tand \"order_item_charges\".\"unit_net_minor\" <= 0\n\t\t\t) or (\n\t\t\t\t\"order_item_charges\".\"kind\" <> 'discount'\n\t\t\t\tand \"order_item_charges\".\"gross_minor\" >= 0\n\t\t\t\tand \"order_item_charges\".\"net_minor\" >= 0\n\t\t\t\tand \"order_item_charges\".\"unit_net_minor\" >= 0\n\t\t\t)"
         }
       },
       "isRLSEnabled": false

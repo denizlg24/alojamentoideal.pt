@@ -93,7 +93,7 @@ describe("allocateDiscountByHousingBase", () => {
 			[10_000, 20_000, 30_000],
 			1000,
 		);
-		expect(allocations).toEqual([167, 333, 500]);
+		expect(allocations).toEqual([166, 333, 501]);
 		expect(allocations.reduce((sum, value) => sum + value, 0)).toBe(1000);
 	});
 

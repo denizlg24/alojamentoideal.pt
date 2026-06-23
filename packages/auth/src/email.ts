@@ -2,6 +2,7 @@ import { Resend } from "resend";
 import { type EmailConfig, getAuthConfig } from "./config";
 
 const APP_NAME = "Alojamento Ideal";
+const EMAIL_ADDRESS_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 /**
  * Escapes HTML-significant characters before interpolating a value into an email
@@ -13,7 +14,16 @@ function escapeHtml(value: string): string {
 		.replace(/&/g, "&amp;")
 		.replace(/</g, "&lt;")
 		.replace(/>/g, "&gt;")
-		.replace(/"/g, "&quot;");
+		.replace(/"/g, "&quot;")
+		.replace(/'/g, "&#39;");
+}
+
+function verifiedRecipient(email: string): string {
+	const recipient = email.trim();
+	if (!EMAIL_ADDRESS_PATTERN.test(recipient)) {
+		throw new Error("Cannot send auth email to an invalid address");
+	}
+	return recipient;
 }
 
 /**
@@ -41,9 +51,13 @@ export interface EmailSender {
 
 class ConsoleEmailSender implements EmailSender {
 	async send(email: OutboundEmail): Promise<void> {
-		console.info(
-			`[auth] email to ${email.to}: ${email.subject}\n${email.text}`,
-		);
+		const recipientDomain = email.to.includes("@")
+			? email.to.split("@").at(-1)
+			: "unknown";
+		console.info("[auth] email queued via console transport", {
+			recipientDomain,
+			subject: email.subject,
+		});
 	}
 }
 
@@ -112,7 +126,10 @@ export async function sendVerificationEmail({
 	email,
 	url,
 }: VerificationEmail): Promise<void> {
-	await emailSender().send({ to: email, ...buildVerificationEmail({ url }) });
+	await emailSender().send({
+		to: verifiedRecipient(email),
+		...buildVerificationEmail({ url }),
+	});
 }
 
 export interface ResetPasswordEmail {
@@ -124,5 +141,8 @@ export async function sendResetPasswordEmail({
 	email,
 	url,
 }: ResetPasswordEmail): Promise<void> {
-	await emailSender().send({ to: email, ...buildResetPasswordEmail({ url }) });
+	await emailSender().send({
+		to: verifiedRecipient(email),
+		...buildResetPasswordEmail({ url }),
+	});
 }

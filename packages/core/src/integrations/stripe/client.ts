@@ -38,9 +38,14 @@ export async function resolvePromotionCode(
 	stripe: Stripe,
 	code: string,
 ): Promise<AppliedDiscountSnapshot | null> {
+	const normalizedCode = code.trim();
+	if (!/^[A-Za-z0-9-]{1,100}$/.test(normalizedCode)) {
+		return null;
+	}
+
 	const promotionCodes = await stripe.promotionCodes.list({
 		active: true,
-		code,
+		code: normalizedCode,
 		expand: ["data.promotion.coupon"],
 		limit: 1,
 	});
@@ -53,6 +58,15 @@ export async function resolvePromotionCode(
 	const coupon = promotionCode.promotion?.coupon;
 	// Unexpanded (string id) or missing coupon means we cannot trust the value.
 	if (!coupon || typeof coupon === "string" || !coupon.valid) {
+		return null;
+	}
+
+	const restrictions = promotionCode.restrictions;
+	if (
+		promotionCode.customer ||
+		restrictions?.first_time_transaction ||
+		restrictions?.minimum_amount != null
+	) {
 		return null;
 	}
 

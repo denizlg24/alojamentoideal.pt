@@ -38,7 +38,8 @@ CREATE TABLE "accommodation_quote_snapshots" (
 	"subtotal_minor" bigint NOT NULL,
 	"tax_minor" bigint DEFAULT 0 NOT NULL,
 	"total_minor" bigint NOT NULL,
-	"validation_status" text DEFAULT 'valid' NOT NULL
+	"validation_status" text DEFAULT 'valid' NOT NULL,
+	CONSTRAINT "accommodation_quote_snapshots_validation_status_check" CHECK ("validation_status" IN ('valid', 'unavailable', 'provider_error'))
 );
 --> statement-breakpoint
 CREATE TABLE "api_idempotency_keys" (
@@ -50,7 +51,8 @@ CREATE TABLE "api_idempotency_keys" (
 	"response_snapshot" jsonb,
 	"scope" text NOT NULL,
 	"status" text DEFAULT 'in_progress' NOT NULL,
-	"updated_at" timestamp with time zone DEFAULT now() NOT NULL
+	"updated_at" timestamp with time zone DEFAULT now() NOT NULL,
+	CONSTRAINT "api_idempotency_keys_status_check" CHECK ("status" IN ('in_progress', 'completed', 'failed'))
 );
 --> statement-breakpoint
 CREATE TABLE "carts" (
@@ -66,7 +68,8 @@ CREATE TABLE "carts" (
 	"subtotal_minor" bigint DEFAULT 0 NOT NULL,
 	"tax_minor" bigint DEFAULT 0 NOT NULL,
 	"total_minor" bigint DEFAULT 0 NOT NULL,
-	"updated_at" timestamp with time zone DEFAULT now() NOT NULL
+	"updated_at" timestamp with time zone DEFAULT now() NOT NULL,
+	CONSTRAINT "carts_status_check" CHECK ("status" IN ('draft', 'converted', 'expired'))
 );
 --> statement-breakpoint
 CREATE TABLE "cart_items" (
@@ -79,7 +82,9 @@ CREATE TABLE "cart_items" (
 	"removed_at" timestamp with time zone,
 	"status" text DEFAULT 'active' NOT NULL,
 	"type" text DEFAULT 'accommodation' NOT NULL,
-	"updated_at" timestamp with time zone DEFAULT now() NOT NULL
+	"updated_at" timestamp with time zone DEFAULT now() NOT NULL,
+	CONSTRAINT "cart_items_status_check" CHECK ("status" IN ('active', 'removed')),
+	CONSTRAINT "cart_items_type_check" CHECK ("type" IN ('accommodation', 'activity'))
 );
 --> statement-breakpoint
 CREATE TABLE "orders" (
@@ -100,7 +105,8 @@ CREATE TABLE "orders" (
 	"subtotal_minor" bigint NOT NULL,
 	"tax_minor" bigint DEFAULT 0 NOT NULL,
 	"total_minor" bigint NOT NULL,
-	"updated_at" timestamp with time zone DEFAULT now() NOT NULL
+	"updated_at" timestamp with time zone DEFAULT now() NOT NULL,
+	CONSTRAINT "orders_status_check" CHECK ("status" IN ('draft', 'pending', 'confirmed', 'cancelled', 'failed'))
 );
 --> statement-breakpoint
 CREATE TABLE "order_contacts" (
@@ -134,7 +140,9 @@ CREATE TABLE "order_items" (
 	"title_snapshot" text NOT NULL,
 	"total_minor" bigint NOT NULL,
 	"type" text NOT NULL,
-	"updated_at" timestamp with time zone DEFAULT now() NOT NULL
+	"updated_at" timestamp with time zone DEFAULT now() NOT NULL,
+	CONSTRAINT "order_items_status_check" CHECK ("status" IN ('draft', 'pending', 'confirmed', 'cancelled', 'failed')),
+	CONSTRAINT "order_items_type_check" CHECK ("type" IN ('accommodation', 'activity'))
 );
 --> statement-breakpoint
 CREATE TABLE "order_item_charges" (
@@ -155,6 +163,7 @@ CREATE TABLE "order_item_charges" (
 );
 --> statement-breakpoint
 ALTER TABLE "accommodation_item_details" ADD CONSTRAINT "accommodation_item_details_order_item_id_order_items_id_fk" FOREIGN KEY ("order_item_id") REFERENCES "public"."order_items"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "carts" ADD CONSTRAINT "carts_converted_order_id_orders_id_fk" FOREIGN KEY ("converted_order_id") REFERENCES "public"."orders"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "cart_items" ADD CONSTRAINT "cart_items_cart_id_carts_id_fk" FOREIGN KEY ("cart_id") REFERENCES "public"."carts"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "cart_items" ADD CONSTRAINT "cart_items_quote_snapshot_id_accommodation_quote_snapshots_id_fk" FOREIGN KEY ("quote_snapshot_id") REFERENCES "public"."accommodation_quote_snapshots"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "orders" ADD CONSTRAINT "orders_cart_id_carts_id_fk" FOREIGN KEY ("cart_id") REFERENCES "public"."carts"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint

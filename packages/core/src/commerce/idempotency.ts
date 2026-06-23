@@ -16,11 +16,32 @@ export function canonicalJson(value: unknown): string {
 
 function canonicalJsonValue(value: unknown, seen: WeakSet<object>): string {
 	if (value === undefined) {
-		return '"__undefined__"';
+		throw new TypeError(
+			"Idempotency payload must be JSON-serializable; undefined is not allowed",
+		);
 	}
 
-	if (value === null || typeof value !== "object") {
+	if (
+		value === null ||
+		typeof value === "string" ||
+		typeof value === "boolean"
+	) {
 		return JSON.stringify(value);
+	}
+
+	if (typeof value === "number") {
+		if (!Number.isFinite(value)) {
+			throw new TypeError(
+				"Idempotency payload must be JSON-serializable; non-finite numbers are not allowed",
+			);
+		}
+		return JSON.stringify(value);
+	}
+
+	if (typeof value !== "object") {
+		throw new TypeError(
+			"Idempotency payload must be JSON-serializable; unsupported values are not allowed",
+		);
 	}
 
 	if (Array.isArray(value)) {
@@ -28,11 +49,24 @@ function canonicalJsonValue(value: unknown, seen: WeakSet<object>): string {
 			throw new TypeError("Cannot canonicalize circular idempotency payload");
 		}
 		seen.add(value);
-		const result = `[${value
-			.map((item) => canonicalJsonValue(item, seen))
-			.join(",")}]`;
+		const result = `[${Array.from(value, (item) =>
+			canonicalJsonValue(item, seen),
+		).join(",")}]`;
 		seen.delete(value);
 		return result;
+	}
+
+	const proto = Object.getPrototypeOf(value);
+	if (proto !== Object.prototype && proto !== null) {
+		throw new TypeError(
+			"Idempotency payload must contain only plain objects and arrays",
+		);
+	}
+
+	if (Object.getOwnPropertySymbols(value).length > 0) {
+		throw new TypeError(
+			"Idempotency payload must use string-keyed plain objects",
+		);
 	}
 
 	const record = value as Record<string, unknown>;

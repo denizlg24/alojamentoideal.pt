@@ -1,5 +1,9 @@
 import { describe, expect, test } from "bun:test";
-import { buildDraftOrderRows, generatePublicOrderReference } from "./orders";
+import {
+	allocateDiscountByHousingBase,
+	buildDraftOrderRows,
+	generatePublicOrderReference,
+} from "./orders";
 import type {
 	DraftOrderContactInput,
 	ListingDisplaySnapshot,
@@ -327,6 +331,16 @@ describe("generatePublicOrderReference", () => {
 			Array.from({ length: 100 }, () => generatePublicOrderReference(now)),
 		);
 		expect(references.size).toBe(100);
+	});
+});
+
+describe("allocateDiscountByHousingBase", () => {
+	test("keeps the final allocation non-negative when shares have fractions", () => {
+		const allocations = allocateDiscountByHousingBase([1, 1, 1], 2);
+
+		expect(allocations).toEqual([0, 0, 2]);
+		expect(allocations.reduce((sum, amount) => sum + amount, 0)).toBe(2);
+		expect(allocations.every((amount) => amount >= 0)).toBe(true);
 	});
 });
 

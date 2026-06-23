@@ -55,6 +55,15 @@ describe("commerce request parsers", () => {
 		expect(parsed.success).toBe(false);
 	});
 
+	test("rejects discount codes with spaces or punctuation", () => {
+		const parsed = parseApplyDiscountBody({
+			code: "SAVE 10!",
+			idempotencyKey: "discount-123",
+		});
+
+		expect(parsed.success).toBe(false);
+	});
+
 	test("accepts bodyless delete-cart-item requests", () => {
 		const parsed = parseDeleteCartItemBody(null);
 

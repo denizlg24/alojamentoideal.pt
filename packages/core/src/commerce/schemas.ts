@@ -53,7 +53,12 @@ const deleteCartItemSchema = z.object({
 
 const applyDiscountSchema = z.object({
 	// Stripe promotion codes: letters, digits and dashes, case-insensitive.
-	code: z.string().trim().min(1).max(64),
+	code: z
+		.string()
+		.trim()
+		.min(1)
+		.max(64)
+		.regex(/^[A-Za-z0-9-]+$/, "Use letters, numbers or dashes"),
 	idempotencyKey: idempotencyKey.optional(),
 });
 

@@ -15,7 +15,7 @@ import {
 	orderItem as orderItemTable,
 	order as orderTable,
 } from "@workspace/db";
-import { and, asc, eq, isNull, sql } from "drizzle-orm";
+import { and, asc, eq, gt, isNull, lte, sql } from "drizzle-orm";
 import { parseQuoteBody } from "../accommodations";
 import { CommerceError, invalidRequest } from "./errors";
 import { hashIdempotencyRequest, idempotencyExpiresAt } from "./idempotency";
@@ -88,6 +88,11 @@ interface ActiveItemInput {
 interface RevalidatedSnapshot {
 	itemId: string;
 	snapshot: NormalizedAccommodationQuoteSnapshot;
+}
+
+interface RevalidatedCartDiscount {
+	applied: AppliedDiscountSnapshot | null;
+	resolved: AppliedDiscountSnapshot | null;
 }
 
 interface CartJoinedRow {
@@ -263,7 +268,7 @@ export class CommerceService {
 
 		return this.#db.transaction(async (tx) => {
 			const now = new Date();
-			await this.#ensureMutableCart(tx, cartId, now);
+			await this.#ensureMutableCart(tx, cartId, now, { forUpdate: true });
 			await tx
 				.update(cartTable)
 				.set({ appliedDiscount: null, discountMinor: 0, updatedAt: now })
@@ -486,7 +491,7 @@ export class CommerceService {
 		snapshot: NormalizedAccommodationQuoteSnapshot,
 	): Promise<CartMutationResponse> {
 		const now = new Date();
-		await this.#ensureMutableCart(tx, cartId, now);
+		await this.#ensureMutableCart(tx, cartId, now, { forUpdate: true });
 		await this.#insertQuoteSnapshot(tx, snapshot);
 
 		const existing = input.clientMutationId
@@ -533,7 +538,7 @@ export class CommerceService {
 		snapshot: NormalizedAccommodationQuoteSnapshot,
 	): Promise<CartMutationResponse> {
 		const now = new Date();
-		await this.#ensureMutableCart(tx, cartId, now);
+		await this.#ensureMutableCart(tx, cartId, now, { forUpdate: true });
 		const [item] = await tx
 			.select({ id: cartItemTable.id, status: cartItemTable.status })
 			.from(cartItemTable)
@@ -562,7 +567,7 @@ export class CommerceService {
 		itemId: string,
 	): Promise<CartResponse> {
 		const now = new Date();
-		await this.#ensureMutableCart(tx, cartId, now);
+		await this.#ensureMutableCart(tx, cartId, now, { forUpdate: true });
 		const [item] = await tx
 			.select({ id: cartItemTable.id, status: cartItemTable.status })
 			.from(cartItemTable)
@@ -592,7 +597,7 @@ export class CommerceService {
 		discount: AppliedDiscountSnapshot,
 	): Promise<CartResponse> {
 		const now = new Date();
-		await this.#ensureMutableCart(tx, cartId, now);
+		await this.#ensureMutableCart(tx, cartId, now, { forUpdate: true });
 
 		const [cartRow] = await tx
 			.select({ currency: cartTable.currency })
@@ -630,7 +635,7 @@ export class CommerceService {
 	 */
 	async #revalidateCartDiscount(
 		cartId: string,
-	): Promise<AppliedDiscountSnapshot | null> {
+	): Promise<RevalidatedCartDiscount> {
 		const [row] = await this.#db
 			.select({ appliedDiscount: cartTable.appliedDiscount })
 			.from(cartTable)
@@ -639,12 +644,12 @@ export class CommerceService {
 
 		const applied = row?.appliedDiscount;
 		if (!applied) {
-			return null;
+			return { applied: null, resolved: null };
 		}
 
 		// Without a promotion code we cannot re-resolve; trust the stored snapshot.
 		if (!applied.promotionCode) {
-			return applied;
+			return { applied, resolved: applied };
 		}
 
 		const resolved = await this.#resolveDiscount(applied.promotionCode);
@@ -656,7 +661,7 @@ export class CommerceService {
 			);
 		}
 
-		return resolved;
+		return { applied, resolved };
 	}
 
 	async #createDraftOrder(
@@ -664,10 +669,15 @@ export class CommerceService {
 		input: DraftOrderBody,
 		snapshots: RevalidatedSnapshot[],
 		owner: CartOwner,
-		discount: AppliedDiscountSnapshot | null,
+		revalidatedDiscount: RevalidatedCartDiscount,
 	): Promise<DraftOrderResponse> {
 		const now = new Date();
 		await this.#ensureMutableCart(tx, input.cartId, now, { forUpdate: true });
+		await this.#assertCartDiscountUnchanged(
+			tx,
+			input.cartId,
+			revalidatedDiscount.applied,
+		);
 		await this.#assertActiveItemSet(
 			tx,
 			input.cartId,
@@ -709,6 +719,7 @@ export class CommerceService {
 		const housingBases = orderSources.map(
 			(source) => source.quote.housingFeeMinor,
 		);
+		const discount = revalidatedDiscount.resolved;
 		const housingBaseTotal = housingBases.reduce((sum, base) => sum + base, 0);
 		const discountMinor = discount
 			? computeDiscountMinor(discount, housingBaseTotal, totals.currency)
@@ -1033,6 +1044,26 @@ export class CommerceService {
 			expectedItemIds.some((itemId) => !actual.has(itemId));
 
 		if (drifted) {
+			throw new CommerceError(
+				"cart_changed",
+				"Your cart changed; please review it and try again.",
+				409,
+			);
+		}
+	}
+
+	async #assertCartDiscountUnchanged(
+		tx: Transaction,
+		cartId: string,
+		expected: AppliedDiscountSnapshot | null,
+	): Promise<void> {
+		const [row] = await tx
+			.select({ appliedDiscount: cartTable.appliedDiscount })
+			.from(cartTable)
+			.where(eq(cartTable.id, cartId))
+			.limit(1);
+
+		if (!discountsEqual(row?.appliedDiscount ?? null, expected)) {
 			throw new CommerceError(
 				"cart_changed",
 				"Your cart changed; please review it and try again.",
@@ -1425,9 +1456,10 @@ export class CommerceService {
 		scope: string,
 		key: string,
 		payload: unknown,
+		db: DbExecutor = this.#db,
 	): Promise<T | null> {
 		const requestHash = hashIdempotencyRequest(payload);
-		const [existing] = await this.#db
+		const [existing] = await db
 			.select({
 				requestHash: apiIdempotencyKeyTable.requestHash,
 				responseSnapshot: apiIdempotencyKeyTable.responseSnapshot,
@@ -1438,6 +1470,7 @@ export class CommerceService {
 				and(
 					eq(apiIdempotencyKeyTable.scope, scope),
 					eq(apiIdempotencyKeyTable.key, key),
+					gt(apiIdempotencyKeyTable.expiresAt, new Date()),
 				),
 			)
 			.limit(1);
@@ -1480,6 +1513,16 @@ export class CommerceService {
 
 		return this.#db.transaction(async (tx) => {
 			const now = new Date();
+			await tx
+				.delete(apiIdempotencyKeyTable)
+				.where(
+					and(
+						eq(apiIdempotencyKeyTable.scope, scope),
+						eq(apiIdempotencyKeyTable.key, key),
+						lte(apiIdempotencyKeyTable.expiresAt, now),
+					),
+				);
+
 			const [inserted] = await tx
 				.insert(apiIdempotencyKeyTable)
 				.values({
@@ -1500,6 +1543,7 @@ export class CommerceService {
 					scope,
 					key,
 					payload,
+					tx,
 				);
 				if (replay) {
 					return replay;
@@ -1533,6 +1577,25 @@ function constantTimeEquals(a: string, b: string): boolean {
 		return false;
 	}
 	return timingSafeEqual(aBuffer, bBuffer);
+}
+
+function discountsEqual(
+	first: AppliedDiscountSnapshot | null,
+	second: AppliedDiscountSnapshot | null,
+): boolean {
+	if (!first || !second) {
+		return first === second;
+	}
+
+	return (
+		first.amountMinor === second.amountMinor &&
+		first.couponId === second.couponId &&
+		first.currency === second.currency &&
+		first.percentBasisPoints === second.percentBasisPoints &&
+		first.promotionCode === second.promotionCode &&
+		first.source === second.source &&
+		first.type === second.type
+	);
 }
 
 /**
