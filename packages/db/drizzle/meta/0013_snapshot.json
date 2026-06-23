@@ -2972,6 +2972,10 @@
           "name": "order_item_charges_tax_minor_nonneg",
           "value": "\"order_item_charges\".\"tax_minor\" >= 0"
         },
+        "order_item_charges_kind_check": {
+          "name": "order_item_charges_kind_check",
+          "value": "\"order_item_charges\".\"kind\" in ('accommodation', 'tax', 'discount', 'fee')"
+        },
         "order_item_charges_signed_amounts_check": {
           "name": "order_item_charges_signed_amounts_check",
           "value": "(\n\t\t\t\t\"order_item_charges\".\"kind\" = 'discount'\n\t\t\t\tand \"order_item_charges\".\"gross_minor\" <= 0\n\t\t\t\tand \"order_item_charges\".\"net_minor\" <= 0\n\t\t\t\tand \"order_item_charges\".\"unit_net_minor\" <= 0\n\t\t\t) or (\n\t\t\t\t\"order_item_charges\".\"kind\" <> 'discount'\n\t\t\t\tand \"order_item_charges\".\"gross_minor\" >= 0\n\t\t\t\tand \"order_item_charges\".\"net_minor\" >= 0\n\t\t\t\tand \"order_item_charges\".\"unit_net_minor\" >= 0\n\t\t\t)"

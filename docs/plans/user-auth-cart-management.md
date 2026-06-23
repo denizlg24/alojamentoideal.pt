@@ -53,15 +53,25 @@ The `user` table is defined earlier in the same file.
 
 Canonical exported type in `@workspace/db`:
 ```ts
-export interface AppliedDiscountSnapshot {
-  source: "stripe";
-  couponId: string;
-  promotionCode: string | null;   // the code the customer entered
-  type: "percentage" | "fixed";
-  percentBasisPoints: number | null; // 1000 = 10%
-  amountMinor: number | null;        // fixed coupons; in cart currency
-  currency: string | null;
-}
+export type AppliedDiscountSnapshot =
+  | {
+      source: "stripe";
+      couponId: string;
+      promotionCode: string | null; // the code the customer entered
+      type: "percentage";
+      percentBasisPoints: number; // 1000 = 10%
+      amountMinor: null;
+      currency: null;
+    }
+  | {
+      source: "stripe";
+      couponId: string;
+      promotionCode: string | null; // the code the customer entered
+      type: "fixed";
+      percentBasisPoints: null;
+      amountMinor: number; // fixed coupons; in cart currency
+      currency: string;
+    };
 ```
 
 Generate with `npm run db:generate`; do not hand-author the SQL. All columns nullable → non-breaking.

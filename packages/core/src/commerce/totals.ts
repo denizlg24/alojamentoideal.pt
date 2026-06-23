@@ -79,16 +79,12 @@ export function computeDiscountMinor(
 
 	let raw: number;
 	if (discount.type === "percentage") {
-		const basisPoints = discount.percentBasisPoints ?? 0;
-		raw = Math.round((housingBaseMinor * basisPoints) / 10000);
+		raw = Math.round((housingBaseMinor * discount.percentBasisPoints) / 10000);
 	} else {
-		if (
-			discount.currency &&
-			discount.currency.toUpperCase() !== currency.toUpperCase()
-		) {
+		if (discount.currency.toUpperCase() !== currency.toUpperCase()) {
 			return 0;
 		}
-		raw = discount.amountMinor ?? 0;
+		raw = discount.amountMinor;
 	}
 
 	return Math.max(0, Math.min(raw, housingBaseMinor));

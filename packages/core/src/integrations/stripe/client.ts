@@ -46,7 +46,7 @@ export async function resolvePromotionCode(
 	const promotionCodes = await stripe.promotionCodes.list({
 		active: true,
 		code: normalizedCode,
-		expand: ["data.promotion.coupon"],
+		expand: ["data.promotion.coupon", "data.promotion.coupon.applies_to"],
 		limit: 1,
 	});
 
@@ -65,7 +65,8 @@ export async function resolvePromotionCode(
 	if (
 		promotionCode.customer ||
 		restrictions?.first_time_transaction ||
-		restrictions?.minimum_amount != null
+		restrictions?.minimum_amount != null ||
+		(coupon.applies_to?.products?.length ?? 0) > 0
 	) {
 		return null;
 	}
@@ -82,11 +83,11 @@ export async function resolvePromotionCode(
 		};
 	}
 
-	if (coupon.amount_off != null) {
+	if (coupon.amount_off != null && coupon.currency) {
 		return {
 			amountMinor: coupon.amount_off,
 			couponId: coupon.id,
-			currency: coupon.currency?.toUpperCase() ?? null,
+			currency: coupon.currency.toUpperCase(),
 			percentBasisPoints: null,
 			promotionCode: promotionCode.code,
 			source: "stripe",

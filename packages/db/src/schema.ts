@@ -514,18 +514,29 @@ export interface OrderBillingAddressSnapshot {
  * captures the authoritative server-side resolution at apply time so totals can
  * be recomputed without re-hitting Stripe on every mutation.
  */
-export interface AppliedDiscountSnapshot {
-	source: "stripe";
-	couponId: string;
-	/** The promotion code the customer entered (null for bare coupon ids). */
-	promotionCode: string | null;
-	type: "percentage" | "fixed";
-	/** Percentage coupons only. 1000 = 10%. */
-	percentBasisPoints: number | null;
-	/** Fixed coupons only, in cart currency minor units. */
-	amountMinor: number | null;
-	currency: string | null;
-}
+export type AppliedDiscountSnapshot =
+	| {
+			source: "stripe";
+			couponId: string;
+			/** The promotion code the customer entered (null for bare coupon ids). */
+			promotionCode: string | null;
+			type: "percentage";
+			/** 1000 = 10%. */
+			percentBasisPoints: number;
+			amountMinor: null;
+			currency: null;
+	  }
+	| {
+			source: "stripe";
+			couponId: string;
+			/** The promotion code the customer entered (null for bare coupon ids). */
+			promotionCode: string | null;
+			type: "fixed";
+			percentBasisPoints: null;
+			/** In cart currency minor units. */
+			amountMinor: number;
+			currency: string;
+	  };
 
 export const cart = pgTable(
 	"carts",
@@ -899,6 +910,10 @@ export const orderItemCharge = pgTable(
 		// gross/net/unit_net are intentionally signed: discount charge rows store
 		// negative amounts (see buildDiscountChargeRow). Only tax is non-negative.
 		check("order_item_charges_tax_minor_nonneg", sql`${table.taxMinor} >= 0`),
+		check(
+			"order_item_charges_kind_check",
+			sql`${table.kind} in ('accommodation', 'tax', 'discount', 'fee')`,
+		),
 		check(
 			"order_item_charges_signed_amounts_check",
 			sql`(
