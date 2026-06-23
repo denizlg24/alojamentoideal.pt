@@ -5,6 +5,7 @@ import {
 	parseCreateCartBody,
 	parseDeleteCartItemBody,
 	parseDraftOrderBody,
+	parseOrderContactBody,
 	parseUpdateCartItemBody,
 } from "./schemas";
 
@@ -188,6 +189,30 @@ describe("commerce request parsers", () => {
 		}
 		expect(parsed.data.contact.email).toBe("guest@example.com");
 		expect(parsed.data.contact.phoneE164).toBe("+351910000000");
+	});
+
+	test("parses a standalone contact update and normalizes it", () => {
+		const parsed = parseOrderContactBody({
+			email: "GUEST@EXAMPLE.COM",
+			name: "Guest Name",
+			phone: "+351910000000",
+		});
+
+		expect(parsed.success).toBe(true);
+		if (!parsed.success) {
+			throw parsed.error;
+		}
+		expect(parsed.data.email).toBe("guest@example.com");
+		expect(parsed.data.phoneE164).toBe("+351910000000");
+	});
+
+	test("rejects a contact update without a phone", () => {
+		const parsed = parseOrderContactBody({
+			email: "guest@example.com",
+			name: "Guest Name",
+		});
+
+		expect(parsed.success).toBe(false);
 	});
 
 	test("accepts draft orders reconstructed from flat contact fields", () => {

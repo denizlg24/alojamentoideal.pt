@@ -1,0 +1,21 @@
+{
+	"name": "@workspace/emails",
+	"private": true,
+	"type": "module",
+	"scripts": {
+		"build": "maizzle build && bun run scripts/generate-templates.ts",
+		"postinstall": "maizzle prepare",
+		"typecheck": "tsc --noEmit"
+	},
+	"exports": {
+		".": "./generated/templates.ts",
+		"./package.json": "./package.json"
+	},
+	"dependencies": {
+		"@maizzle/framework": "latest"
+	},
+	"devDependencies": {
+		"@types/node": "^26",
+		"typescript": "^6"
+	}
+}

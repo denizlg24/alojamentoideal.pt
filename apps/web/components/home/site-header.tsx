@@ -10,11 +10,12 @@ import {
 	SheetTrigger,
 } from "@workspace/ui/components/sheet";
 import { cn } from "@workspace/ui/lib/utils";
-import { KeyRound, Menu, UserRound } from "lucide-react";
+import { KeyRound, Menu } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import logo from "@/public/alojamento-ideal-logo.png";
+import { MobileAuthSection, UserMenu } from "./user-menu";
 
 const NAV_ITEMS = [
 	{ href: "/homes", label: "Homes" },
@@ -78,21 +79,7 @@ export function SiteHeader({ solid = false }: { solid?: boolean }) {
 						</Link>
 					</Button>
 
-					<Button
-						asChild
-						variant="ghost"
-						size="icon"
-						className={cn(
-							"rounded-full",
-							opaque
-								? "text-foreground/80 hover:text-foreground"
-								: "text-white hover:bg-white/15 hover:text-white",
-						)}
-					>
-						<Link href="/sign-in" aria-label="Sign in">
-							<UserRound className="size-5" />
-						</Link>
-					</Button>
+					<UserMenu opaque={opaque} />
 				</nav>
 
 				<Sheet>
@@ -126,14 +113,7 @@ export function SiteHeader({ solid = false }: { solid?: boolean }) {
 									</Link>
 								</SheetClose>
 							))}
-							<SheetClose asChild>
-								<Link
-									href="/sign-in"
-									className="rounded-md px-3 py-2 font-medium text-foreground/90 transition-colors hover:bg-accent hover:text-foreground"
-								>
-									Sign in
-								</Link>
-							</SheetClose>
+							<MobileAuthSection />
 							<SheetClose asChild>
 								<Button asChild className="mt-2 rounded-full">
 									<Link href="/owner">

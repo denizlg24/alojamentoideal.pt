@@ -62,6 +62,14 @@ const applyDiscountSchema = z.object({
 	idempotencyKey: idempotencyKey.optional(),
 });
 
+const createPaymentIntentSchema = z.object({
+	cartId: z.string().uuid(),
+	idempotencyKey: idempotencyKey.optional(),
+	// Optional: when absent, the route resolves the payable order from the cart
+	// (used to resume a converted cart whose order id was not retained client-side).
+	orderId: z.string().uuid().optional(),
+});
+
 const addressLine = z.string().trim().min(1).max(200);
 const billingAddressSchema: z.ZodType<OrderBillingAddressSnapshot> = z
 	.object({
@@ -177,6 +185,12 @@ export interface DraftOrderBody {
 	idempotencyKey?: string;
 }
 
+export interface CreatePaymentIntentBody {
+	cartId: string;
+	idempotencyKey?: string;
+	orderId?: string;
+}
+
 export function parseCreateCartBody(
 	body: unknown,
 ): CommerceParseResult<CreateCartBody> {
@@ -222,6 +236,22 @@ export function parseApplyDiscountBody(
 	body: unknown,
 ): CommerceParseResult<ApplyDiscountBody> {
 	return applyDiscountSchema.safeParse(body);
+}
+
+export function parseCreatePaymentIntentBody(
+	body: unknown,
+): CommerceParseResult<CreatePaymentIntentBody> {
+	return createPaymentIntentSchema.safeParse(body);
+}
+
+/**
+ * Parses a standalone contact update (the same nested contact shape the
+ * draft-order route accepts under `contact`) into a normalized snapshot.
+ */
+export function parseOrderContactBody(
+	body: unknown,
+): CommerceParseResult<DraftOrderContactInput> {
+	return rawContactSchema.safeParse(body);
 }
 
 export function parseDraftOrderBody(

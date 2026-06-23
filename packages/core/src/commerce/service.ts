@@ -15,7 +15,7 @@ import {
 	orderItem as orderItemTable,
 	order as orderTable,
 } from "@workspace/db";
-import { and, asc, eq, gt, isNull, lte, sql } from "drizzle-orm";
+import { and, asc, eq, gt, inArray, isNull, lte, sql } from "drizzle-orm";
 import { parseQuoteBody } from "../accommodations";
 import { CommerceError, invalidRequest } from "./errors";
 import { hashIdempotencyRequest, idempotencyExpiresAt } from "./idempotency";
@@ -26,6 +26,15 @@ import {
 	buildDraftOrderRows,
 	generatePublicOrderReference,
 } from "./orders";
+import {
+	type MarkOrderPaidResult,
+	type MarkOrderPaymentFailedResult,
+	type OrderPaymentFailureInput,
+	type OrderStatusRecord,
+	type PayableOrder,
+	type PaymentAmount,
+	toOrderBookingStatus,
+} from "./payments";
 import type {
 	AddCartItemBody,
 	ApplyDiscountBody,
@@ -45,6 +54,7 @@ import type {
 	CartValidationResponse,
 	CommerceQuoteDto,
 	CommerceQuoteInput,
+	DraftOrderContactInput,
 	DraftOrderResponse,
 	ListingDisplaySnapshot,
 	NormalizedAccommodationQuoteSnapshot,
@@ -176,6 +186,447 @@ export class CommerceService {
 	async getCart(cartId: string, owner: CartOwner): Promise<CartResponse> {
 		await this.#assertCartAccess(this.#db, cartId, owner);
 		return { cart: await this.#cartDto(this.#db, cartId, new Date()) };
+	}
+
+	/**
+	 * Re-reads a draft order for payment, authorizing the caller the same way
+	 * carts are (the linked user, or the anonymous cart's secret token). The
+	 * persisted order is the only authoritative source of the payable amount;
+	 * `DraftOrderResponse` deliberately omits it. Throws when the order is
+	 * missing, not owned, no longer a draft, or its checkout window has lapsed.
+	 */
+	async getPayableOrder(
+		orderId: string,
+		owner: CartOwner,
+	): Promise<PayableOrder> {
+		const [row] = await this.#db
+			.select({
+				cartId: orderTable.cartId,
+				cartToken: cartTable.cartToken,
+				checkoutExpiresAt: orderTable.checkoutExpiresAt,
+				currency: orderTable.currency,
+				id: orderTable.id,
+				publicReference: orderTable.publicReference,
+				status: orderTable.status,
+				stripePaymentIntentId: orderTable.stripePaymentIntentId,
+				totalMinor: orderTable.totalMinor,
+				userId: orderTable.userId,
+			})
+			.from(orderTable)
+			.leftJoin(cartTable, eq(cartTable.id, orderTable.cartId))
+			.where(eq(orderTable.id, orderId))
+			.limit(1);
+
+		if (
+			!row ||
+			!isOrderAccessGranted(
+				{ cartToken: row.cartToken, userId: row.userId },
+				owner,
+			)
+		) {
+			throw new CommerceError("order_not_found", "Order not found.", 404);
+		}
+
+		if (row.status !== "draft") {
+			throw new CommerceError(
+				"order_not_payable",
+				"This order can no longer be paid.",
+				409,
+			);
+		}
+
+		if (
+			row.checkoutExpiresAt &&
+			row.checkoutExpiresAt.getTime() <= Date.now()
+		) {
+			throw new CommerceError(
+				"order_expired",
+				"This checkout session has expired.",
+				410,
+			);
+		}
+
+		return {
+			cartId: row.cartId,
+			checkoutExpiresAt: row.checkoutExpiresAt
+				? row.checkoutExpiresAt.toISOString()
+				: null,
+			currency: row.currency,
+			orderId: row.id,
+			publicReference: row.publicReference,
+			status: toOrderBookingStatus(row.status),
+			stripePaymentIntentId: row.stripePaymentIntentId,
+			totalMinor: row.totalMinor,
+		};
+	}
+
+	/**
+	 * Resolves the payable draft order that a cart was converted into, so a guest
+	 * who only kept the cart id (e.g. after a refresh) can resume payment without
+	 * the order id. Access is authorized against the cart exactly like `getCart`;
+	 * the delegated `getPayableOrder` re-checks ownership and payability. A cart
+	 * that has not been converted yet reports no payable order.
+	 */
+	async getPayableOrderForCart(
+		cartId: string,
+		owner: CartOwner,
+	): Promise<PayableOrder> {
+		await this.#assertCartAccess(this.#db, cartId, owner);
+
+		const [row] = await this.#db
+			.select({
+				convertedOrderId: cartTable.convertedOrderId,
+				status: cartTable.status,
+			})
+			.from(cartTable)
+			.where(eq(cartTable.id, cartId))
+			.limit(1);
+
+		if (row?.status !== "converted" || !row.convertedOrderId) {
+			throw new CommerceError("order_not_found", "Order not found.", 404);
+		}
+
+		return this.getPayableOrder(row.convertedOrderId, owner);
+	}
+
+	/**
+	 * Owner-scoped read of a draft order's contact snapshot, used to repaint the
+	 * checkout contact form after a reload (the contact is never kept in browser
+	 * storage). Authorized the same way as `readOrderStatus`.
+	 */
+	async getOrderContact(
+		publicReference: string,
+		owner: CartOwner,
+	): Promise<DraftOrderContactInput> {
+		const [row] = await this.#db
+			.select({
+				billingAddress: orderContactTable.billingAddress,
+				cartToken: cartTable.cartToken,
+				companyName: orderContactTable.companyName,
+				email: orderContactTable.email,
+				isCompany: orderContactTable.isCompany,
+				name: orderContactTable.name,
+				notes: orderContactTable.notes,
+				phoneE164: orderContactTable.phoneE164,
+				taxNumber: orderContactTable.taxNumber,
+				userId: orderTable.userId,
+			})
+			.from(orderTable)
+			.leftJoin(cartTable, eq(cartTable.id, orderTable.cartId))
+			.leftJoin(orderContactTable, eq(orderContactTable.orderId, orderTable.id))
+			.where(eq(orderTable.publicReference, publicReference))
+			.limit(1);
+
+		if (
+			!row ||
+			!isOrderAccessGranted(
+				{ cartToken: row.cartToken, userId: row.userId },
+				owner,
+			) ||
+			row.email === null ||
+			row.name === null ||
+			row.phoneE164 === null
+		) {
+			throw new CommerceError("order_not_found", "Order not found.", 404);
+		}
+
+		return {
+			billingAddress: row.billingAddress ?? {},
+			companyName: row.companyName,
+			email: row.email,
+			isCompany: row.isCompany ?? false,
+			name: row.name,
+			notes: row.notes,
+			phoneE164: row.phoneE164,
+			taxNumber: row.taxNumber,
+		};
+	}
+
+	/**
+	 * Updates a draft order's contact snapshot in place. The contact does not
+	 * affect the order total, so the PaymentIntent stays valid. Only a `draft`
+	 * order may be edited; once paid/failed the contact is frozen.
+	 */
+	async updateDraftOrderContact(
+		publicReference: string,
+		owner: CartOwner,
+		contact: DraftOrderContactInput,
+	): Promise<void> {
+		return this.#db.transaction(async (tx) => {
+			const [row] = await tx
+				.select({
+					cartToken: cartTable.cartToken,
+					id: orderTable.id,
+					status: orderTable.status,
+					userId: orderTable.userId,
+				})
+				.from(orderTable)
+				.leftJoin(cartTable, eq(cartTable.id, orderTable.cartId))
+				.where(eq(orderTable.publicReference, publicReference))
+				.limit(1);
+
+			if (
+				!row ||
+				!isOrderAccessGranted(
+					{ cartToken: row.cartToken, userId: row.userId },
+					owner,
+				)
+			) {
+				throw new CommerceError("order_not_found", "Order not found.", 404);
+			}
+
+			if (row.status !== "draft") {
+				throw new CommerceError(
+					"order_not_payable",
+					"This order can no longer be changed.",
+					409,
+				);
+			}
+
+			await tx
+				.update(orderContactTable)
+				.set({
+					billingAddress: contact.billingAddress,
+					companyName: contact.companyName,
+					email: contact.email,
+					isCompany: contact.isCompany,
+					name: contact.name,
+					notes: contact.notes,
+					phoneE164: contact.phoneE164,
+					taxNumber: contact.taxNumber,
+				})
+				.where(eq(orderContactTable.orderId, row.id));
+		});
+	}
+
+	/**
+	 * Links a Stripe PaymentIntent to its order. Guarded by `IS NULL` so an
+	 * idempotent retry (which yields the same intent id) cannot clobber an
+	 * existing link, and concurrent writers converge on a single row.
+	 */
+	async attachPaymentIntentId(
+		orderId: string,
+		paymentIntentId: string,
+	): Promise<void> {
+		await this.#db
+			.update(orderTable)
+			.set({ stripePaymentIntentId: paymentIntentId, updatedAt: new Date() })
+			.where(
+				and(
+					eq(orderTable.id, orderId),
+					isNull(orderTable.stripePaymentIntentId),
+				),
+			);
+	}
+
+	/**
+	 * Marks a draft/pending order as paid in response to a signature-verified
+	 * `payment_intent.succeeded` webhook. Before confirming, the captured amount
+	 * and currency are asserted against the persisted order total: a mismatch
+	 * (e.g. a re-quote between intent creation and capture, or tampering) returns
+	 * `amount_mismatch` and leaves the order unconfirmed for manual review rather
+	 * than silently confirming a wrong total. The guarded UPDATE is the
+	 * idempotency authority: a re-delivered event (or a racing worker) finds the
+	 * order already finalized and returns `already_finalized` without
+	 * re-confirming, so the caller sends exactly one confirmation email. There is
+	 * no owner check here because the trust boundary is Stripe's webhook
+	 * signature, not a session.
+	 */
+	async markOrderPaid(
+		orderId: string,
+		payment: PaymentAmount,
+	): Promise<MarkOrderPaidResult> {
+		return this.#db.transaction(async (tx) => {
+			const [order] = await tx
+				.select({
+					currency: orderTable.currency,
+					status: orderTable.status,
+					totalMinor: orderTable.totalMinor,
+				})
+				.from(orderTable)
+				.where(eq(orderTable.id, orderId))
+				.limit(1);
+
+			if (!order) {
+				return { outcome: "not_found" };
+			}
+			if (order.status !== "draft" && order.status !== "pending") {
+				return { outcome: "already_finalized" };
+			}
+			if (
+				payment.amountMinor !== order.totalMinor ||
+				payment.currency.toUpperCase() !== order.currency.toUpperCase()
+			) {
+				return {
+					expected: {
+						amountMinor: order.totalMinor,
+						currency: order.currency,
+					},
+					outcome: "amount_mismatch",
+					received: payment,
+				};
+			}
+
+			const [updated] = await tx
+				.update(orderTable)
+				.set({
+					amountPaidMinor: payment.amountMinor,
+					status: "confirmed",
+					updatedAt: new Date(),
+				})
+				.where(
+					and(
+						eq(orderTable.id, orderId),
+						inArray(orderTable.status, ["draft", "pending"]),
+					),
+				)
+				.returning({
+					currency: orderTable.currency,
+					publicReference: orderTable.publicReference,
+				});
+
+			// Lost the race to another finalizer between the read and the guarded
+			// update; the order is already settled.
+			if (!updated) {
+				return { outcome: "already_finalized" };
+			}
+
+			const [contact] = await tx
+				.select({
+					billingAddress: orderContactTable.billingAddress,
+					email: orderContactTable.email,
+					name: orderContactTable.name,
+					phoneE164: orderContactTable.phoneE164,
+				})
+				.from(orderContactTable)
+				.where(eq(orderContactTable.orderId, orderId))
+				.limit(1);
+
+			const [reservation] = await tx
+				.select({
+					checkIn: accommodationItemDetailTable.checkIn,
+					checkOut: accommodationItemDetailTable.checkOut,
+					guests: accommodationItemDetailTable.guests,
+					imageUrl: orderItemTable.imageUrlSnapshot,
+					title: orderItemTable.titleSnapshot,
+				})
+				.from(orderItemTable)
+				.innerJoin(
+					accommodationItemDetailTable,
+					eq(accommodationItemDetailTable.orderItemId, orderItemTable.id),
+				)
+				.where(eq(orderItemTable.orderId, orderId))
+				.orderBy(asc(orderItemTable.position))
+				.limit(1);
+
+			return {
+				confirmation: {
+					accommodationImage: reservation?.imageUrl ?? null,
+					accommodationTitle:
+						reservation?.title ?? "Your Alojamento Ideal stay",
+					amountPaidMinor: payment.amountMinor,
+					billingAddress: contact?.billingAddress ?? {},
+					checkIn: reservation?.checkIn ?? "To be confirmed",
+					checkOut: reservation?.checkOut ?? "To be confirmed",
+					contactPhone: contact?.phoneE164 ?? "",
+					currency: updated.currency,
+					// The contact is captured at draft creation, so a confirmed order
+					// always has one; fall back rather than risk an unhandled throw.
+					email: contact?.email ?? "",
+					guests: reservation?.guests ?? 0,
+					name: contact?.name ?? "",
+					publicReference: updated.publicReference,
+				},
+				outcome: "confirmed",
+			};
+		});
+	}
+
+	/**
+	 * Marks a draft/pending order as failed from a `payment_intent.payment_failed`
+	 * webhook, recording Stripe's failure code/detail. Idempotent the same way as
+	 * `markOrderPaid`: a re-delivery of an already-finalized order is a no-op.
+	 */
+	async markOrderPaymentFailed(
+		orderId: string,
+		failure: OrderPaymentFailureInput,
+	): Promise<MarkOrderPaymentFailedResult> {
+		const [updated] = await this.#db
+			.update(orderTable)
+			.set({
+				failureCode: failure.failureCode,
+				failureDetail: failure.failureDetail,
+				status: "failed",
+				updatedAt: new Date(),
+			})
+			.where(
+				and(
+					eq(orderTable.id, orderId),
+					inArray(orderTable.status, ["draft", "pending"]),
+				),
+			)
+			.returning({ id: orderTable.id });
+
+		if (updated) {
+			return { outcome: "failed" };
+		}
+
+		const [existing] = await this.#db
+			.select({ id: orderTable.id })
+			.from(orderTable)
+			.where(eq(orderTable.id, orderId))
+			.limit(1);
+		if (existing) {
+			return { outcome: "already_finalized" };
+		}
+		return { outcome: "not_found" };
+	}
+
+	/**
+	 * Owner-scoped read of an order's persisted payment/booking facts for the
+	 * completion page. Live PaymentIntent status is resolved by the route from
+	 * `stripePaymentIntentId`; this never trusts client-reported payment state.
+	 */
+	async readOrderStatus(
+		publicReference: string,
+		owner: CartOwner,
+	): Promise<OrderStatusRecord> {
+		const [row] = await this.#db
+			.select({
+				amountPaidMinor: orderTable.amountPaidMinor,
+				cartToken: cartTable.cartToken,
+				currency: orderTable.currency,
+				id: orderTable.id,
+				publicReference: orderTable.publicReference,
+				status: orderTable.status,
+				stripePaymentIntentId: orderTable.stripePaymentIntentId,
+				totalMinor: orderTable.totalMinor,
+				userId: orderTable.userId,
+			})
+			.from(orderTable)
+			.leftJoin(cartTable, eq(cartTable.id, orderTable.cartId))
+			.where(eq(orderTable.publicReference, publicReference))
+			.limit(1);
+
+		if (
+			!row ||
+			!isOrderAccessGranted(
+				{ cartToken: row.cartToken, userId: row.userId },
+				owner,
+			)
+		) {
+			throw new CommerceError("order_not_found", "Order not found.", 404);
+		}
+
+		return {
+			amountPaidMinor: row.amountPaidMinor,
+			bookingStatus: toOrderBookingStatus(row.status),
+			currency: row.currency,
+			orderId: row.id,
+			publicReference: row.publicReference,
+			stripePaymentIntentId: row.stripePaymentIntentId,
+			totalMinor: row.totalMinor,
+		};
 	}
 
 	/**
@@ -1613,6 +2064,25 @@ export function isCartAccessGranted(
 	return (
 		owner.cartToken !== null &&
 		constantTimeEquals(owner.cartToken, cart.cartToken)
+	);
+}
+
+/**
+ * Access decision for an order. Mirrors {@link isCartAccessGranted}, but the
+ * anonymous token is read from the order's originating cart (joined in) and may
+ * be absent if that cart was pruned, in which case only the linked user counts.
+ */
+export function isOrderAccessGranted(
+	order: { cartToken: string | null; userId: string | null },
+	owner: CartOwner,
+): boolean {
+	if (order.userId) {
+		return owner.userId !== null && owner.userId === order.userId;
+	}
+	return (
+		owner.cartToken !== null &&
+		order.cartToken !== null &&
+		constantTimeEquals(owner.cartToken, order.cartToken)
 	);
 }
 

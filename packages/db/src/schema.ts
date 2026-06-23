@@ -105,6 +105,7 @@ export const user = pgTable("user", {
 	email: text("email").notNull().unique(),
 	emailVerified: boolean("email_verified").notNull().default(false),
 	image: text("image"),
+	dateOfBirth: date("date_of_birth"),
 	role: text("role").notNull().default("user"),
 	banned: boolean("banned").notNull().default(false),
 	banReason: text("ban_reason"),
@@ -732,6 +733,7 @@ export const order = pgTable(
 		failureDetail: text("failure_detail"),
 		publicReference: text("public_reference").notNull(),
 		status: text("status").notNull().default("draft"),
+		stripePaymentIntentId: text("stripe_payment_intent_id"),
 		subtotalMinor: bigint("subtotal_minor", { mode: "number" }).notNull(),
 		taxMinor: bigint("tax_minor", { mode: "number" }).notNull().default(0),
 		totalMinor: bigint("total_minor", { mode: "number" }).notNull(),
@@ -745,6 +747,9 @@ export const order = pgTable(
 		index("orders_cart_id_idx").on(table.cartId),
 		index("orders_status_created_at_idx").on(table.status, table.createdAt),
 		index("orders_user_id_idx").on(table.userId),
+		uniqueIndex("orders_stripe_payment_intent_id_uidx").on(
+			table.stripePaymentIntentId,
+		),
 		// Monetary columns are non-negative minor units (discount_minor is a
 		// positive amount subtracted from total_minor, mirroring carts).
 		check("orders_subtotal_minor_nonneg", sql`${table.subtotalMinor} >= 0`),

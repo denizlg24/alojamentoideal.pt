@@ -1,6 +1,8 @@
 import "@workspace/ui/globals.css";
+import { getAuthConfig } from "@workspace/auth";
 import type { Metadata, Viewport } from "next";
 import { Bricolage_Grotesque, Hanken_Grotesk } from "next/font/google";
+import { AuthDialogProvider } from "@/components/auth/auth-dialog-provider";
 import { siteConfig } from "@/lib/site/config";
 
 const fontSans = Hanken_Grotesk({
@@ -59,9 +61,19 @@ export default function RootLayout({
 }: Readonly<{
 	children: React.ReactNode;
 }>) {
+	// Read server-only auth config once and pass the capability flag down; the
+	// client overlay cannot inspect env vars. `children` stays a Server Component
+	// passed as a prop, so wrapping it in a client provider does not deopt page
+	// prerendering.
+	const googleEnabled = Boolean(getAuthConfig().google);
+
 	return (
 		<html lang="en" className={`${fontSans.variable} ${fontDisplay.variable}`}>
-			<body>{children}</body>
+			<body>
+				<AuthDialogProvider googleEnabled={googleEnabled}>
+					{children}
+				</AuthDialogProvider>
+			</body>
 		</html>
 	);
 }

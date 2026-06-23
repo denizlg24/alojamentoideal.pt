@@ -1,0 +1,227 @@
+import type {
+	CartMutationResponse,
+	CartResponse,
+	CartValidationResponse,
+	DraftOrderContactInput,
+	DraftOrderResponse,
+	OrderStatusResponse,
+	PaymentIntentResponse,
+} from "@workspace/core/commerce";
+import { readCheckoutError, toCheckoutError } from "./errors";
+
+/**
+ * sessionStorage key holding the visitor's active cart id, shared by the
+ * booking widget ("Add to cart") and the checkout controller so both converge
+ * on one cart. The authoritative cart token stays in the httpOnly `ai_cart`
+ * cookie; this only avoids spawning a fresh cart on reload.
+ */
+export const CHECKOUT_CART_STORAGE_KEY = "ai_checkout_cart_id";
+
+/**
+ * Typed client over the cart/checkout route handlers. Cookies (`ai_cart`,
+ * session) ride along on these same-origin requests automatically. Every
+ * non-2xx response is normalized into a `CheckoutError`; network failures are
+ * caught and re-thrown the same way so callers only handle one error type.
+ */
+
+async function request<T>(input: string, init?: RequestInit): Promise<T> {
+	let response: Response;
+	try {
+		response = await fetch(input, {
+			...init,
+			headers: {
+				"content-type": "application/json",
+				...init?.headers,
+			},
+		});
+	} catch (error) {
+		if (error instanceof DOMException && error.name === "AbortError") {
+			throw error;
+		}
+		throw toCheckoutError(error);
+	}
+
+	if (!response.ok) {
+		throw await readCheckoutError(response);
+	}
+
+	if (response.status === 204) {
+		return undefined as T;
+	}
+
+	return (await response.json()) as T;
+}
+
+function jsonBody(body: unknown): RequestInit {
+	return { body: JSON.stringify(body), method: "POST" };
+}
+
+export interface CreateCartInput {
+	cartId?: string;
+	idempotencyKey?: string;
+}
+
+export function createCart(body: CreateCartInput = {}): Promise<CartResponse> {
+	return request<CartResponse>("/api/cart", jsonBody(body));
+}
+
+export function getCart(cartId: string): Promise<CartResponse> {
+	return request<CartResponse>(`/api/cart/${cartId}`);
+}
+
+export interface AddCartItemInput {
+	adults?: number;
+	checkIn: string;
+	checkOut: string;
+	children?: number;
+	clientMutationId?: string;
+	guests: number;
+	idempotencyKey: string;
+	infants?: number;
+	listingId: string;
+	pets?: number;
+}
+
+export function addCartItem(
+	cartId: string,
+	body: AddCartItemInput,
+): Promise<CartMutationResponse> {
+	return request<CartMutationResponse>(
+		`/api/cart/${cartId}/items`,
+		jsonBody(body),
+	);
+}
+
+export interface UpdateCartItemInput {
+	adults?: number;
+	checkIn?: string;
+	checkOut?: string;
+	children?: number;
+	guests?: number;
+	idempotencyKey: string;
+	infants?: number;
+	pets?: number;
+}
+
+export function updateCartItem(
+	cartId: string,
+	itemId: string,
+	body: UpdateCartItemInput,
+): Promise<CartMutationResponse> {
+	return request<CartMutationResponse>(`/api/cart/${cartId}/items/${itemId}`, {
+		body: JSON.stringify(body),
+		method: "PATCH",
+	});
+}
+
+export function validateCart(cartId: string): Promise<CartValidationResponse> {
+	return request<CartValidationResponse>(
+		`/api/cart/${cartId}/validate`,
+		jsonBody({}),
+	);
+}
+
+export interface ApplyDiscountInput {
+	code: string;
+	idempotencyKey?: string;
+}
+
+export function applyDiscount(
+	cartId: string,
+	body: ApplyDiscountInput,
+): Promise<CartResponse> {
+	return request<CartResponse>(`/api/cart/${cartId}/discount`, jsonBody(body));
+}
+
+export function removeDiscount(cartId: string): Promise<CartResponse> {
+	return request<CartResponse>(`/api/cart/${cartId}/discount`, {
+		method: "DELETE",
+	});
+}
+
+export function claimCart(): Promise<CartResponse> {
+	return request<CartResponse>("/api/cart/claim", jsonBody({}));
+}
+
+export interface CheckoutBillingAddress {
+	city?: string;
+	country?: string;
+	line1?: string;
+	line2?: string;
+	postalCode?: string;
+	region?: string;
+}
+
+export interface CheckoutContactInput {
+	billingAddress?: CheckoutBillingAddress;
+	companyName?: string;
+	email: string;
+	isCompany?: boolean;
+	name: string;
+	notes?: string;
+	phone: string;
+	taxNumber?: string;
+}
+
+export interface CreateDraftOrderInput {
+	cartId: string;
+	contact: CheckoutContactInput;
+	idempotencyKey?: string;
+}
+
+export function createDraftOrder(
+	body: CreateDraftOrderInput,
+): Promise<DraftOrderResponse> {
+	return request<DraftOrderResponse>(
+		"/api/checkout/draft-order",
+		jsonBody(body),
+	);
+}
+
+export interface CreatePaymentIntentInput {
+	cartId: string;
+	idempotencyKey?: string;
+	/** Omit to resume the payable order a converted cart was turned into. */
+	orderId?: string;
+}
+
+export function createPaymentIntent(
+	body: CreatePaymentIntentInput,
+): Promise<PaymentIntentResponse> {
+	return request<PaymentIntentResponse>(
+		"/api/checkout/payment-intent",
+		jsonBody(body),
+	);
+}
+
+export function getOrderStatus(
+	publicReference: string,
+): Promise<OrderStatusResponse> {
+	return request<OrderStatusResponse>(
+		`/api/checkout/order/${encodeURIComponent(publicReference)}`,
+	);
+}
+
+export interface OrderContactResponse {
+	contact: DraftOrderContactInput;
+}
+
+/** Reads the draft order's stored contact, to repaint the form after a reload. */
+export function getOrderContact(
+	publicReference: string,
+): Promise<OrderContactResponse> {
+	return request<OrderContactResponse>(
+		`/api/checkout/order/${encodeURIComponent(publicReference)}/contact`,
+	);
+}
+
+/** Updates the draft order's contact in place (does not affect the total). */
+export function updateOrderContact(
+	publicReference: string,
+	body: CheckoutContactInput,
+): Promise<OrderContactResponse> {
+	return request<OrderContactResponse>(
+		`/api/checkout/order/${encodeURIComponent(publicReference)}/contact`,
+		{ body: JSON.stringify(body), method: "PUT" },
+	);
+}

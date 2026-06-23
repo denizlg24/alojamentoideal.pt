@@ -34,6 +34,17 @@ export function createAuth() {
 			},
 		},
 		socialProviders: config.google ? { google: config.google } : {},
+		user: {
+			additionalFields: {
+				// Stored as YYYY-MM-DD in the `date_of_birth` column. Captured at
+				// sign-up; ID/age verification remains a post-confirmation step.
+				dateOfBirth: {
+					input: true,
+					required: false,
+					type: "string",
+				},
+			},
+		},
 		databaseHooks: {
 			session: {
 				create: {

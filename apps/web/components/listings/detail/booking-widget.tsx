@@ -1,5 +1,6 @@
 "use client";
 
+import type { CartDto } from "@workspace/core/commerce";
 import {
 	Accordion,
 	AccordionContent,
@@ -31,6 +32,16 @@ import type { DateRange } from "react-day-picker";
 import { nightsBetween, parseIsoDate, toIsoDate } from "@/lib/catalog/dates";
 import { capacityForGuests, MAX_INFANTS } from "@/lib/catalog/guests";
 import { formatListingMoney } from "@/lib/catalog/pricing-display";
+import {
+	addCartItem,
+	CHECKOUT_CART_STORAGE_KEY,
+	createCart,
+	getCart,
+} from "@/lib/checkout/api-client";
+import {
+	cartItemClientMutationId,
+	cartItemIdempotencyKey,
+} from "@/lib/checkout/idempotency";
 import { GuestFields } from "../../search/guest-selector";
 import { ListingCalendar } from "./listing-calendar";
 import { useBookingAvailability } from "./use-booking-availability";
@@ -119,6 +130,7 @@ function BookingWidgetInner({
 		infants: intParam(searchParams.get("infants"), 0, 0, MAX_INFANTS),
 	}));
 	const [added, setAdded] = useState(false);
+	const [adding, setAdding] = useState(false);
 	const [datesOpen, setDatesOpen] = useState(false);
 
 	const availabilityState = useBookingAvailability(listingId, minNights);
@@ -181,9 +193,58 @@ function BookingWidgetInner({
 		!minStayError &&
 		reserveHref !== null;
 
-	const handleAddToCart = () => {
-		setAdded(true);
-		setTimeout(() => setAdded(false), 2000);
+	const handleAddToCart = async () => {
+		if (!checkIn || !checkOut || adding) {
+			return;
+		}
+		setAdding(true);
+		try {
+			let cart: CartDto | null = null;
+			const storedId = sessionStorage.getItem(CHECKOUT_CART_STORAGE_KEY);
+			if (storedId) {
+				try {
+					cart = (await getCart(storedId)).cart;
+				} catch {
+					sessionStorage.removeItem(CHECKOUT_CART_STORAGE_KEY);
+				}
+			}
+			if (cart?.status !== "draft") {
+				cart = (await createCart()).cart;
+				sessionStorage.setItem(CHECKOUT_CART_STORAGE_KEY, cart.id);
+			}
+
+			const stayKey = {
+				adults: guests.adults,
+				checkIn,
+				checkOut,
+				children: guests.children,
+				guests: guestCapacity,
+				infants: guests.infants,
+				listingId,
+			};
+			const alreadyInCart = cart.items.some(
+				(entry) =>
+					entry.status === "active" &&
+					entry.listingId === listingId &&
+					entry.checkIn === checkIn &&
+					entry.checkOut === checkOut,
+			);
+			if (!alreadyInCart) {
+				await addCartItem(cart.id, {
+					...stayKey,
+					clientMutationId: cartItemClientMutationId(stayKey),
+					idempotencyKey: cartItemIdempotencyKey(stayKey),
+				});
+			}
+
+			setAdded(true);
+			setTimeout(() => setAdded(false), 2000);
+		} catch {
+			// Quietly ignore here: the visitor can still use Reserve, which routes
+			// to the full checkout where errors are surfaced clearly.
+		} finally {
+			setAdding(false);
+		}
 	};
 
 	// Auto-close the desktop date popover once a full range is chosen so the
@@ -301,11 +362,11 @@ function BookingWidgetInner({
 					size="lg"
 					className="w-full"
 					onClick={handleAddToCart}
-					disabled={!canReserve}
+					disabled={!canReserve || adding}
 					type="button"
 				>
 					<ShoppingCart className="size-4" />
-					{added ? "Added to cart" : "Add to cart"}
+					{added ? "Added to cart" : adding ? "Adding" : "Add to cart"}
 				</Button>
 			</div>
 			<p className="text-center text-muted-foreground text-xs">
