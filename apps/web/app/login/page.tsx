@@ -1,4 +1,3 @@
-import { getAuthConfig } from "@workspace/auth";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { redirect } from "next/navigation";
@@ -26,8 +25,6 @@ async function LoginContent({
 		redirect(signedInRedirectTarget(next));
 	}
 
-	const googleEnabled = Boolean(getAuthConfig().google);
-
 	return (
 		<AuthCard
 			footer={
@@ -45,7 +42,7 @@ async function LoginContent({
 			title="Welcome back"
 		>
 			<AuthReturnLink next={next} />
-			<LoginForm googleEnabled={googleEnabled} next={next} />
+			<LoginForm next={next} />
 		</AuthCard>
 	);
 }

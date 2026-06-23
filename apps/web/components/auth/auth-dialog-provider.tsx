@@ -78,13 +78,7 @@ const VIEW_TITLES: Record<AuthView, { subtitle: string; title: string }> = {
  * `/login` etc. pages remain the canonical URLs for email links and direct
  * navigation; this overlay reuses the same form components.
  */
-export function AuthDialogProvider({
-	children,
-	googleEnabled,
-}: {
-	children: ReactNode;
-	googleEnabled: boolean;
-}) {
+export function AuthDialogProvider({ children }: { children: ReactNode }) {
 	const router = useRouter();
 	const isMobile = useIsMobile();
 	const { data: session } = useSession();
@@ -128,18 +122,13 @@ export function AuthDialogProvider({
 			<AuthReturnLink next={next} />
 			{view === "login" && (
 				<LoginForm
-					googleEnabled={googleEnabled}
 					next={next}
 					onSuccess={handleSuccess}
 					onSwitchView={setView}
 				/>
 			)}
 			{view === "register" && (
-				<RegisterForm
-					googleEnabled={googleEnabled}
-					next={next}
-					onSwitchView={setView}
-				/>
+				<RegisterForm next={next} onSwitchView={setView} />
 			)}
 			{view === "forgot" && <ForgotPasswordForm onSwitchView={setView} />}
 

@@ -11,12 +11,10 @@ import { claimCart } from "@/lib/checkout/api-client";
 import type { AuthView } from "./auth-dialog-provider";
 
 export function LoginForm({
-	googleEnabled,
 	next,
 	onSuccess,
 	onSwitchView,
 }: {
-	googleEnabled: boolean;
 	next: string;
 	/** Dialog mode: called after a successful sign-in instead of navigating to `next`. */
 	onSuccess?: () => void;
@@ -114,23 +112,14 @@ export function LoginForm({
 				</Link>
 			)}
 
-			{googleEnabled && (
-				<>
-					<div className="flex items-center gap-3 text-muted-foreground text-xs">
-						<span className="h-px flex-1 bg-border" />
-						or
-						<span className="h-px flex-1 bg-border" />
-					</div>
-					<Button
-						onClick={handleGoogle}
-						size="lg"
-						type="button"
-						variant="outline"
-					>
-						Continue with Google
-					</Button>
-				</>
-			)}
+			<div className="flex items-center gap-3 text-muted-foreground text-xs">
+				<span className="h-px flex-1 bg-border" />
+				or
+				<span className="h-px flex-1 bg-border" />
+			</div>
+			<Button onClick={handleGoogle} size="lg" type="button" variant="outline">
+				Continue with Google
+			</Button>
 		</form>
 	);
 }

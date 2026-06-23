@@ -11,11 +11,9 @@ import type { AuthView } from "./auth-dialog-provider";
 const MIN_PASSWORD_LENGTH = 8;
 
 export function RegisterForm({
-	googleEnabled,
 	next,
 	onSwitchView,
 }: {
-	googleEnabled: boolean;
 	next: string;
 	/** Dialog mode: switch the visible auth view in place instead of navigating. */
 	onSwitchView?: (view: AuthView) => void;
@@ -167,23 +165,14 @@ export function RegisterForm({
 				{submitting ? "Creating account" : "Create account"}
 			</Button>
 
-			{googleEnabled && (
-				<>
-					<div className="flex items-center gap-3 text-muted-foreground text-xs">
-						<span className="h-px flex-1 bg-border" />
-						or
-						<span className="h-px flex-1 bg-border" />
-					</div>
-					<Button
-						onClick={handleGoogle}
-						size="lg"
-						type="button"
-						variant="outline"
-					>
-						Continue with Google
-					</Button>
-				</>
-			)}
+			<div className="flex items-center gap-3 text-muted-foreground text-xs">
+				<span className="h-px flex-1 bg-border" />
+				or
+				<span className="h-px flex-1 bg-border" />
+			</div>
+			<Button onClick={handleGoogle} size="lg" type="button" variant="outline">
+				Continue with Google
+			</Button>
 		</form>
 	);
 }
