@@ -19,6 +19,7 @@ const nextConfig: NextConfig = {
 		"@workspace/auth",
 		"@workspace/core",
 		"@workspace/db",
+		"@workspace/emails",
 	],
 };
 

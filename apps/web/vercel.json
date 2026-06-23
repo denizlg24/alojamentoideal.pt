@@ -1,4 +1,4 @@
 {
 	"$schema": "https://openapi.vercel.sh/vercel.json",
-	"buildCommand": "cd ../../packages/db && bun run db:migrate && cd ../../apps/web && bun run build"
+	"buildCommand": "cd ../../packages/db && bun run db:migrate && cd ../../ && bunx turbo build --filter=web"
 }
