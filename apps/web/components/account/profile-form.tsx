@@ -5,14 +5,11 @@ import { Button } from "@workspace/ui/components/button";
 import { Checkbox } from "@workspace/ui/components/checkbox";
 import { Input } from "@workspace/ui/components/input";
 import { Label } from "@workspace/ui/components/label";
-import {
-	NativeSelect,
-	NativeSelectOption,
-} from "@workspace/ui/components/native-select";
 import { cn } from "@workspace/ui/lib/utils";
 import { type ReactNode, useId, useState } from "react";
+import { CountrySelect } from "@/components/form/country-select";
+import { PhoneInput } from "@/components/form/phone-input";
 import { profileUpdateSchema } from "@/lib/account/validation";
-import { COUNTRY_OPTIONS } from "@/lib/site/countries";
 import { AccountSection } from "./account-ui";
 
 /** All editable profile fields as form-friendly strings (null becomes ""). */
@@ -112,20 +109,12 @@ function CountryField({
 	return (
 		<div className="flex flex-col gap-1.5">
 			<Label htmlFor={id}>{label}</Label>
-			<NativeSelect
-				aria-invalid={error ? true : undefined}
-				className="w-full"
+			<CountrySelect
 				id={id}
-				onChange={(event) => onChange(event.target.value)}
+				invalid={Boolean(error)}
+				onChange={onChange}
 				value={value}
-			>
-				<NativeSelectOption value="">Select a country</NativeSelectOption>
-				{COUNTRY_OPTIONS.map((country) => (
-					<NativeSelectOption key={country.code} value={country.code}>
-						{country.name}
-					</NativeSelectOption>
-				))}
-			</NativeSelect>
+			/>
 			{error && <p className="text-destructive text-xs">{error}</p>}
 		</div>
 	);
@@ -238,16 +227,18 @@ export function ProfileForm({
 				title="Contact"
 				description="How the Alojamento Ideal team reaches you about your stay."
 			>
-				<Field
-					autoComplete="tel"
-					error={errors.phoneE164}
-					id={`${baseId}-phone`}
-					label="Phone number"
-					onChange={(value) => set("phoneE164", value)}
-					placeholder="+351 912 345 678"
-					type="tel"
-					value={draft.phoneE164}
-				/>
+				<div className="flex flex-col gap-1.5">
+					<Label htmlFor={`${baseId}-phone`}>Phone number</Label>
+					<PhoneInput
+						id={`${baseId}-phone`}
+						invalid={Boolean(errors.phoneE164)}
+						onChange={(value) => set("phoneE164", value)}
+						value={draft.phoneE164}
+					/>
+					{errors.phoneE164 && (
+						<p className="text-destructive text-xs">{errors.phoneE164}</p>
+					)}
+				</div>
 			</AccountSection>
 
 			<AccountSection

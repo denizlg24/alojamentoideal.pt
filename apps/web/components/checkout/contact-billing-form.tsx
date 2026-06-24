@@ -4,13 +4,10 @@ import { Button } from "@workspace/ui/components/button";
 import { Checkbox } from "@workspace/ui/components/checkbox";
 import { Input } from "@workspace/ui/components/input";
 import { Label } from "@workspace/ui/components/label";
-import {
-	NativeSelect,
-	NativeSelectOption,
-} from "@workspace/ui/components/native-select";
 import { Textarea } from "@workspace/ui/components/textarea";
 import { useEffect, useState } from "react";
-import { COUNTRY_OPTIONS } from "@/lib/site/countries";
+import { CountrySelect } from "@/components/form/country-select";
+import { PhoneInput } from "@/components/form/phone-input";
 import { CheckoutAlert } from "./checkout-alert";
 import { type ContactDraft, hasBillingDetails } from "./types";
 
@@ -139,15 +136,14 @@ export function ContactBillingForm({
 				/>
 			</div>
 
-			<Field
-				autoComplete="tel"
-				id="contact-phone"
-				label="Phone (with country code)"
-				onChange={(next) => set("phone", next)}
-				placeholder="+351 912 345 678"
-				type="tel"
-				value={value.phone}
-			/>
+			<div className="flex flex-col gap-1.5">
+				<Label htmlFor="contact-phone">Phone</Label>
+				<PhoneInput
+					id="contact-phone"
+					onChange={(next) => set("phone", next)}
+					value={value.phone}
+				/>
+			</div>
 
 			<div className="flex items-center gap-2">
 				<Checkbox
@@ -219,22 +215,12 @@ export function ContactBillingForm({
 						/>
 						<div className="flex flex-col gap-1.5">
 							<Label htmlFor="billing-country">Country</Label>
-							<NativeSelect
+							<CountrySelect
 								autoComplete="country"
-								className="w-full"
 								id="billing-country"
-								onChange={(event) => set("country", event.target.value)}
+								onChange={(next) => set("country", next)}
 								value={value.country}
-							>
-								<NativeSelectOption value="">
-									Select a country
-								</NativeSelectOption>
-								{COUNTRY_OPTIONS.map((country) => (
-									<NativeSelectOption key={country.code} value={country.code}>
-										{country.name}
-									</NativeSelectOption>
-								))}
-							</NativeSelect>
+							/>
 						</div>
 					</div>
 				</div>
