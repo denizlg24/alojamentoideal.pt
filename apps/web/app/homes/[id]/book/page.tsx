@@ -106,7 +106,7 @@ async function CheckoutShell({ id }: { id: string }) {
 				<div className="rounded-2xl border bg-card p-5 shadow-sm">
 					<div className="flex gap-3">
 						<div
-							className="size-20 shrink-0 rounded-xl bg-muted bg-center bg-cover"
+							className="size-20 shrink-0 rounded-xl bg-center bg-cover bg-muted"
 							style={
 								listing?.coverPhoto?.url
 									? { backgroundImage: `url(${listing.coverPhoto.url})` }
