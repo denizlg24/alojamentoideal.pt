@@ -2,6 +2,29 @@ import type { IdentityVerificationStatus } from "@workspace/db";
 
 export type { IdentityVerificationStatus };
 
+export interface AccountIdentityDocumentDisplay {
+	documentType: string | null;
+	expiresOn: string | null;
+	issuingCountry: string | null;
+	maskedDocumentNumber: string | null;
+	nationality: string | null;
+	status: IdentityVerificationStatus;
+	/** ISO 8601 timestamp the identity last reached `verified`, else null. */
+	verifiedAt: string | null;
+}
+
+export interface VerifiedIdentityDocumentFields {
+	dateOfBirth: string | null;
+	documentExpiresOn: string | null;
+	documentIssuingCountry: string | null;
+	documentNumber: string | null;
+	documentType: string | null;
+	firstName: string | null;
+	lastName: string | null;
+	nationality: string | null;
+	stripeVerificationReportId: string | null;
+}
+
 /**
  * Editable guest-profile fields a user manages from their account. Mirrors the
  * checkout contact shape (`orderContact` / `ContactDraft`) so a saved profile
@@ -32,6 +55,7 @@ export interface AccountProfileInput {
  * and never leaves the server.
  */
 export interface AccountProfile extends AccountProfileInput {
+	identity: AccountIdentityDocumentDisplay;
 	identityStatus: IdentityVerificationStatus;
 	/** ISO 8601 timestamp the identity last reached `verified`, else null. */
 	identityVerifiedAt: string | null;

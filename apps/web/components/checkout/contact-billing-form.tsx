@@ -111,8 +111,10 @@ export function ContactBillingForm({
 		<div className="flex flex-col gap-4">
 			{prefilledFromAccount && (
 				<CheckoutAlert variant="info">
-					We filled in your account details. Add a phone number so the
-					Alojamento Ideal team can reach you about your stay.
+					We filled in your account details.{" "}
+					{value.phone
+						? null
+						: "Add a phone number so the Alojamento Ideal team can reach you about your stay."}
 				</CheckoutAlert>
 			)}
 

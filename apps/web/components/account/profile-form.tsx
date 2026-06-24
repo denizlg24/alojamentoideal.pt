@@ -351,7 +351,7 @@ export function ProfileForm({
 				</TwoColumn>
 			</AccountSection>
 
-			<div className="flex items-center justify-end gap-4 pt-6">
+			<div className="flex items-center justify-end gap-4 pt-6 pb-4">
 				<span
 					aria-live="polite"
 					className={cn(

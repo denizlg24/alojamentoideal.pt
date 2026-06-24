@@ -27,6 +27,12 @@ const tsvector = customType<{ data: string; driverData: string }>({
 	},
 });
 
+const bytea = customType<{ data: Buffer; driverData: Buffer }>({
+	dataType() {
+		return "bytea";
+	},
+});
+
 export interface ListingSectionHashes {
 	amenities: string;
 	description: string;
@@ -166,57 +172,121 @@ export type IdentityVerificationStatus =
 	| "verified"
 	| "canceled";
 
+export type IdentityDocumentStatus = Exclude<
+	IdentityVerificationStatus,
+	"unstarted"
+>;
+
+export type IdentityDocumentSource = "stripe_identity";
+
+export type ProviderBookingStatus =
+	| "pending"
+	| "confirmed"
+	| "cancelled"
+	| "failed"
+	| "completed";
+
+export type BookingGuestIdentityStatus =
+	| "missing"
+	| "provided"
+	| "processing"
+	| "requires_input"
+	| "verified"
+	| "canceled";
+
+export type GuestSubmissionJobStatus =
+	| "pending"
+	| "running"
+	| "retrying"
+	| "succeeded"
+	| "failed"
+	| "canceled";
+
+export const userIdentityDocument = pgTable(
+	"user_identity_documents",
+	{
+		id: text("id").primaryKey(),
+		userId: text("user_id")
+			.notNull()
+			.references(() => user.id, { onDelete: "cascade" }),
+		source: text("source")
+			.$type<IdentityDocumentSource>()
+			.notNull()
+			.default("stripe_identity"),
+		status: text("status")
+			.$type<IdentityDocumentStatus>()
+			.notNull()
+			.default("requires_input"),
+		stripeVerificationSessionId: text("stripe_verification_session_id"),
+		stripeVerificationReportId: text("stripe_verification_report_id"),
+		// Encrypted identity columns must be encrypted before insert. Decryption
+		// is limited to profile display, booking prefill, and compliance paths.
+		firstNameEncrypted: bytea("first_name_encrypted"),
+		lastNameEncrypted: bytea("last_name_encrypted"),
+		dateOfBirthEncrypted: bytea("date_of_birth_encrypted"),
+		documentTypeEncrypted: bytea("document_type_encrypted"),
+		documentIssuingCountryEncrypted: bytea(
+			"document_issuing_country_encrypted",
+		),
+		documentNumberEncrypted: bytea("document_number_encrypted"),
+		documentExpiresOnEncrypted: bytea("document_expires_on_encrypted"),
+		nationalityEncrypted: bytea("nationality_encrypted"),
+		submittedAt: timestampWithTimezone("submitted_at"),
+		verifiedAt: timestampWithTimezone("verified_at"),
+		purgeAfter: timestampWithTimezone("purge_after"),
+		purgedAt: timestampWithTimezone("purged_at"),
+		createdAt: timestampWithTimezone("created_at").notNull().defaultNow(),
+		updatedAt: timestampWithTimezone("updated_at").notNull().defaultNow(),
+	},
+	(table) => [
+		index("user_identity_documents_user_status_idx").on(
+			table.userId,
+			table.status,
+		),
+		index("user_identity_documents_purge_after_idx").on(table.purgeAfter),
+		uniqueIndex("user_identity_documents_active_verified_uidx")
+			.on(table.userId)
+			.where(sql`${table.status} = 'verified' and ${table.purgedAt} is null`),
+		uniqueIndex("user_identity_documents_stripe_session_uidx")
+			.on(table.stripeVerificationSessionId)
+			.where(sql`${table.stripeVerificationSessionId} is not null`),
+		check(
+			"user_identity_documents_status_check",
+			sql`${table.status} in ('processing', 'requires_input', 'verified', 'canceled')`,
+		),
+		check(
+			"user_identity_documents_source_check",
+			sql`${table.source} in ('stripe_identity')`,
+		),
+	],
+);
+
 /**
  * Optional guest profile holding the self-service details a user fills in on
  * their account: contact phone, billing identity (company/tax) and address, and
  * residence/nationality. These are the defaults that pre-fill the checkout
  * contact step (see `orderContact`), so the column set mirrors that snapshot.
- *
- * Identity verification is delegated to Stripe Identity: we never store raw
- * document data, only the verification session id, its lifecycle status and the
- * timestamp it last reached `verified`.
  */
-export const userProfile = pgTable(
-	"user_profile",
-	{
-		userId: text("user_id")
-			.primaryKey()
-			.references(() => user.id, { onDelete: "cascade" }),
-		phoneE164: text("phone_e164"),
-		isCompany: boolean("is_company").notNull().default(false),
-		companyName: text("company_name"),
-		taxNumber: text("tax_number"),
-		billingLine1: text("billing_line1"),
-		billingLine2: text("billing_line2"),
-		billingCity: text("billing_city"),
-		billingRegion: text("billing_region"),
-		billingPostalCode: text("billing_postal_code"),
-		// ISO 3166-1 alpha-2 country codes.
-		billingCountry: text("billing_country"),
-		residenceCountry: text("residence_country"),
-		nationality: text("nationality"),
-		identityVerificationSessionId: text("identity_verification_session_id"),
-		identityStatus: text("identity_status")
-			.$type<IdentityVerificationStatus>()
-			.notNull()
-			.default("unstarted"),
-		identityVerifiedAt: timestampWithTimezone("identity_verified_at"),
-		createdAt: timestampWithTimezone("created_at").notNull().defaultNow(),
-		updatedAt: timestampWithTimezone("updated_at").notNull().defaultNow(),
-	},
-	(table) => [
-		index("user_profile_identity_status_idx").on(table.identityStatus),
-		// A Stripe VerificationSession maps to at most one profile. Nulls are
-		// excluded so profiles that never started verification do not collide.
-		uniqueIndex("user_profile_identity_session_uidx")
-			.on(table.identityVerificationSessionId)
-			.where(sql`${table.identityVerificationSessionId} is not null`),
-		check(
-			"user_profile_identity_status_check",
-			sql`${table.identityStatus} in ('unstarted', 'processing', 'requires_input', 'verified', 'canceled')`,
-		),
-	],
-);
+export const userProfile = pgTable("user_profile", {
+	userId: text("user_id")
+		.primaryKey()
+		.references(() => user.id, { onDelete: "cascade" }),
+	phoneE164: text("phone_e164"),
+	isCompany: boolean("is_company").notNull().default(false),
+	companyName: text("company_name"),
+	taxNumber: text("tax_number"),
+	billingLine1: text("billing_line1"),
+	billingLine2: text("billing_line2"),
+	billingCity: text("billing_city"),
+	billingRegion: text("billing_region"),
+	billingPostalCode: text("billing_postal_code"),
+	// ISO 3166-1 alpha-2 country codes.
+	billingCountry: text("billing_country"),
+	residenceCountry: text("residence_country"),
+	nationality: text("nationality"),
+	createdAt: timestampWithTimezone("created_at").notNull().defaultNow(),
+	updatedAt: timestampWithTimezone("updated_at").notNull().defaultNow(),
+});
 
 export const providerSyncRun = pgTable(
 	"provider_sync_run",
@@ -921,6 +991,156 @@ export const orderItem = pgTable(
 	],
 );
 
+export const providerBooking = pgTable(
+	"provider_bookings",
+	{
+		id: text("id").primaryKey(),
+		orderItemId: text("order_item_id")
+			.notNull()
+			.references(() => orderItem.id, { onDelete: "cascade" }),
+		provider: text("provider").notNull(),
+		externalAccountId: text("external_account_id"),
+		providerReservationId: text("provider_reservation_id"),
+		providerStatus: text("provider_status"),
+		normalizedStatus: text("normalized_status")
+			.$type<ProviderBookingStatus>()
+			.notNull()
+			.default("pending"),
+		stayStartsAt: timestampWithTimezone("stay_starts_at"),
+		stayEndsAt: timestampWithTimezone("stay_ends_at"),
+		providerCreatedAt: timestampWithTimezone("provider_created_at"),
+		providerUpdatedAt: timestampWithTimezone("provider_updated_at"),
+		rawOperationalPayload: jsonb("raw_operational_payload").$type<
+			Record<string, unknown>
+		>(),
+		createdAt: timestampWithTimezone("created_at").notNull().defaultNow(),
+		updatedAt: timestampWithTimezone("updated_at").notNull().defaultNow(),
+	},
+	(table) => [
+		uniqueIndex("provider_bookings_order_item_uidx").on(table.orderItemId),
+		uniqueIndex("provider_bookings_provider_reservation_uidx")
+			.on(table.provider, table.externalAccountId, table.providerReservationId)
+			.where(sql`${table.providerReservationId} is not null`),
+		index("provider_bookings_provider_date_idx").on(
+			table.provider,
+			table.stayStartsAt,
+			table.stayEndsAt,
+		),
+		index("provider_bookings_status_idx").on(table.normalizedStatus),
+		check(
+			"provider_bookings_status_check",
+			sql`${table.normalizedStatus} in ('pending', 'confirmed', 'cancelled', 'failed', 'completed')`,
+		),
+	],
+);
+
+export const bookingGuest = pgTable(
+	"booking_guests",
+	{
+		id: text("id").primaryKey(),
+		providerBookingId: text("provider_booking_id")
+			.notNull()
+			.references(() => providerBooking.id, { onDelete: "cascade" }),
+		userId: text("user_id").references(() => user.id, {
+			onDelete: "set null",
+		}),
+		userIdentityDocumentId: text("user_identity_document_id").references(
+			() => userIdentityDocument.id,
+			{ onDelete: "set null" },
+		),
+		position: integer("position").notNull(),
+		identityStatus: text("identity_status")
+			.$type<BookingGuestIdentityStatus>()
+			.notNull()
+			.default("missing"),
+		stripeVerificationSessionId: text("stripe_verification_session_id"),
+		stripeVerificationReportId: text("stripe_verification_report_id"),
+		// Encrypted snapshot columns are independent legal booking records.
+		// Encrypt before insert; do not reference live account identity values.
+		firstNameEncrypted: bytea("first_name_encrypted"),
+		lastNameEncrypted: bytea("last_name_encrypted"),
+		dateOfBirthEncrypted: bytea("date_of_birth_encrypted"),
+		residenceCountryEncrypted: bytea("residence_country_encrypted"),
+		nationalityEncrypted: bytea("nationality_encrypted"),
+		documentTypeEncrypted: bytea("document_type_encrypted"),
+		documentIssuingCountryEncrypted: bytea(
+			"document_issuing_country_encrypted",
+		),
+		documentNumberEncrypted: bytea("document_number_encrypted"),
+		documentExpiresOnEncrypted: bytea("document_expires_on_encrypted"),
+		submittedAt: timestampWithTimezone("submitted_at"),
+		purgeAfter: timestampWithTimezone("purge_after"),
+		purgedAt: timestampWithTimezone("purged_at"),
+		createdAt: timestampWithTimezone("created_at").notNull().defaultNow(),
+		updatedAt: timestampWithTimezone("updated_at").notNull().defaultNow(),
+	},
+	(table) => [
+		uniqueIndex("booking_guests_booking_position_uidx").on(
+			table.providerBookingId,
+			table.position,
+		),
+		uniqueIndex("booking_guests_stripe_session_uidx")
+			.on(table.stripeVerificationSessionId)
+			.where(sql`${table.stripeVerificationSessionId} is not null`),
+		index("booking_guests_provider_booking_idx").on(table.providerBookingId),
+		index("booking_guests_user_idx").on(table.userId),
+		index("booking_guests_identity_document_idx").on(
+			table.userIdentityDocumentId,
+		),
+		index("booking_guests_purge_after_idx").on(table.purgeAfter),
+		check("booking_guests_position_nonneg", sql`${table.position} >= 0`),
+		check(
+			"booking_guests_identity_status_check",
+			sql`${table.identityStatus} in ('missing', 'provided', 'processing', 'requires_input', 'verified', 'canceled')`,
+		),
+	],
+);
+
+export const guestSubmissionJob = pgTable(
+	"guest_submission_jobs",
+	{
+		id: text("id").primaryKey(),
+		providerBookingId: text("provider_booking_id")
+			.notNull()
+			.references(() => providerBooking.id, { onDelete: "cascade" }),
+		status: text("status")
+			.$type<GuestSubmissionJobStatus>()
+			.notNull()
+			.default("pending"),
+		attemptCount: integer("attempt_count").notNull().default(0),
+		maxAttempts: integer("max_attempts").notNull().default(5),
+		nextRunAt: timestampWithTimezone("next_run_at"),
+		startedAt: timestampWithTimezone("started_at"),
+		completedAt: timestampWithTimezone("completed_at"),
+		redactedErrorText: text("redacted_error_text"),
+		externalResultReference: text("external_result_reference"),
+		createdAt: timestampWithTimezone("created_at").notNull().defaultNow(),
+		updatedAt: timestampWithTimezone("updated_at").notNull().defaultNow(),
+	},
+	(table) => [
+		index("guest_submission_jobs_booking_status_idx").on(
+			table.providerBookingId,
+			table.status,
+		),
+		index("guest_submission_jobs_status_next_run_idx").on(
+			table.status,
+			table.nextRunAt,
+		),
+		check(
+			"guest_submission_jobs_status_check",
+			sql`${table.status} in ('pending', 'running', 'retrying', 'succeeded', 'failed', 'canceled')`,
+		),
+		check(
+			"guest_submission_jobs_attempt_count_nonneg",
+			sql`${table.attemptCount} >= 0`,
+		),
+		check(
+			"guest_submission_jobs_max_attempts_nonneg",
+			sql`${table.maxAttempts} >= 0`,
+		),
+	],
+);
+
 export const accommodationItemDetail = pgTable(
 	"accommodation_item_details",
 	{
@@ -1030,6 +1250,7 @@ export const schema = {
 	session,
 	account,
 	verification,
+	userIdentityDocument,
 	userProfile,
 	providerSyncRun,
 	providerSyncState,
@@ -1044,6 +1265,9 @@ export const schema = {
 	order,
 	orderContact,
 	orderItem,
+	providerBooking,
+	bookingGuest,
+	guestSubmissionJob,
 	accommodationItemDetail,
 	orderItemCharge,
 	apiIdempotencyKey,

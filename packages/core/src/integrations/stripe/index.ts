@@ -5,8 +5,11 @@ export {
 } from "./client";
 export {
 	createIdentityVerificationSession,
+	type IdentityVerificationResetOutcome,
 	type IdentityVerificationSnapshot,
+	resetIdentityVerificationSession,
 	retrieveIdentityVerificationSession,
+	retrieveVerifiedIdentityDocumentFields,
 } from "./identity";
 export {
 	createOrUpdatePaymentIntent,

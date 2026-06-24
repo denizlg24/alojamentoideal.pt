@@ -5,6 +5,7 @@ import {
 	getStripeWebhookSecret,
 	interpretStripeEvent,
 	type RelevantStripeEvent,
+	retrieveVerifiedIdentityDocumentFields,
 	StripeConfigurationError,
 	StripeWebhookSignatureError,
 } from "@workspace/core/integrations/stripe";
@@ -98,20 +99,40 @@ async function handlePaymentFailed(
 }
 
 /**
- * Persists a Stripe Identity verification transition against the user's
- * profile. `applyIdentityStatus` matches on the session id and is idempotent,
- * so a re-delivered event resolves to the same state. A session with no
- * matching profile is logged for reconciliation rather than failing the
- * webhook.
+ * Persists a Stripe Identity verification transition against the account
+ * identity document ledger. `applyIdentityStatus` matches on the session id and
+ * is idempotent, so a re-delivered event resolves to the same state. A session
+ * with no matching document row is logged for reconciliation rather than
+ * failing the webhook.
  */
 async function handleIdentityUpdated(
 	event: Extract<RelevantStripeEvent, { type: "identity_updated" }>,
+	stripe: ReturnType<typeof createStripeClientFromEnv>,
 ): Promise<void> {
-	const userId = await accountProfileRepository().applyIdentityStatus(
-		event.sessionId,
-		event.status,
-		event.verifiedAt,
-	);
+	const repository = accountProfileRepository();
+	const knownSession = await repository.hasIdentitySession(event.sessionId);
+	if (!knownSession) {
+		logger.info(
+			"Stripe identity event ignored for a reset or unknown session",
+			{
+				sessionId: event.sessionId,
+				status: event.status,
+			},
+		);
+		return;
+	}
+
+	const verifiedFields =
+		event.status === "verified"
+			? await retrieveVerifiedIdentityDocumentFields(stripe, event.sessionId)
+			: undefined;
+
+	const userId = await repository.applyIdentityStatus({
+		sessionId: event.sessionId,
+		status: event.status,
+		statusChangedAt: event.verifiedAt ?? event.statusChangedAt,
+		verifiedFields,
+	});
 	if (!userId) {
 		logger.warn("Stripe identity event referenced an unknown session", {
 			sessionId: event.sessionId,
@@ -120,7 +141,10 @@ async function handleIdentityUpdated(
 	}
 }
 
-async function handleStripeEvent(event: RelevantStripeEvent): Promise<void> {
+async function handleStripeEvent(
+	event: RelevantStripeEvent,
+	stripe: ReturnType<typeof createStripeClientFromEnv>,
+): Promise<void> {
 	switch (event.type) {
 		case "payment_succeeded":
 			await handlePaymentSucceeded(event);
@@ -129,7 +153,7 @@ async function handleStripeEvent(event: RelevantStripeEvent): Promise<void> {
 			await handlePaymentFailed(event);
 			return;
 		case "identity_updated":
-			await handleIdentityUpdated(event);
+			await handleIdentityUpdated(event, stripe);
 			return;
 		default:
 			return;
@@ -189,7 +213,7 @@ export const POST = withApiRoute(
 			throw error;
 		}
 
-		await handleStripeEvent(interpreted);
+		await handleStripeEvent(interpreted, stripe);
 		return Response.json({ received: true });
 	},
 );

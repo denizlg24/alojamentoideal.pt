@@ -90,10 +90,7 @@ export function AccountView({
 
 			<ProfileForm initialProfile={profile} />
 
-			<IdentityVerification
-				initialStatus={profile.identityStatus}
-				initialVerifiedAt={profile.identityVerifiedAt}
-			/>
+			<IdentityVerification initialIdentity={profile.identity} />
 		</>
 	);
 }

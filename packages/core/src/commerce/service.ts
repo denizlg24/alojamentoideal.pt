@@ -7,6 +7,7 @@ import {
 	accommodationListing as accommodationListingTable,
 	accommodationQuoteSnapshot as accommodationQuoteSnapshotTable,
 	apiIdempotencyKey as apiIdempotencyKeyTable,
+	bookingGuest as bookingGuestTable,
 	cartItem as cartItemTable,
 	cart as cartTable,
 	type Database,
@@ -14,6 +15,7 @@ import {
 	orderItemCharge as orderItemChargeTable,
 	orderItem as orderItemTable,
 	order as orderTable,
+	providerBooking as providerBookingTable,
 } from "@workspace/db";
 import { and, asc, eq, gt, inArray, isNull, lte, sql } from "drizzle-orm";
 import { parseQuoteBody } from "../accommodations";
@@ -67,6 +69,10 @@ const DEFAULT_PROPERTY_TIMEZONE = "Europe/Lisbon";
 
 type Transaction = Parameters<Parameters<Database["transaction"]>[0]>[0];
 type DbExecutor = Database | Transaction;
+
+function stayDateToTimestamp(value: string): Date {
+	return new Date(`${value}T00:00:00.000Z`);
+}
 
 export interface CommerceServiceOptions {
 	accountId: string;
@@ -1286,6 +1292,32 @@ export class CommerceService {
 				propertyTimezone: rows.detail.propertyTimezone,
 				provider: rows.detail.provider,
 			});
+
+			const providerBookingId = crypto.randomUUID();
+			await tx.insert(providerBookingTable).values({
+				createdAt: now,
+				externalAccountId: rows.detail.externalAccountId,
+				id: providerBookingId,
+				normalizedStatus: "pending",
+				orderItemId,
+				provider: rows.detail.provider,
+				stayEndsAt: stayDateToTimestamp(rows.detail.checkOut),
+				stayStartsAt: stayDateToTimestamp(rows.detail.checkIn),
+				updatedAt: now,
+			});
+
+			if (rows.detail.guests > 0) {
+				await tx.insert(bookingGuestTable).values(
+					Array.from({ length: rows.detail.guests }, (_, position) => ({
+						createdAt: now,
+						id: crypto.randomUUID(),
+						identityStatus: "missing" as const,
+						position,
+						providerBookingId,
+						updatedAt: now,
+					})),
+				);
+			}
 
 			if (charges.length > 0) {
 				await tx.insert(orderItemChargeTable).values(

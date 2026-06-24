@@ -87,6 +87,8 @@ export interface StripeIdentityUpdated {
 	/** Account this session belongs to, read from session metadata. */
 	userId: string | null;
 	status: Exclude<IdentityVerificationStatus, "unstarted">;
+	/** ISO timestamp of the Stripe lifecycle event. */
+	statusChangedAt: string;
 	/** ISO timestamp the session reached `verified`; null otherwise. */
 	verifiedAt: string | null;
 }
@@ -107,15 +109,14 @@ function identityEvent(
 	session: Stripe.Identity.VerificationSession,
 	status: StripeIdentityUpdated["status"],
 ): StripeIdentityUpdated {
+	const eventTime = new Date(event.created * 1000).toISOString();
 	return {
 		type: "identity_updated",
 		sessionId: session.id,
 		userId: session.metadata?.userId ?? null,
 		status,
-		verifiedAt:
-			status === "verified"
-				? new Date(event.created * 1000).toISOString()
-				: null,
+		statusChangedAt: eventTime,
+		verifiedAt: status === "verified" ? eventTime : null,
 	};
 }
 

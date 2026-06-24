@@ -27,9 +27,6 @@ interface BookPageProps {
 	searchParams: Promise<SearchParams>;
 }
 
-// Prebuild the checkout shell for every known listing so the listing summary
-// (cover, title, rating) is prerendered; only the stay-dependent controller,
-// which reads searchParams, streams in at request time.
 export async function generateStaticParams(): Promise<{ id: string }[]> {
 	return generateListingStaticParams();
 }
