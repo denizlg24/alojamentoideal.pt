@@ -1,6 +1,6 @@
 "use client";
 
-import type { CartDto, CartItemDto } from "@workspace/core/commerce";
+import type { CartDto } from "@workspace/core/commerce";
 import { Button } from "@workspace/ui/components/button";
 import { Separator } from "@workspace/ui/components/separator";
 import { Skeleton } from "@workspace/ui/components/skeleton";
@@ -14,10 +14,21 @@ import {
 } from "@/lib/checkout/format";
 import type { InitialListing } from "./types";
 
+export interface ReservationSummaryItem {
+	adults: number;
+	checkIn: string;
+	checkOut: string;
+	children: number;
+	infants: number;
+	nights: number;
+}
+
 interface ReservationSummaryProps {
+	canChangeStay?: boolean;
+	canOpenPriceDetails?: boolean;
 	cart: CartDto | null;
 	discountSlot?: ReactNode;
-	item: CartItemDto | null;
+	item: ReservationSummaryItem | null;
 	listing: InitialListing;
 	onChangeDates: () => void;
 	onChangeGuests: () => void;
@@ -26,10 +37,12 @@ interface ReservationSummaryProps {
 }
 
 function SummaryRow({
+	disabled,
 	label,
 	onChange,
 	value,
 }: {
+	disabled?: boolean;
 	label: string;
 	onChange: () => void;
 	value: string;
@@ -41,8 +54,10 @@ function SummaryRow({
 				<span className="text-muted-foreground text-sm">{value}</span>
 			</div>
 			<Button
-				className="h-auto p-0 text-sm underline"
+				className="h-auto p-0 text-sm underline disabled:cursor-not-allowed disabled:opacity-50"
+				disabled={disabled}
 				onClick={onChange}
+				type="button"
 				variant="link"
 			>
 				Change
@@ -53,6 +68,8 @@ function SummaryRow({
 
 /** Sticky reservation summary: listing, stay, guests, price lines, discount. */
 export function ReservationSummary({
+	canChangeStay,
+	canOpenPriceDetails,
 	cart,
 	discountSlot,
 	item,
@@ -62,6 +79,9 @@ export function ReservationSummary({
 	onOpenCurrency,
 	onOpenPriceDetails,
 }: ReservationSummaryProps) {
+	const changeDisabled = canChangeStay === false;
+	const priceDetailsDisabled = canOpenPriceDetails === false;
+
 	return (
 		<div className="rounded-2xl border bg-card p-5 shadow-sm">
 			<div className="flex gap-3">
@@ -95,11 +115,13 @@ export function ReservationSummary({
 			{item ? (
 				<div className="flex flex-col gap-3">
 					<SummaryRow
+						disabled={changeDisabled}
 						label="Dates"
 						onChange={onChangeDates}
 						value={`${formatStayRangeLong(item.checkIn, item.checkOut)} · ${nightsLabel(item.nights)}`}
 					/>
 					<SummaryRow
+						disabled={changeDisabled}
 						label="Guests"
 						onChange={onChangeGuests}
 						value={guestSummaryLabel({
@@ -120,7 +142,8 @@ export function ReservationSummary({
 
 			<div className="flex items-center justify-between">
 				<button
-					className="font-medium text-sm underline underline-offset-2"
+					className="font-medium text-sm underline underline-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+					disabled={priceDetailsDisabled}
 					onClick={onOpenPriceDetails}
 					type="button"
 				>

@@ -13,6 +13,7 @@ import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSession } from "@/lib/auth/client";
+import { nightsBetween } from "@/lib/catalog/dates";
 import { capacityForGuests } from "@/lib/catalog/guests";
 import { trackCheckoutEvent } from "@/lib/checkout/analytics";
 import * as api from "@/lib/checkout/api-client";
@@ -53,7 +54,10 @@ import { PayTimingStep } from "./pay-timing-step";
 import { CheckoutPaymentElement } from "./payment-element";
 import { PaymentMethodStep } from "./payment-method-step";
 import { PriceBreakdownDialog } from "./price-breakdown-dialog";
-import { ReservationSummary } from "./reservation-summary";
+import {
+	ReservationSummary,
+	type ReservationSummaryItem,
+} from "./reservation-summary";
 import { ReviewReservationStep } from "./review-reservation-step";
 import { StripePaymentForm } from "./stripe-payment-form";
 import {
@@ -112,6 +116,28 @@ function stayKeyFromItem(listingId: string, item: CartItemDto): StayKeyInput {
 	};
 }
 
+function pendingSummaryItemOf(
+	stay: InitialStay,
+): ReservationSummaryItem | null {
+	if (!stay.checkIn || !stay.checkOut) {
+		return null;
+	}
+
+	const nights = nightsBetween(stay.checkIn, stay.checkOut);
+	if (!Number.isFinite(nights) || nights < 1) {
+		return null;
+	}
+
+	return {
+		adults: stay.adults,
+		checkIn: stay.checkIn,
+		checkOut: stay.checkOut,
+		children: stay.children,
+		infants: stay.infants,
+		nights,
+	};
+}
+
 export function CheckoutController({
 	initialListing,
 	initialStay,
@@ -159,6 +185,7 @@ export function CheckoutController({
 	const hasPayment = payment !== null;
 	const currency = cart?.currency ?? initialListing.currency;
 	const totalLabel = cart ? formatMinor(cart.totalMinor, currency) : "";
+	const pendingSummaryItem = pendingSummaryItemOf(initialStay);
 
 	const stayKey = useMemo(
 		() =>
@@ -1022,19 +1049,25 @@ export function CheckoutController({
 		</>
 	);
 
+	const hasReadyItem = cart !== null && item !== null;
+	const summaryItem = item ?? (phase === "loading" ? pendingSummaryItem : null);
 	const summary = (
 		<ReservationSummary
+			canChangeStay={hasReadyItem}
+			canOpenPriceDetails={hasReadyItem}
 			cart={cart}
 			discountSlot={
-				<DiscountCodeForm
-					appliedCode={cart?.appliedDiscount?.promotionCode ?? null}
-					error={discountError}
-					onApply={handleApplyDiscount}
-					onRemove={handleRemoveDiscount}
-					pending={discountPending}
-				/>
+				hasReadyItem ? (
+					<DiscountCodeForm
+						appliedCode={cart?.appliedDiscount?.promotionCode ?? null}
+						error={discountError}
+						onApply={handleApplyDiscount}
+						onRemove={handleRemoveDiscount}
+						pending={discountPending}
+					/>
+				) : null
 			}
-			item={item}
+			item={summaryItem}
 			listing={initialListing}
 			onChangeDates={() => setDialog("dates")}
 			onChangeGuests={() => setDialog("guests")}
@@ -1045,17 +1078,19 @@ export function CheckoutController({
 
 	return (
 		<>
-			{phase === "loading" ? (
-				<div className="mx-auto grid w-full max-w-5xl grid-cols-1 gap-8 px-4 py-8 sm:px-6 lg:grid-cols-[minmax(0,1fr)_minmax(340px,400px)]">
-					<div className="flex flex-col gap-4">
-						<Skeleton className="h-40 w-full rounded-2xl" />
-						<Skeleton className="h-64 w-full rounded-2xl" />
-					</div>
-					<Skeleton className="h-80 w-full rounded-2xl" />
-				</div>
-			) : (
-				<CheckoutLayout steps={steps} summary={summary} />
-			)}
+			<CheckoutLayout
+				steps={
+					phase === "loading" ? (
+						<div className="flex flex-col gap-4">
+							<Skeleton className="h-40 w-full rounded-2xl" />
+							<Skeleton className="h-64 w-full rounded-2xl" />
+						</div>
+					) : (
+						steps
+					)
+				}
+				summary={summary}
+			/>
 
 			{cart && item && (
 				<PriceBreakdownDialog
