@@ -155,6 +155,56 @@ export const verification = pgTable("verification", {
 	updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
 
+/**
+ * Optional guest profile holding the self-service details a user fills in on
+ * their account: contact phone, billing identity (company/tax) and address, and
+ * residence/nationality. These are the defaults that pre-fill the checkout
+ * contact step (see `orderContact`), so the column set mirrors that snapshot.
+ *
+ * Identity verification is delegated to Stripe Identity: we never store raw
+ * document data, only the verification session id, its lifecycle status and the
+ * timestamp it last reached `verified`. `identityStatus` mirrors Stripe's
+ * VerificationSession statuses plus `unstarted` for the pre-session state.
+ */
+export const userProfile = pgTable(
+	"user_profile",
+	{
+		userId: text("user_id")
+			.primaryKey()
+			.references(() => user.id, { onDelete: "cascade" }),
+		phoneE164: text("phone_e164"),
+		isCompany: boolean("is_company").notNull().default(false),
+		companyName: text("company_name"),
+		taxNumber: text("tax_number"),
+		billingLine1: text("billing_line1"),
+		billingLine2: text("billing_line2"),
+		billingCity: text("billing_city"),
+		billingRegion: text("billing_region"),
+		billingPostalCode: text("billing_postal_code"),
+		// ISO 3166-1 alpha-2 country codes.
+		billingCountry: text("billing_country"),
+		residenceCountry: text("residence_country"),
+		nationality: text("nationality"),
+		identityVerificationSessionId: text("identity_verification_session_id"),
+		identityStatus: text("identity_status").notNull().default("unstarted"),
+		identityVerifiedAt: timestampWithTimezone("identity_verified_at"),
+		createdAt: timestampWithTimezone("created_at").notNull().defaultNow(),
+		updatedAt: timestampWithTimezone("updated_at").notNull().defaultNow(),
+	},
+	(table) => [
+		index("user_profile_identity_status_idx").on(table.identityStatus),
+		// A Stripe VerificationSession maps to at most one profile. Nulls are
+		// excluded so profiles that never started verification do not collide.
+		uniqueIndex("user_profile_identity_session_uidx")
+			.on(table.identityVerificationSessionId)
+			.where(sql`${table.identityVerificationSessionId} is not null`),
+		check(
+			"user_profile_identity_status_check",
+			sql`${table.identityStatus} in ('unstarted', 'processing', 'requires_input', 'verified', 'canceled')`,
+		),
+	],
+);
+
 export const providerSyncRun = pgTable(
 	"provider_sync_run",
 	{
@@ -967,6 +1017,7 @@ export const schema = {
 	session,
 	account,
 	verification,
+	userProfile,
 	providerSyncRun,
 	providerSyncState,
 	accommodationListing,

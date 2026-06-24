@@ -35,5 +35,6 @@ export {
 	schema,
 	session,
 	user,
+	userProfile,
 	verification,
 } from "./schema";
