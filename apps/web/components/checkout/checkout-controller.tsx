@@ -340,11 +340,6 @@ export function CheckoutController({
 					loaded = null;
 				}
 
-				if (loaded?.status !== "draft") {
-					loaded = (await api.createCart()).cart;
-					sessionStorage.setItem(CART_STORAGE_KEY, loaded.id);
-				}
-
 				const staySeed: StayKeyInput = {
 					adults: initialStay.adults,
 					checkIn: initialStay.checkIn,
@@ -354,17 +349,34 @@ export function CheckoutController({
 					infants: initialStay.infants,
 					listingId: initialListing.id,
 				};
-
 				const targetStayKey = stayKeyToken(staySeed);
 
-				const existing = loaded.items.find(
-					(entry) =>
-						entry.status === "active" &&
-						stayKeyToken(stayKeyFromItem(initialListing.id, entry)) ===
-							targetStayKey,
-				);
+				if (loaded?.status !== "draft") {
+					loaded = (await api.createCart()).cart;
+					sessionStorage.setItem(CART_STORAGE_KEY, loaded.id);
+				}
 
-				if (!existing) {
+				// `/book` books a single stay; the multi-item cart (multiple stays +
+				// experiences in one purchase) is a separate, future concept. Reuse the
+				// stored draft only when it already holds exactly this stay (e.g. a page
+				// refresh). Otherwise start clean, so a stale stay from an earlier
+				// reserve never lingers as a second active item, which would surface its
+				// guest count in the summary and inflate the cart total by summing both.
+				const activeItems = loaded.items.filter(
+					(entry) => entry.status === "active",
+				);
+				const [firstActive] = activeItems;
+				const alreadyExactStay =
+					activeItems.length === 1 &&
+					firstActive !== undefined &&
+					stayKeyToken(stayKeyFromItem(initialListing.id, firstActive)) ===
+						targetStayKey;
+
+				if (!alreadyExactStay) {
+					if (activeItems.length > 0) {
+						loaded = (await api.createCart()).cart;
+						sessionStorage.setItem(CART_STORAGE_KEY, loaded.id);
+					}
 					loaded = (
 						await api.addCartItem(loaded.id, {
 							adults: initialStay.adults,
