@@ -1,5 +1,6 @@
 "use client";
 
+import type { AccountProfile } from "@workspace/core/account";
 import type {
 	CartDto,
 	CartItemDto,
@@ -56,11 +57,14 @@ import { ReservationSummary } from "./reservation-summary";
 import { ReviewReservationStep } from "./review-reservation-step";
 import { StripePaymentForm } from "./stripe-payment-form";
 import {
+	applyProfileToContactDraft,
 	type ContactDraft,
 	contactDraftFromOrderContact,
 	emptyContactDraft,
+	hasBillingDetails,
 	type InitialListing,
 	type InitialStay,
+	profileInputFromContactDraft,
 } from "./types";
 
 const CART_STORAGE_KEY = CHECKOUT_CART_STORAGE_KEY;
@@ -126,6 +130,7 @@ export function CheckoutController({
 	const [contact, setContact] = useState<ContactDraft>(emptyContactDraft);
 	const [contactPrefilled, setContactPrefilled] = useState(false);
 	const [signedIn, setSignedIn] = useState(false);
+	const [saveToAccount, setSaveToAccount] = useState(false);
 	const [editingContact, setEditingContact] = useState(false);
 	const [savingContact, setSavingContact] = useState(false);
 	const [payTimingDone, setPayTimingDone] = useState(false);
@@ -142,6 +147,9 @@ export function CheckoutController({
 	const [savingStay, setSavingStay] = useState(false);
 
 	const bootstrapStarted = useRef(false);
+	// Last profile fetched during prefill; reused so a "save to account" write
+	// preserves residence/nationality the checkout form never collects.
+	const accountProfileRef = useRef<AccountProfile | null>(null);
 
 	const item = activeItemOf(cart);
 	// `prepared`: a draft order exists, so the cart is frozen and any stay or
@@ -369,12 +377,14 @@ export function CheckoutController({
 	// biome-ignore lint/correctness/useExhaustiveDependencies: keyed on sessionUserId; the setters and `api` are stable.
 	useEffect(() => {
 		let cancelled = false;
+		accountProfileRef.current = null;
 		const loadMe = async () => {
 			try {
 				const response = await fetch("/api/me");
 				if (!response.ok) {
 					if (!cancelled) {
 						setSignedIn(false);
+						accountProfileRef.current = null;
 					}
 					return;
 				}
@@ -397,8 +407,34 @@ export function CheckoutController({
 				// Link any anonymous cart to the account (idempotent; the sign-in hook
 				// also does this, so failures here are non-fatal).
 				void api.claimCart().catch(() => undefined);
+
+				// Prefill the saved phone/billing details from the account profile.
+				const profileResponse = await fetch("/api/account/profile");
+				if (!profileResponse.ok || cancelled) {
+					accountProfileRef.current = null;
+					return;
+				}
+				const profile = (await profileResponse.json()) as AccountProfile;
+				if (cancelled) {
+					return;
+				}
+				accountProfileRef.current = profile;
+				setContact((current) => applyProfileToContactDraft(current, profile));
+				if (
+					profile.phoneE164 ||
+					profile.companyName ||
+					profile.taxNumber ||
+					hasBillingDetails(
+						applyProfileToContactDraft(emptyContactDraft(), profile),
+					)
+				) {
+					setContactPrefilled(true);
+				}
 			} catch {
 				// Anonymous checkout is fine; ignore.
+				if (!cancelled) {
+					accountProfileRef.current = null;
+				}
 			}
 		};
 		void loadMe();
@@ -593,6 +629,33 @@ export function CheckoutController({
 		}
 	}, [cart, initialListing.id, item, prepared, rebuildCart]);
 
+	// Best-effort: persist the entered contact/billing to the account profile
+	// when the guest opted in. Never blocks checkout; failures (e.g. a phone the
+	// profile schema rejects) are swallowed since the order already holds the
+	// contact. Residence/nationality are preserved by reloading the current
+	// profile immediately before the full-replace PUT.
+	const saveContactToAccount = useCallback(async () => {
+		if (!signedIn || !saveToAccount) {
+			return;
+		}
+		try {
+			const profileResponse = await fetch("/api/account/profile");
+			if (!profileResponse.ok) {
+				accountProfileRef.current = null;
+				return;
+			}
+			const profile = (await profileResponse.json()) as AccountProfile;
+			accountProfileRef.current = profile;
+			await fetch("/api/account/profile", {
+				body: JSON.stringify(profileInputFromContactDraft(contact, profile)),
+				headers: { "content-type": "application/json" },
+				method: "PUT",
+			});
+		} catch {
+			// Saving to the profile is a convenience; ignore failures.
+		}
+	}, [contact, saveToAccount, signedIn]);
+
 	const handleContactSubmit = useCallback(async () => {
 		if (!cart) {
 			return;
@@ -648,6 +711,7 @@ export function CheckoutController({
 				currency: intent.currency,
 				kind: intent.kind,
 			});
+			void saveContactToAccount();
 		} catch (error) {
 			const err = toCheckoutError(error);
 			if (ORDER_RESTART_CODES.has(err.code) && item) {
@@ -670,6 +734,7 @@ export function CheckoutController({
 		draftOrder,
 		handleValidationFailure,
 		initialListing.id,
+		saveContactToAccount,
 		stayKey,
 		item,
 		rebuildCart,
@@ -690,12 +755,13 @@ export function CheckoutController({
 			);
 			setContact(contactDraftFromOrderContact(saved));
 			setEditingContact(false);
+			void saveContactToAccount();
 		} catch (error) {
 			setContactError(toCheckoutError(error).message);
 		} finally {
 			setSavingContact(false);
 		}
-	}, [buildContactInput, draftOrder]);
+	}, [buildContactInput, draftOrder, saveContactToAccount]);
 
 	const validateBeforePay = useCallback(async (): Promise<boolean> => {
 		if (!cart || !draftOrder || payment?.kind !== "payment_intent") {
@@ -824,11 +890,14 @@ export function CheckoutController({
 		<div className="flex flex-col gap-4">
 			{!signedIn && !editingContact && <CheckoutAuthPrompt next={authNext} />}
 			<ContactBillingForm
+				canSaveToAccount={signedIn}
 				error={contactError}
 				onCancel={editingContact ? () => setEditingContact(false) : undefined}
 				onChange={setContact}
+				onSaveToAccountChange={setSaveToAccount}
 				onSubmit={editingContact ? handleContactUpdate : handleContactSubmit}
 				prefilledFromAccount={editingContact ? false : contactPrefilled}
+				saveToAccount={saveToAccount}
 				submitLabel={editingContact ? "Save contact details" : undefined}
 				submitting={editingContact ? savingContact : preparing}
 				value={contact}

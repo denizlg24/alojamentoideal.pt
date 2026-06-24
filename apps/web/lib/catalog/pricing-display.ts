@@ -117,7 +117,7 @@ export function listingPriceDisplay(
 
 	if (price.nightlyFrom !== null) {
 		return {
-			lead: "from",
+			lead: "as low as",
 			main: formatListingMoney(price.nightlyFrom, price.currency),
 			sub: "per night",
 		};

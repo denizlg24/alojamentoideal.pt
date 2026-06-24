@@ -5,17 +5,23 @@ import { Checkbox } from "@workspace/ui/components/checkbox";
 import { Input } from "@workspace/ui/components/input";
 import { Label } from "@workspace/ui/components/label";
 import { Textarea } from "@workspace/ui/components/textarea";
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { CountrySelect } from "@/components/form/country-select";
+import { PhoneInput } from "@/components/form/phone-input";
 import { CheckoutAlert } from "./checkout-alert";
-import type { ContactDraft } from "./types";
+import { type ContactDraft, hasBillingDetails } from "./types";
 
 interface ContactBillingFormProps {
+	/** When true, offer to save the entered contact/billing to the account. */
+	canSaveToAccount: boolean;
 	error: string | null;
 	/** Optional secondary action; shown when editing already-saved contact. */
 	onCancel?: () => void;
 	onChange: (next: ContactDraft) => void;
+	onSaveToAccountChange: (next: boolean) => void;
 	onSubmit: () => void;
 	prefilledFromAccount: boolean;
+	saveToAccount: boolean;
 	submitLabel?: string;
 	submitting: boolean;
 	value: ContactDraft;
@@ -70,16 +76,29 @@ function Field({
  * name/email prefilled, so the only required field left is usually the phone.
  */
 export function ContactBillingForm({
+	canSaveToAccount,
 	error,
 	onCancel,
 	onChange,
+	onSaveToAccountChange,
 	onSubmit,
 	prefilledFromAccount,
+	saveToAccount,
 	submitLabel,
 	submitting,
 	value,
 }: ContactBillingFormProps) {
-	const [showBilling, setShowBilling] = useState(false);
+	const [showBilling, setShowBilling] = useState(() =>
+		hasBillingDetails(value),
+	);
+
+	// Reveal the billing block once a saved address arrives via prefill. Never
+	// auto-collapses, so a guest who opened it keeps it open.
+	useEffect(() => {
+		if (hasBillingDetails(value)) {
+			setShowBilling(true);
+		}
+	}, [value]);
 
 	const set = <Key extends keyof ContactDraft>(
 		key: Key,
@@ -92,8 +111,10 @@ export function ContactBillingForm({
 		<div className="flex flex-col gap-4">
 			{prefilledFromAccount && (
 				<CheckoutAlert variant="info">
-					We filled in your account details. Add a phone number so the
-					Alojamento Ideal team can reach you about your stay.
+					We filled in your account details.{" "}
+					{value.phone
+						? null
+						: "Add a phone number so the Alojamento Ideal team can reach you about your stay."}
 				</CheckoutAlert>
 			)}
 
@@ -117,15 +138,14 @@ export function ContactBillingForm({
 				/>
 			</div>
 
-			<Field
-				autoComplete="tel"
-				id="contact-phone"
-				label="Phone (with country code)"
-				onChange={(next) => set("phone", next)}
-				placeholder="+351 912 345 678"
-				type="tel"
-				value={value.phone}
-			/>
+			<div className="flex flex-col gap-1.5">
+				<Label htmlFor="contact-phone">Phone</Label>
+				<PhoneInput
+					id="contact-phone"
+					onChange={(next) => set("phone", next)}
+					value={value.phone}
+				/>
+			</div>
 
 			<div className="flex items-center gap-2">
 				<Checkbox
@@ -195,13 +215,15 @@ export function ContactBillingForm({
 							onChange={(next) => set("region", next)}
 							value={value.region}
 						/>
-						<Field
-							autoComplete="country-name"
-							id="billing-country"
-							label="Country"
-							onChange={(next) => set("country", next)}
-							value={value.country}
-						/>
+						<div className="flex flex-col gap-1.5">
+							<Label htmlFor="billing-country">Country</Label>
+							<CountrySelect
+								autoComplete="country"
+								id="billing-country"
+								onChange={(next) => set("country", next)}
+								value={value.country}
+							/>
+						</div>
 					</div>
 				</div>
 			) : (
@@ -223,6 +245,21 @@ export function ContactBillingForm({
 					value={value.notes}
 				/>
 			</div>
+
+			{canSaveToAccount && (
+				<div className="flex items-center gap-2">
+					<Checkbox
+						checked={saveToAccount}
+						id="save-to-account"
+						onCheckedChange={(checked) =>
+							onSaveToAccountChange(checked === true)
+						}
+					/>
+					<Label className="font-normal text-sm" htmlFor="save-to-account">
+						Save this contact and billing info to my account for next time
+					</Label>
+				</div>
+			)}
 
 			{error && <CheckoutAlert variant="error">{error}</CheckoutAlert>}
 

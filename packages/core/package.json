@@ -8,6 +8,10 @@
 			"types": "./src/index.ts",
 			"default": "./src/index.ts"
 		},
+		"./account": {
+			"types": "./src/account/index.ts",
+			"default": "./src/account/index.ts"
+		},
 		"./catalog": {
 			"types": "./src/catalog/index.ts",
 			"default": "./src/catalog/index.ts"

@@ -1,3 +1,4 @@
+import type { IdentityVerificationStatus } from "@workspace/db";
 import Stripe from "stripe";
 import { StripeConfigurationError } from "./client";
 
@@ -79,15 +80,45 @@ export interface StripePaymentFailed {
 	type: "payment_failed";
 }
 
+/** A Stripe Identity VerificationSession lifecycle transition. */
+export interface StripeIdentityUpdated {
+	type: "identity_updated";
+	sessionId: string;
+	/** Account this session belongs to, read from session metadata. */
+	userId: string | null;
+	status: Exclude<IdentityVerificationStatus, "unstarted">;
+	/** ISO timestamp of the Stripe lifecycle event. */
+	statusChangedAt: string;
+	/** ISO timestamp the session reached `verified`; null otherwise. */
+	verifiedAt: string | null;
+}
+
 /**
- * The subset of Stripe events checkout reacts to, reduced to plain fields. This
+ * The subset of Stripe events the app reacts to, reduced to plain fields. This
  * keeps raw Stripe enums and object shapes inside this package; the route layer
  * dispatches on `type` without depending on the `stripe` SDK.
  */
 export type RelevantStripeEvent =
 	| StripePaymentSucceeded
 	| StripePaymentFailed
+	| StripeIdentityUpdated
 	| { type: "ignored" };
+
+function identityEvent(
+	event: Stripe.Event,
+	session: Stripe.Identity.VerificationSession,
+	status: StripeIdentityUpdated["status"],
+): StripeIdentityUpdated {
+	const eventTime = new Date(event.created * 1000).toISOString();
+	return {
+		type: "identity_updated",
+		sessionId: session.id,
+		userId: session.metadata?.userId ?? null,
+		status,
+		statusChangedAt: eventTime,
+		verifiedAt: status === "verified" ? eventTime : null,
+	};
+}
 
 /**
  * Reduces a verified Stripe event to the normalized union the app handles.
@@ -116,6 +147,14 @@ export function interpretStripeEvent(event: Stripe.Event): RelevantStripeEvent {
 				type: "payment_failed",
 			};
 		}
+		case "identity.verification_session.verified":
+			return identityEvent(event, event.data.object, "verified");
+		case "identity.verification_session.processing":
+			return identityEvent(event, event.data.object, "processing");
+		case "identity.verification_session.requires_input":
+			return identityEvent(event, event.data.object, "requires_input");
+		case "identity.verification_session.canceled":
+			return identityEvent(event, event.data.object, "canceled");
 		default:
 			return { type: "ignored" };
 	}
