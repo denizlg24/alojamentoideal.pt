@@ -377,12 +377,14 @@ export function CheckoutController({
 	// biome-ignore lint/correctness/useExhaustiveDependencies: keyed on sessionUserId; the setters and `api` are stable.
 	useEffect(() => {
 		let cancelled = false;
+		accountProfileRef.current = null;
 		const loadMe = async () => {
 			try {
 				const response = await fetch("/api/me");
 				if (!response.ok) {
 					if (!cancelled) {
 						setSignedIn(false);
+						accountProfileRef.current = null;
 					}
 					return;
 				}
@@ -409,6 +411,7 @@ export function CheckoutController({
 				// Prefill the saved phone/billing details from the account profile.
 				const profileResponse = await fetch("/api/account/profile");
 				if (!profileResponse.ok || cancelled) {
+					accountProfileRef.current = null;
 					return;
 				}
 				const profile = (await profileResponse.json()) as AccountProfile;
@@ -429,6 +432,9 @@ export function CheckoutController({
 				}
 			} catch {
 				// Anonymous checkout is fine; ignore.
+				if (!cancelled) {
+					accountProfileRef.current = null;
+				}
 			}
 		};
 		void loadMe();
@@ -626,16 +632,22 @@ export function CheckoutController({
 	// Best-effort: persist the entered contact/billing to the account profile
 	// when the guest opted in. Never blocks checkout; failures (e.g. a phone the
 	// profile schema rejects) are swallowed since the order already holds the
-	// contact. Residence/nationality are preserved via the cached profile.
+	// contact. Residence/nationality are preserved by reloading the current
+	// profile immediately before the full-replace PUT.
 	const saveContactToAccount = useCallback(async () => {
 		if (!signedIn || !saveToAccount) {
 			return;
 		}
 		try {
+			const profileResponse = await fetch("/api/account/profile");
+			if (!profileResponse.ok) {
+				accountProfileRef.current = null;
+				return;
+			}
+			const profile = (await profileResponse.json()) as AccountProfile;
+			accountProfileRef.current = profile;
 			await fetch("/api/account/profile", {
-				body: JSON.stringify(
-					profileInputFromContactDraft(contact, accountProfileRef.current),
-				),
+				body: JSON.stringify(profileInputFromContactDraft(contact, profile)),
 				headers: { "content-type": "application/json" },
 				method: "PUT",
 			});

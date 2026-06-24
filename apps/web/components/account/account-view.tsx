@@ -30,7 +30,14 @@ function formatDate(value: string | null): string {
 	if (!value) {
 		return "Not set";
 	}
-	const date = new Date(value);
+	const dateOnly = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+	const date = dateOnly
+		? new Date(
+				Number(dateOnly[1]),
+				Number(dateOnly[2]) - 1,
+				Number(dateOnly[3]),
+			)
+		: new Date(value);
 	if (Number.isNaN(date.getTime())) {
 		return value;
 	}
@@ -78,7 +85,7 @@ export function AccountView({
 					</div>
 				</div>
 
-				<dl className="grid grid-cols-1 gap-5 sm:grid-cols-2">
+				<dl className="grid grid-cols-1 gap-x-4 gap-y-1 sm:grid-cols-[max-content_1fr]">
 					<ReadField label="Name" value={user.name || "Not set"} />
 					<ReadField label="Email" value={user.email} />
 					<ReadField

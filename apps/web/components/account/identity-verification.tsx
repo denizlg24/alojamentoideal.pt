@@ -33,6 +33,13 @@ const PILL_LABEL: Record<IdentityVerificationStatus, string> = {
 	canceled: "Not verified",
 };
 
+const HOSTED_RETURN_POLL_ATTEMPTS = 8;
+const HOSTED_RETURN_POLL_DELAY_MS = 1000;
+
+function sleep(ms: number): Promise<void> {
+	return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
+
 function helperText(status: IdentityVerificationStatus): string {
 	switch (status) {
 		case "verified":
@@ -103,23 +110,45 @@ export function IdentityVerification({
 
 		let cancelled = false;
 		void (async () => {
-			const response = await fetch("/api/account/profile").catch(() => null);
-			if (!response?.ok || cancelled) {
-				return;
+			const initialStatus = initialIdentity.status;
+			setIdentity((current) =>
+				current.status === "verified"
+					? current
+					: { ...current, status: "processing", verifiedAt: null },
+			);
+
+			for (
+				let attempt = 0;
+				attempt < HOSTED_RETURN_POLL_ATTEMPTS;
+				attempt += 1
+			) {
+				if (attempt > 0) {
+					await sleep(HOSTED_RETURN_POLL_DELAY_MS);
+				}
+				const response = await fetch("/api/account/profile").catch(() => null);
+				if (!response?.ok || cancelled) {
+					continue;
+				}
+				const profile = (await response
+					.json()
+					.catch(() => null)) as AccountProfile | null;
+				if (!profile || cancelled) {
+					continue;
+				}
+				if (
+					profile.identity.status !== initialStatus ||
+					attempt === HOSTED_RETURN_POLL_ATTEMPTS - 1
+				) {
+					setIdentity(profile.identity);
+					return;
+				}
 			}
-			const profile = (await response
-				.json()
-				.catch(() => null)) as AccountProfile | null;
-			if (!profile || cancelled) {
-				return;
-			}
-			setIdentity(profile.identity);
 		})();
 
 		return () => {
 			cancelled = true;
 		};
-	}, []);
+	}, [initialIdentity.status]);
 
 	async function startVerification() {
 		setError(null);
@@ -223,7 +252,7 @@ export function IdentityVerification({
 			{error && <p className="text-destructive text-sm">{error}</p>}
 
 			{status === "verified" && (
-				<dl className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+				<dl className="grid grid-cols-1 gap-x-4 gap-y-1 sm:grid-cols-[max-content_1fr]">
 					<ReadField
 						label="Document type"
 						value={valueOrFallback(identity.documentType)}

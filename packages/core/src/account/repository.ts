@@ -1,7 +1,6 @@
 import {
 	type Database,
 	type IdentityDocumentStatus,
-	type IdentityVerificationStatus,
 	userIdentityDocument,
 	userProfile,
 } from "@workspace/db";
@@ -9,7 +8,6 @@ import { and, desc, eq, isNull, sql } from "drizzle-orm";
 import {
 	decryptIdentityField,
 	encryptIdentityField,
-	getAccountIdentityEncryptionKey,
 } from "./identity-encryption";
 import type {
 	AccountIdentityDocumentDisplay,
@@ -71,6 +69,18 @@ function maskDocumentNumber(value: string | null): string | null {
 	return suffix.length > 0 ? `***${suffix}` : null;
 }
 
+function parseStatusChangedAt(value: string | null): Date | null {
+	if (!value) {
+		return null;
+	}
+	const date = new Date(value);
+	return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function lastAppliedIdentityEventAt(row: UserIdentityDocumentRow): Date | null {
+	return row.verifiedAt ?? row.submittedAt ?? null;
+}
+
 function toIdentityDisplay(
 	row: UserIdentityDocumentRow | undefined,
 ): AccountIdentityDocumentDisplay {
@@ -86,22 +96,21 @@ function toIdentityDisplay(
 		};
 	}
 
-	const key = getAccountIdentityEncryptionKey();
-	const documentNumber = decryptIdentityField(row.documentNumberEncrypted, key);
+	const documentNumber = decryptIdentityField(row.documentNumberEncrypted);
 
 	return {
 		documentType: cleanDisplayValue(
-			decryptIdentityField(row.documentTypeEncrypted, key),
+			decryptIdentityField(row.documentTypeEncrypted),
 		),
 		expiresOn: cleanDisplayValue(
-			decryptIdentityField(row.documentExpiresOnEncrypted, key),
+			decryptIdentityField(row.documentExpiresOnEncrypted),
 		),
 		issuingCountry: cleanDisplayValue(
-			decryptIdentityField(row.documentIssuingCountryEncrypted, key),
+			decryptIdentityField(row.documentIssuingCountryEncrypted),
 		),
 		maskedDocumentNumber: maskDocumentNumber(documentNumber),
 		nationality: cleanDisplayValue(
-			decryptIdentityField(row.nationalityEncrypted, key),
+			decryptIdentityField(row.nationalityEncrypted),
 		),
 		status: row.status,
 		verifiedAt: row.verifiedAt?.toISOString() ?? null,
@@ -134,23 +143,17 @@ function toProfile(
 function encryptedIdentityFields(
 	fields: VerifiedIdentityDocumentFields,
 ): Partial<UserIdentityDocumentInsert> {
-	const key = getAccountIdentityEncryptionKey();
-
 	return {
-		dateOfBirthEncrypted: encryptIdentityField(fields.dateOfBirth, key),
-		documentExpiresOnEncrypted: encryptIdentityField(
-			fields.documentExpiresOn,
-			key,
-		),
+		dateOfBirthEncrypted: encryptIdentityField(fields.dateOfBirth),
+		documentExpiresOnEncrypted: encryptIdentityField(fields.documentExpiresOn),
 		documentIssuingCountryEncrypted: encryptIdentityField(
 			fields.documentIssuingCountry,
-			key,
 		),
-		documentNumberEncrypted: encryptIdentityField(fields.documentNumber, key),
-		documentTypeEncrypted: encryptIdentityField(fields.documentType, key),
-		firstNameEncrypted: encryptIdentityField(fields.firstName, key),
-		lastNameEncrypted: encryptIdentityField(fields.lastName, key),
-		nationalityEncrypted: encryptIdentityField(fields.nationality, key),
+		documentNumberEncrypted: encryptIdentityField(fields.documentNumber),
+		documentTypeEncrypted: encryptIdentityField(fields.documentType),
+		firstNameEncrypted: encryptIdentityField(fields.firstName),
+		lastNameEncrypted: encryptIdentityField(fields.lastName),
+		nationalityEncrypted: encryptIdentityField(fields.nationality),
 		stripeVerificationReportId: fields.stripeVerificationReportId,
 	};
 }
@@ -317,10 +320,17 @@ export class AccountProfileRepository {
 		}
 
 		const now = new Date();
-		const statusAt = statusChangedAt ? new Date(statusChangedAt) : now;
+		const statusAt = parseStatusChangedAt(statusChangedAt) ?? now;
+		const lastAppliedAt = lastAppliedIdentityEventAt(existing);
+		if (lastAppliedAt && statusAt.getTime() < lastAppliedAt.getTime()) {
+			return existing.userId;
+		}
+		if (existing.status === "verified" && status !== "verified") {
+			return existing.userId;
+		}
 		const set: Partial<UserIdentityDocumentInsert> = {
 			status,
-			updatedAt: new Date(),
+			updatedAt: now,
 		};
 
 		if (

@@ -119,6 +119,7 @@ CREATE INDEX "booking_guests_user_idx" ON "booking_guests" USING btree ("user_id
 CREATE INDEX "booking_guests_identity_document_idx" ON "booking_guests" USING btree ("user_identity_document_id");--> statement-breakpoint
 CREATE INDEX "booking_guests_purge_after_idx" ON "booking_guests" USING btree ("purge_after");--> statement-breakpoint
 CREATE INDEX "guest_submission_jobs_booking_status_idx" ON "guest_submission_jobs" USING btree ("provider_booking_id","status");--> statement-breakpoint
+CREATE UNIQUE INDEX "guest_submission_jobs_active_booking_uidx" ON "guest_submission_jobs" USING btree ("provider_booking_id") WHERE "guest_submission_jobs"."status" in ('pending', 'running', 'retrying');--> statement-breakpoint
 CREATE INDEX "guest_submission_jobs_status_next_run_idx" ON "guest_submission_jobs" USING btree ("status","next_run_at");--> statement-breakpoint
 CREATE UNIQUE INDEX "provider_bookings_order_item_uidx" ON "provider_bookings" USING btree ("order_item_id");--> statement-breakpoint
 CREATE UNIQUE INDEX "provider_bookings_provider_reservation_uidx" ON "provider_bookings" USING btree ("provider","external_account_id","provider_reservation_id") WHERE "provider_bookings"."provider_reservation_id" is not null;--> statement-breakpoint

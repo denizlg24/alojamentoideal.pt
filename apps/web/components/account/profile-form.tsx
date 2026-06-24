@@ -57,6 +57,7 @@ function isEqual(a: FormState, b: FormState): boolean {
 
 interface FieldProps {
 	autoComplete?: string;
+	disabled?: boolean;
 	error?: string;
 	id: string;
 	label: string;
@@ -68,6 +69,7 @@ interface FieldProps {
 
 function Field({
 	autoComplete,
+	disabled,
 	error,
 	id,
 	label,
@@ -82,6 +84,7 @@ function Field({
 			<Input
 				aria-invalid={error ? true : undefined}
 				autoComplete={autoComplete}
+				disabled={disabled}
 				id={id}
 				onChange={(event) => onChange(event.target.value)}
 				placeholder={placeholder}
@@ -94,12 +97,14 @@ function Field({
 }
 
 function CountryField({
+	disabled,
 	error,
 	id,
 	label,
 	onChange,
 	value,
 }: {
+	disabled?: boolean;
 	error?: string;
 	id: string;
 	label: string;
@@ -110,6 +115,7 @@ function CountryField({
 		<div className="flex flex-col gap-1.5">
 			<Label htmlFor={id}>{label}</Label>
 			<CountrySelect
+				disabled={disabled}
 				id={id}
 				invalid={Boolean(error)}
 				onChange={onChange}
@@ -150,6 +156,22 @@ export function ProfileForm({
 		}
 	}
 
+	function setCompanyBilling(isCompany: boolean) {
+		setDraft((current) => ({
+			...current,
+			companyName: isCompany ? current.companyName : "",
+			isCompany,
+			taxNumber: isCompany ? current.taxNumber : "",
+		}));
+		setStatus("idle");
+		setErrors((current) => ({
+			...current,
+			companyName: undefined,
+			isCompany: undefined,
+			taxNumber: undefined,
+		}));
+	}
+
 	function reset() {
 		setDraft(baseline);
 		setErrors({});
@@ -159,7 +181,8 @@ export function ProfileForm({
 
 	async function onSubmit(event: React.FormEvent) {
 		event.preventDefault();
-		const parsed = profileUpdateSchema.safeParse(draft);
+		const submitted = draft;
+		const parsed = profileUpdateSchema.safeParse(submitted);
 		if (!parsed.success) {
 			const next: FieldErrors = {};
 			for (const issue of parsed.error.issues) {
@@ -178,11 +201,11 @@ export function ProfileForm({
 		// Optimistically promote the draft to the saved baseline so the form
 		// settles immediately; roll back if the request fails.
 		const previous = baseline;
-		setBaseline(draft);
+		setBaseline(submitted);
 
 		try {
 			const response = await fetch("/api/account/profile", {
-				body: JSON.stringify(draft),
+				body: JSON.stringify(submitted),
 				headers: { "content-type": "application/json" },
 				method: "PUT",
 			});
@@ -230,6 +253,7 @@ export function ProfileForm({
 				<div className="flex flex-col gap-1.5">
 					<Label htmlFor={`${baseId}-phone`}>Phone number</Label>
 					<PhoneInput
+						disabled={saving}
 						id={`${baseId}-phone`}
 						invalid={Boolean(errors.phoneE164)}
 						onChange={(value) => set("phoneE164", value)}
@@ -248,8 +272,9 @@ export function ProfileForm({
 				<div className="flex items-center gap-2">
 					<Checkbox
 						checked={draft.isCompany}
+						disabled={saving}
 						id={`${baseId}-is-company`}
-						onCheckedChange={(checked) => set("isCompany", checked === true)}
+						onCheckedChange={(checked) => setCompanyBilling(checked === true)}
 					/>
 					<Label className="font-normal" htmlFor={`${baseId}-is-company`}>
 						I'm booking on behalf of a company
@@ -260,6 +285,7 @@ export function ProfileForm({
 					<TwoColumn>
 						<Field
 							error={errors.companyName}
+							disabled={saving}
 							id={`${baseId}-company`}
 							label="Company name"
 							onChange={(value) => set("companyName", value)}
@@ -267,6 +293,7 @@ export function ProfileForm({
 						/>
 						<Field
 							error={errors.taxNumber}
+							disabled={saving}
 							id={`${baseId}-tax`}
 							label="Tax number"
 							onChange={(value) => set("taxNumber", value)}
@@ -277,6 +304,7 @@ export function ProfileForm({
 
 				<Field
 					autoComplete="address-line1"
+					disabled={saving}
 					error={errors.billingLine1}
 					id={`${baseId}-line1`}
 					label="Address"
@@ -286,6 +314,7 @@ export function ProfileForm({
 				/>
 				<Field
 					autoComplete="address-line2"
+					disabled={saving}
 					error={errors.billingLine2}
 					id={`${baseId}-line2`}
 					label="Apartment, suite, etc. (optional)"
@@ -295,6 +324,7 @@ export function ProfileForm({
 				<TwoColumn>
 					<Field
 						autoComplete="address-level2"
+						disabled={saving}
 						error={errors.billingCity}
 						id={`${baseId}-city`}
 						label="City"
@@ -303,6 +333,7 @@ export function ProfileForm({
 					/>
 					<Field
 						autoComplete="address-level1"
+						disabled={saving}
 						error={errors.billingRegion}
 						id={`${baseId}-region`}
 						label="Region (optional)"
@@ -313,6 +344,7 @@ export function ProfileForm({
 				<TwoColumn>
 					<Field
 						autoComplete="postal-code"
+						disabled={saving}
 						error={errors.billingPostalCode}
 						id={`${baseId}-postal`}
 						label="Postal code"
@@ -320,6 +352,7 @@ export function ProfileForm({
 						value={draft.billingPostalCode}
 					/>
 					<CountryField
+						disabled={saving}
 						error={errors.billingCountry}
 						id={`${baseId}-billing-country`}
 						label="Country"
@@ -335,6 +368,7 @@ export function ProfileForm({
 			>
 				<TwoColumn>
 					<CountryField
+						disabled={saving}
 						error={errors.residenceCountry}
 						id={`${baseId}-residence`}
 						label="Country of residence"
@@ -342,6 +376,7 @@ export function ProfileForm({
 						value={draft.residenceCountry}
 					/>
 					<CountryField
+						disabled={saving}
 						error={errors.nationality}
 						id={`${baseId}-nationality`}
 						label="Nationality"

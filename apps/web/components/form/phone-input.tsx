@@ -56,6 +56,7 @@ function composePhone(country: string, national: string): string {
 }
 
 interface PhoneInputProps {
+	disabled?: boolean;
 	id?: string;
 	invalid?: boolean;
 	onChange: (value: string) => void;
@@ -70,6 +71,7 @@ interface PhoneInputProps {
  * select as {@link CountrySelect} for a consistent, mobile-friendly experience.
  */
 export function PhoneInput({
+	disabled,
 	id,
 	invalid,
 	onChange,
@@ -102,6 +104,7 @@ export function PhoneInput({
 			<NativeSelect
 				aria-label="Country dialing code"
 				className="w-28 shrink-0"
+				disabled={disabled}
 				onChange={(event) => update(event.target.value, national)}
 				value={country}
 			>
@@ -117,6 +120,7 @@ export function PhoneInput({
 				aria-invalid={invalid || undefined}
 				autoComplete="tel-national"
 				className="flex-1"
+				disabled={disabled}
 				id={id}
 				inputMode="tel"
 				onChange={(event) => update(country, event.target.value)}

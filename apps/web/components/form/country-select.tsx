@@ -9,6 +9,7 @@ import { COUNTRY_OPTIONS } from "@/lib/site/countries";
 interface CountrySelectProps {
 	autoComplete?: string;
 	className?: string;
+	disabled?: boolean;
 	id?: string;
 	invalid?: boolean;
 	onChange: (code: string) => void;
@@ -26,6 +27,7 @@ interface CountrySelectProps {
 export function CountrySelect({
 	autoComplete,
 	className,
+	disabled,
 	id,
 	invalid,
 	onChange,
@@ -37,6 +39,7 @@ export function CountrySelect({
 			aria-invalid={invalid || undefined}
 			autoComplete={autoComplete}
 			className={className ?? "w-full"}
+			disabled={disabled}
 			id={id}
 			onChange={(event) => onChange(event.target.value)}
 			value={value}

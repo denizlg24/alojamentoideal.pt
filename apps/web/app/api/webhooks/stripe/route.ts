@@ -9,11 +9,15 @@ import {
 	StripeConfigurationError,
 	StripeWebhookSignatureError,
 } from "@workspace/core/integrations/stripe";
-import { logger } from "@workspace/core/observability";
+import { hashIdentifier, logger } from "@workspace/core/observability";
 import { accountProfileRepository } from "@/lib/api/account";
 import { commerceService } from "@/lib/api/commerce";
 import { withApiRoute } from "@/lib/api/route";
 import { sendOrderConfirmationEmail } from "@/lib/email/order-confirmation";
+
+function stripeSessionLogId(sessionId: string): string {
+	return hashIdentifier(`stripe-identity:${sessionId}`);
+}
 
 /**
  * Settles an order whose PaymentIntent succeeded. `markOrderPaid` is idempotent,
@@ -115,7 +119,7 @@ async function handleIdentityUpdated(
 		logger.info(
 			"Stripe identity event ignored for a reset or unknown session",
 			{
-				sessionId: event.sessionId,
+				sessionIdHash: stripeSessionLogId(event.sessionId),
 				status: event.status,
 			},
 		);
@@ -135,7 +139,7 @@ async function handleIdentityUpdated(
 	});
 	if (!userId) {
 		logger.warn("Stripe identity event referenced an unknown session", {
-			sessionId: event.sessionId,
+			sessionIdHash: stripeSessionLogId(event.sessionId),
 			status: event.status,
 		});
 	}

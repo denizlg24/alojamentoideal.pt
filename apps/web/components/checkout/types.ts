@@ -153,6 +153,8 @@ export function profileInputFromContactDraft(
 		return trimmed.length > 0 ? trimmed : null;
 	};
 	const country = text(draft.country);
+	const companyName = draft.isCompany ? text(draft.companyName) : null;
+	const taxNumber = draft.isCompany ? text(draft.taxNumber) : null;
 	return {
 		billingCity: text(draft.city),
 		billingCountry: country ? country.toUpperCase() : null,
@@ -160,11 +162,11 @@ export function profileInputFromContactDraft(
 		billingLine2: text(draft.line2),
 		billingPostalCode: text(draft.postalCode),
 		billingRegion: text(draft.region),
-		companyName: text(draft.companyName),
+		companyName,
 		isCompany: draft.isCompany,
 		nationality: base?.nationality ?? null,
 		phoneE164: text(draft.phone),
 		residenceCountry: base?.residenceCountry ?? null,
-		taxNumber: text(draft.taxNumber),
+		taxNumber,
 	};
 }

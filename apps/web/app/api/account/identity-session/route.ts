@@ -4,10 +4,15 @@ import {
 	resetIdentityVerificationSession,
 	StripeConfigurationError,
 } from "@workspace/core/integrations/stripe";
-import { logger } from "@workspace/core/observability";
+import { hashIdentifier, logger } from "@workspace/core/observability";
 import { accountProfileRepository } from "@/lib/api/account";
 import { withApiRoute } from "@/lib/api/route";
 import { getServerUser } from "@/lib/auth/session";
+import { siteConfig } from "@/lib/site/config";
+
+function stripeSessionLogId(sessionId: string): string {
+	return hashIdentifier(`stripe-identity:${sessionId}`);
+}
 
 /**
  * Starts a Stripe Identity verification for the signed-in user and returns the
@@ -40,17 +45,39 @@ export const POST = withApiRoute(
 			throw error;
 		}
 
-		const origin = new URL(request.url).origin;
+		const returnUrl = new URL(
+			"/account?identity=complete",
+			siteConfig.url,
+		).toString();
 		const session = await createIdentityVerificationSession(stripe, {
 			userId: user.id,
-			returnUrl: `${origin}/account?identity=complete`,
+			returnUrl,
 		});
 
-		await accountProfileRepository().linkIdentitySession(
-			user.id,
-			session.id,
-			session.status,
-		);
+		try {
+			await accountProfileRepository().linkIdentitySession(
+				user.id,
+				session.id,
+				session.status,
+			);
+		} catch (error) {
+			try {
+				await resetIdentityVerificationSession(stripe, {
+					sessionId: session.id,
+					status: session.status,
+				});
+			} catch (cleanupError) {
+				logger.warn("Stripe identity session cleanup failed", {
+					error:
+						cleanupError instanceof Error
+							? cleanupError.message
+							: String(cleanupError),
+					sessionIdHash: stripeSessionLogId(session.id),
+					status: session.status,
+				});
+			}
+			throw error;
+		}
 
 		return Response.json({
 			clientSecret: session.clientSecret,
@@ -104,7 +131,9 @@ export const DELETE = withApiRoute(
 				} catch (error) {
 					logger.warn("Stripe identity reset failed; deleting local data", {
 						error: error instanceof Error ? error.message : String(error),
-						sessionId: target.stripeVerificationSessionId,
+						sessionIdHash: stripeSessionLogId(
+							target.stripeVerificationSessionId,
+						),
 						status: target.status,
 					});
 				}

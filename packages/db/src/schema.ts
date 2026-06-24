@@ -1122,6 +1122,9 @@ export const guestSubmissionJob = pgTable(
 			table.providerBookingId,
 			table.status,
 		),
+		uniqueIndex("guest_submission_jobs_active_booking_uidx")
+			.on(table.providerBookingId)
+			.where(sql`${table.status} in ('pending', 'running', 'retrying')`),
 		index("guest_submission_jobs_status_next_run_idx").on(
 			table.status,
 			table.nextRunAt,

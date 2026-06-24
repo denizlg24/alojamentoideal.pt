@@ -47,11 +47,11 @@ export function ReadField({
 	value: ReactNode;
 }) {
 	return (
-		<div className="flex flex-col gap-1">
-			<span className="text-muted-foreground text-xs uppercase tracking-wide">
+		<>
+			<dt className="text-muted-foreground text-xs uppercase tracking-wide">
 				{label}
-			</span>
-			<span className="text-sm">{value}</span>
-		</div>
+			</dt>
+			<dd className="mb-4 text-sm last:mb-0 sm:mb-0">{value}</dd>
+		</>
 	);
 }
