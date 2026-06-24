@@ -9,6 +9,7 @@ import {
 	StripeWebhookSignatureError,
 } from "@workspace/core/integrations/stripe";
 import { logger } from "@workspace/core/observability";
+import { accountProfileRepository } from "@/lib/api/account";
 import { commerceService } from "@/lib/api/commerce";
 import { withApiRoute } from "@/lib/api/route";
 import { sendOrderConfirmationEmail } from "@/lib/email/order-confirmation";
@@ -96,6 +97,29 @@ async function handlePaymentFailed(
 	});
 }
 
+/**
+ * Persists a Stripe Identity verification transition against the user's
+ * profile. `applyIdentityStatus` matches on the session id and is idempotent,
+ * so a re-delivered event resolves to the same state. A session with no
+ * matching profile is logged for reconciliation rather than failing the
+ * webhook.
+ */
+async function handleIdentityUpdated(
+	event: Extract<RelevantStripeEvent, { type: "identity_updated" }>,
+): Promise<void> {
+	const userId = await accountProfileRepository().applyIdentityStatus(
+		event.sessionId,
+		event.status,
+		event.verifiedAt,
+	);
+	if (!userId) {
+		logger.warn("Stripe identity event referenced an unknown session", {
+			sessionId: event.sessionId,
+			status: event.status,
+		});
+	}
+}
+
 async function handleStripeEvent(event: RelevantStripeEvent): Promise<void> {
 	switch (event.type) {
 		case "payment_succeeded":
@@ -103,6 +127,9 @@ async function handleStripeEvent(event: RelevantStripeEvent): Promise<void> {
 			return;
 		case "payment_failed":
 			await handlePaymentFailed(event);
+			return;
+		case "identity_updated":
+			await handleIdentityUpdated(event);
 			return;
 		default:
 			return;
