@@ -6,6 +6,7 @@ import { Label } from "@workspace/ui/components/label";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
+import { FcGoogle } from "react-icons/fc";
 import { signIn } from "@/lib/auth/client";
 import { claimCart } from "@/lib/checkout/api-client";
 import type { AuthView } from "./auth-dialog-provider";
@@ -124,6 +125,7 @@ export function LoginForm({
 			</div>
 			<Button onClick={handleGoogle} size="lg" type="button" variant="outline">
 				Continue with Google
+				<FcGoogle />
 			</Button>
 		</form>
 	);
