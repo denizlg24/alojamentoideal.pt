@@ -7,16 +7,19 @@ export function safeNextPath(
 	value: string | null | undefined,
 	fallback = "/",
 ): string {
+	const normalized = value?.trim();
+	const lower = normalized?.toLowerCase();
 	if (
-		!value?.startsWith("/") ||
-		value.startsWith("//") ||
-		value.startsWith("/\\") ||
-		value.startsWith("/%5C") ||
-		value.startsWith("/%2F:")
+		!normalized?.startsWith("/") ||
+		normalized.startsWith("//") ||
+		normalized.startsWith("/\\") ||
+		lower?.startsWith("/%5c") ||
+		lower?.startsWith("/%2f%2f") ||
+		lower?.startsWith("/%2f:")
 	) {
 		return fallback;
 	}
-	return value;
+	return normalized;
 }
 
 /**

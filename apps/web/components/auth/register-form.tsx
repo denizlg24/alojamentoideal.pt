@@ -69,7 +69,7 @@ export function RegisterForm({
 			// Sign-up does not create a session (email verification is required). Show
 			// the verify-email state; the cart merges automatically on first login.
 			setVerifyEmail(email.trim());
-		} catch (error) {
+		} catch {
 			setError("We could not create your account. Please try again.");
 			setSubmitting(false);
 		}

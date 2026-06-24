@@ -364,7 +364,7 @@ export class CommerceService {
 				.leftJoin(cartTable, eq(cartTable.id, orderTable.cartId))
 				.where(eq(orderTable.publicReference, publicReference))
 				.limit(1)
-				.for("update");
+				.for("update", { of: orderTable });
 			if (
 				!row ||
 				!isOrderAccessGranted(

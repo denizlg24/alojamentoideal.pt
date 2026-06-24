@@ -236,7 +236,7 @@ export function buildOrderConfirmationEmail(
 		const html = applyPlaceholders(TEMPLATES.orderConfirmationHtml, {
 			APP_NAME,
 			ORDER_NUMBER: escapeHtml(input.orderNumber),
-			ACCOMMODATION_TITLE: safeTitleForSubject,
+			ACCOMMODATION_TITLE: escapeHtml(input.accommodationTitle),
 			ACCOMMODATION_IMAGE: escapeHtml(input.accommodationImage),
 			CHECK_IN: escapeHtml(input.checkIn),
 			CHECK_OUT: escapeHtml(input.checkOut),
