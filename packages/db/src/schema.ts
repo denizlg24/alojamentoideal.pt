@@ -156,6 +156,17 @@ export const verification = pgTable("verification", {
 });
 
 /**
+ * Lifecycle of a user's Stripe Identity verification. Mirrors the Stripe
+ * VerificationSession statuses plus `unstarted` for the pre-session state.
+ */
+export type IdentityVerificationStatus =
+	| "unstarted"
+	| "processing"
+	| "requires_input"
+	| "verified"
+	| "canceled";
+
+/**
  * Optional guest profile holding the self-service details a user fills in on
  * their account: contact phone, billing identity (company/tax) and address, and
  * residence/nationality. These are the defaults that pre-fill the checkout
@@ -163,8 +174,7 @@ export const verification = pgTable("verification", {
  *
  * Identity verification is delegated to Stripe Identity: we never store raw
  * document data, only the verification session id, its lifecycle status and the
- * timestamp it last reached `verified`. `identityStatus` mirrors Stripe's
- * VerificationSession statuses plus `unstarted` for the pre-session state.
+ * timestamp it last reached `verified`.
  */
 export const userProfile = pgTable(
 	"user_profile",
@@ -186,7 +196,10 @@ export const userProfile = pgTable(
 		residenceCountry: text("residence_country"),
 		nationality: text("nationality"),
 		identityVerificationSessionId: text("identity_verification_session_id"),
-		identityStatus: text("identity_status").notNull().default("unstarted"),
+		identityStatus: text("identity_status")
+			.$type<IdentityVerificationStatus>()
+			.notNull()
+			.default("unstarted"),
 		identityVerifiedAt: timestampWithTimezone("identity_verified_at"),
 		createdAt: timestampWithTimezone("created_at").notNull().defaultNow(),
 		updatedAt: timestampWithTimezone("updated_at").notNull().defaultNow(),

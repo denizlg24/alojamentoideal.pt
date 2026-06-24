@@ -8,6 +8,7 @@ export type {
 	AccommodationQuoteFeeSnapshot,
 	AppliedDiscountSnapshot,
 	CommerceCatalogSnapshot,
+	IdentityVerificationStatus,
 	ListingSectionHashes,
 	LocalizedText,
 	OrderBillingAddressSnapshot,

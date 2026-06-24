@@ -4,6 +4,11 @@ export {
 	StripeConfigurationError,
 } from "./client";
 export {
+	createIdentityVerificationSession,
+	type IdentityVerificationSnapshot,
+	retrieveIdentityVerificationSession,
+} from "./identity";
+export {
 	createOrUpdatePaymentIntent,
 	type PaymentIntentParams,
 	type PaymentIntentSnapshot,
@@ -14,6 +19,7 @@ export {
 	getStripeWebhookSecret,
 	interpretStripeEvent,
 	type RelevantStripeEvent,
+	type StripeIdentityUpdated,
 	type StripePaymentFailed,
 	type StripePaymentSucceeded,
 	StripeWebhookSignatureError,
