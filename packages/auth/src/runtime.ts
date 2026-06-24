@@ -1,9 +1,11 @@
-import { getDb, schema } from "@workspace/db";
+import { CART_COOKIE_NAME, cart, getDb, schema } from "@workspace/db";
 import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { admin } from "better-auth/plugins";
+import { and, eq, isNull } from "drizzle-orm";
+import { z } from "zod";
 import { getAuthConfig } from "./config";
-import { sendVerificationEmail } from "./email";
+import { sendResetPasswordEmail, sendVerificationEmail } from "./email";
 
 export function createAuth() {
 	const config = getAuthConfig();
@@ -21,6 +23,9 @@ export function createAuth() {
 		emailAndPassword: {
 			enabled: true,
 			requireEmailVerification: true,
+			sendResetPassword: async ({ user, url }) => {
+				await sendResetPasswordEmail({ email: user.email, url });
+			},
 		},
 		emailVerification: {
 			sendOnSignUp: true,
@@ -30,6 +35,52 @@ export function createAuth() {
 			},
 		},
 		socialProviders: config.google ? { google: config.google } : {},
+		user: {
+			additionalFields: {
+				// Stored as YYYY-MM-DD in the `date_of_birth` column. Captured at
+				// sign-up; ID/age verification remains a post-confirmation step.
+				dateOfBirth: {
+					input: true,
+					required: false,
+					type: "string",
+					validator: {
+						input: z.string().date(),
+					},
+				},
+			},
+		},
+		databaseHooks: {
+			session: {
+				create: {
+					// Opportunistically merge the visitor's anonymous cart into the
+					// account on login/sign-up. The /api/cart/claim endpoint is the
+					// resilient path; both converge on identical claim SQL.
+					after: async (session, context) => {
+						const cartToken = context?.getCookie(CART_COOKIE_NAME);
+						if (!cartToken) {
+							return;
+						}
+
+						try {
+							await getDb()
+								.update(cart)
+								.set({ updatedAt: new Date(), userId: session.userId })
+								.where(
+									and(
+										eq(cart.cartToken, cartToken),
+										isNull(cart.userId),
+										eq(cart.status, "draft"),
+									),
+								);
+						} catch (error) {
+							// Opportunistic only: a failed merge must never block login. The
+							// /api/cart/claim endpoint reconciles on the next request.
+							console.error("Failed to merge anonymous cart on login", error);
+						}
+					},
+				},
+			},
+		},
 		plugins: [admin()],
 	});
 }

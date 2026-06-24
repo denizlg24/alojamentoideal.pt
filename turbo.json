@@ -9,15 +9,20 @@
 		"NEXT_PUBLIC_AUTH_URL",
 		"NEXT_PUBLIC_SENTRY_DSN",
 		"NEXT_PUBLIC_SENTRY_ENVIRONMENT",
-		"NEXT_PUBLIC_SENTRY_TRACES_SAMPLE_RATE"
+		"NEXT_PUBLIC_SENTRY_TRACES_SAMPLE_RATE",
+		"NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY"
 	],
 	"globalPassThroughEnv": [
 		"DATABASE_URL",
 		"BETTER_AUTH_SECRET",
 		"BETTER_AUTH_URL",
 		"AUTH_TRUSTED_ORIGINS",
+		"RESEND_API_KEY",
+		"EMAIL_FROM",
 		"GOOGLE_CLIENT_ID",
 		"GOOGLE_CLIENT_SECRET",
+		"STRIPE_SECRET_KEY",
+		"STRIPE_WEBHOOK_SECRET",
 		"HOSTIFY_API_KEY",
 		"HOSTIFY_BASE_URL",
 		"HOSTIFY_TIMEOUT_MS",
@@ -70,8 +75,11 @@
 			"outputs": [".next/**", "!.next/cache/**"],
 			"passThroughEnv": ["SENTRY_AUTH_TOKEN", "SENTRY_ORG", "SENTRY_PROJECT"]
 		},
+		"@workspace/emails#build": {
+			"outputs": ["dist/**", "generated/**"]
+		},
 		"typecheck": {
-			"dependsOn": ["^typecheck"]
+			"dependsOn": ["^build", "^typecheck"]
 		},
 		"test": {
 			"dependsOn": ["^build"],

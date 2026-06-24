@@ -1,6 +1,7 @@
 import "@workspace/ui/globals.css";
 import type { Metadata, Viewport } from "next";
 import { Bricolage_Grotesque, Hanken_Grotesk } from "next/font/google";
+import { AuthDialogProvider } from "@/components/auth/auth-dialog-provider";
 import { siteConfig } from "@/lib/site/config";
 
 const fontSans = Hanken_Grotesk({
@@ -61,7 +62,9 @@ export default function RootLayout({
 }>) {
 	return (
 		<html lang="en" className={`${fontSans.variable} ${fontDisplay.variable}`}>
-			<body>{children}</body>
+			<body>
+				<AuthDialogProvider>{children}</AuthDialogProvider>
+			</body>
 		</html>
 	);
 }

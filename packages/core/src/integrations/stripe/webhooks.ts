@@ -1,0 +1,122 @@
+import Stripe from "stripe";
+import { StripeConfigurationError } from "./client";
+
+/**
+ * Raised when a webhook payload fails Stripe signature verification. The route
+ * maps this to a 400 so Stripe stops retrying a request it can never validate,
+ * while genuine configuration/transport errors propagate as 5xx.
+ */
+export class StripeWebhookSignatureError extends Error {
+	constructor(message: string) {
+		super(message);
+		this.name = "StripeWebhookSignatureError";
+	}
+}
+
+interface StripeWebhookEnvironment {
+	STRIPE_WEBHOOK_SECRET?: string;
+}
+
+/**
+ * Reads the signing secret used to verify inbound Stripe webhooks. Mirrors
+ * `createStripeClientFromEnv` by reading the environment directly and failing
+ * loudly when the deployment is missing required Stripe configuration.
+ */
+export function getStripeWebhookSecret(
+	environment: StripeWebhookEnvironment = {
+		STRIPE_WEBHOOK_SECRET: process.env.STRIPE_WEBHOOK_SECRET,
+	},
+): string {
+	const secret = environment.STRIPE_WEBHOOK_SECRET;
+	if (!secret) {
+		throw new StripeConfigurationError("STRIPE_WEBHOOK_SECRET is required");
+	}
+	return secret;
+}
+
+/**
+ * Verifies a raw webhook payload against its `stripe-signature` header and
+ * returns the parsed event. Uses the async constructor so the same code path
+ * works under Node and edge crypto. A failed verification is normalized to
+ * `StripeWebhookSignatureError`; all other failures propagate unchanged.
+ */
+export async function constructStripeEvent(
+	stripe: Stripe,
+	payload: string,
+	signature: string,
+	secret: string,
+): Promise<Stripe.Event> {
+	try {
+		return await stripe.webhooks.constructEventAsync(
+			payload,
+			signature,
+			secret,
+		);
+	} catch (error) {
+		if (error instanceof Stripe.errors.StripeSignatureVerificationError) {
+			throw new StripeWebhookSignatureError(error.message);
+		}
+		throw error;
+	}
+}
+
+/** A succeeded PaymentIntent, normalized to the fields the app acts on. */
+export interface StripePaymentSucceeded {
+	amountReceivedMinor: number;
+	/** Uppercase ISO currency, matching how order totals are stored. */
+	currency: string;
+	orderId: string | null;
+	paymentIntentId: string;
+	type: "payment_succeeded";
+}
+
+/** A failed PaymentIntent, normalized to the fields the app persists. */
+export interface StripePaymentFailed {
+	failureCode: string | null;
+	failureDetail: string | null;
+	orderId: string | null;
+	paymentIntentId: string;
+	type: "payment_failed";
+}
+
+/**
+ * The subset of Stripe events checkout reacts to, reduced to plain fields. This
+ * keeps raw Stripe enums and object shapes inside this package; the route layer
+ * dispatches on `type` without depending on the `stripe` SDK.
+ */
+export type RelevantStripeEvent =
+	| StripePaymentSucceeded
+	| StripePaymentFailed
+	| { type: "ignored" };
+
+/**
+ * Reduces a verified Stripe event to the normalized union the app handles.
+ * Unrecognized event types collapse to `ignored` so the route can acknowledge
+ * them with a 200 and move on.
+ */
+export function interpretStripeEvent(event: Stripe.Event): RelevantStripeEvent {
+	switch (event.type) {
+		case "payment_intent.succeeded": {
+			const intent = event.data.object;
+			return {
+				amountReceivedMinor: intent.amount_received,
+				currency: intent.currency.toUpperCase(),
+				orderId: intent.metadata?.orderId ?? null,
+				paymentIntentId: intent.id,
+				type: "payment_succeeded",
+			};
+		}
+		case "payment_intent.payment_failed": {
+			const intent = event.data.object;
+			return {
+				failureCode: intent.last_payment_error?.code ?? null,
+				failureDetail: intent.last_payment_error?.message ?? null,
+				orderId: intent.metadata?.orderId ?? null,
+				paymentIntentId: intent.id,
+				type: "payment_failed",
+			};
+		}
+		default:
+			return { type: "ignored" };
+	}
+}

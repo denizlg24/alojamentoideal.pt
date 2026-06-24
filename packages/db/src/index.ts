@@ -1,21 +1,35 @@
 export { type Database, getDb, getPool } from "./client";
+export { CART_COOKIE_NAME } from "./constants";
 export type {
 	AccommodationListingNightRawContent,
 	AccommodationListingNormalizedContent,
 	AccommodationListingProcessedContent,
 	AccommodationListingRawContent,
+	AccommodationQuoteFeeSnapshot,
+	AppliedDiscountSnapshot,
+	CommerceCatalogSnapshot,
 	ListingSectionHashes,
 	LocalizedText,
+	OrderBillingAddressSnapshot,
 	ProcessedAmenity,
 } from "./schema";
 export * as schemaTables from "./schema";
 export {
+	accommodationItemDetail,
 	accommodationListing,
 	accommodationListingNight,
+	accommodationQuoteSnapshot,
 	account,
+	apiIdempotencyKey,
+	cart,
+	cartItem,
 	listingReview,
 	listingReviewSummary,
 	observabilityEvent,
+	order,
+	orderContact,
+	orderItem,
+	orderItemCharge,
 	providerSyncRun,
 	providerSyncState,
 	schema,

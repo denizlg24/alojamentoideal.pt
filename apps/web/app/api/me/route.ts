@@ -1,17 +1,15 @@
-import { getAuth } from "@workspace/auth";
 import { withApiRoute } from "@/lib/api/route";
+import { getServerUser } from "@/lib/auth/session";
 
 export const GET = withApiRoute(
 	{ name: "me", rateLimit: { bucket: "auth" } },
 	async (request: Request): Promise<Response> => {
-		const session = await getAuth().api.getSession({
-			headers: request.headers,
-		});
+		const user = await getServerUser(request);
 
-		if (!session) {
+		if (!user) {
 			return new Response(null, { status: 401 });
 		}
 
-		return Response.json(session.user);
+		return Response.json(user);
 	},
 );
