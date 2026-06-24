@@ -171,6 +171,11 @@ export function CheckoutController({
 	const [notice, setNotice] = useState<string | null>(null);
 	const [dialog, setDialog] = useState<DialogKind>(null);
 	const [savingStay, setSavingStay] = useState(false);
+	// Optimistic stay shown in the summary the moment a date/guest edit is
+	// confirmed, so the dialog can close and the stay rows update immediately
+	// while the price re-quote settles. Cleared once the cart catches up.
+	const [optimisticStay, setOptimisticStay] =
+		useState<ReservationSummaryItem | null>(null);
 
 	const bootstrapStarted = useRef(false);
 	// Last profile fetched during prefill; reused so a "save to account" write
@@ -562,6 +567,22 @@ export function CheckoutController({
 			}
 			const base = stayKeyFromItem(initialListing.id, item);
 			const merged: StayKeyInput = { ...base, ...next };
+
+			// Reflect the new stay in the summary and close the dialog immediately;
+			// only the price re-quote stays pending (the price rows skeleton out).
+			// On failure the `finally` clears this, reverting to the cart's stay.
+			const nights = nightsBetween(merged.checkIn, merged.checkOut);
+			if (Number.isFinite(nights) && nights >= 1) {
+				setOptimisticStay({
+					adults: merged.adults,
+					checkIn: merged.checkIn,
+					checkOut: merged.checkOut,
+					children: merged.children,
+					infants: merged.infants,
+					nights,
+				});
+			}
+			setDialog(null);
 			setSavingStay(true);
 			setReviewError(null);
 			try {
@@ -584,14 +605,13 @@ export function CheckoutController({
 					setCart(validated.cart);
 					if (!validated.valid) {
 						handleValidationFailure(validated);
-						return;
 					}
 				}
-				setDialog(null);
 			} catch (error) {
 				setNotice(toCheckoutError(error).message);
 			} finally {
 				setSavingStay(false);
+				setOptimisticStay(null);
 			}
 		},
 		[
@@ -1065,8 +1085,8 @@ export function CheckoutController({
 	const summaryItem = item ?? (phase === "loading" ? pendingSummaryItem : null);
 	const summary = (
 		<ReservationSummary
-			canChangeStay={hasReadyItem}
-			canOpenPriceDetails={hasReadyItem}
+			canChangeStay={hasReadyItem && !savingStay}
+			canOpenPriceDetails={hasReadyItem && !savingStay}
 			cart={cart}
 			discountSlot={
 				hasReadyItem ? (
@@ -1079,12 +1099,13 @@ export function CheckoutController({
 					/>
 				) : null
 			}
-			item={summaryItem}
+			item={optimisticStay ?? summaryItem}
 			listing={initialListing}
 			onChangeDates={() => setDialog("dates")}
 			onChangeGuests={() => setDialog("guests")}
 			onOpenCurrency={() => setDialog("currency")}
 			onOpenPriceDetails={() => setDialog("price")}
+			pricePending={savingStay}
 		/>
 	);
 

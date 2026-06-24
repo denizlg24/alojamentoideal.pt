@@ -34,6 +34,8 @@ interface ReservationSummaryProps {
 	onChangeGuests: () => void;
 	onOpenCurrency: () => void;
 	onOpenPriceDetails: () => void;
+	/** Skeleton the price rows while a stay edit re-quotes (stay rows stay live). */
+	pricePending?: boolean;
 }
 
 function SummaryRow({
@@ -78,6 +80,7 @@ export function ReservationSummary({
 	onChangeGuests,
 	onOpenCurrency,
 	onOpenPriceDetails,
+	pricePending,
 }: ReservationSummaryProps) {
 	const changeDisabled = canChangeStay === false;
 	const priceDetailsDisabled = canOpenPriceDetails === false;
@@ -159,7 +162,7 @@ export function ReservationSummary({
 			</div>
 
 			<div className="mt-3 flex flex-col gap-2 text-sm">
-				{cart && item ? (
+				{cart && item && !pricePending ? (
 					<>
 						<div className="flex items-center justify-between text-muted-foreground">
 							<span>Subtotal</span>
@@ -184,7 +187,17 @@ export function ReservationSummary({
 						</div>
 					</>
 				) : (
-					<Skeleton className="h-6 w-full" />
+					<div className="flex flex-col gap-2">
+						<div className="flex items-center justify-between">
+							<Skeleton className="h-4 w-20" />
+							<Skeleton className="h-4 w-14" />
+						</div>
+						<Separator className="my-1" />
+						<div className="flex items-center justify-between">
+							<Skeleton className="h-5 w-16" />
+							<Skeleton className="h-5 w-20" />
+						</div>
+					</div>
 				)}
 			</div>
 

@@ -187,8 +187,23 @@ async function CheckoutDynamic({
 		infants,
 	};
 
+	// Key the live controller on the stay so a navigation that lands here with
+	// different search params (a fresh reserve) remounts it and re-runs the
+	// once-only bootstrap, instead of the router cache reusing a mounted instance
+	// still holding the previous stay.
+	const stayKey = [
+		id,
+		initialStay.checkIn ?? "",
+		initialStay.checkOut ?? "",
+		initialStay.adults,
+		initialStay.children,
+		initialStay.infants,
+		initialStay.guests,
+	].join("|");
+
 	return (
 		<CheckoutController
+			key={stayKey}
 			initialListing={initialListing}
 			initialStay={initialStay}
 		/>
