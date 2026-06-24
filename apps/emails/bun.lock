@@ -4,7 +4,8 @@
   "workspaces": {
     "": {
       "dependencies": {
-        "@maizzle/framework": "latest",
+        "@maizzle/framework": "6.0.2",
+        "@maizzle/tailwindcss": "1.5.5",
       },
     },
   },

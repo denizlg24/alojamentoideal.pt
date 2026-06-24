@@ -17,7 +17,8 @@
     "apps/emails": {
       "name": "@workspace/emails",
       "dependencies": {
-        "@maizzle/framework": "^6.0.2",
+        "@maizzle/framework": "6.0.2",
+        "@maizzle/tailwindcss": "1.5.5",
       },
       "devDependencies": {
         "@types/node": "^26",
@@ -63,6 +64,7 @@
         "better-auth": "^1.6.20",
         "drizzle-orm": "^0.45.2",
         "resend": "^6.14.0",
+        "zod": "^4.4.3",
       },
       "devDependencies": {
         "@types/node": "^26",

@@ -23,7 +23,8 @@
 		"@workspace/emails": "workspace:*",
 		"better-auth": "^1.6.20",
 		"drizzle-orm": "^0.45.2",
-		"resend": "^6.14.0"
+		"resend": "^6.14.0",
+		"zod": "^4.4.3"
 	},
 	"peerDependencies": {
 		"react": "^19"

@@ -1,8 +1,9 @@
 import { CART_COOKIE_NAME, cart, getDb, schema } from "@workspace/db";
-import { betterAuth, z } from "better-auth";
+import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { admin } from "better-auth/plugins";
 import { and, eq, isNull } from "drizzle-orm";
+import { z } from "zod";
 import { getAuthConfig } from "./config";
 import { sendResetPasswordEmail, sendVerificationEmail } from "./email";
 

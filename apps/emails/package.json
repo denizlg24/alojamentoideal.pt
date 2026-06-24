@@ -12,7 +12,8 @@
 		"./package.json": "./package.json"
 	},
 	"dependencies": {
-		"@maizzle/framework": "latest"
+		"@maizzle/framework": "6.0.2",
+		"@maizzle/tailwindcss": "1.5.5"
 	},
 	"devDependencies": {
 		"@types/node": "^26",
