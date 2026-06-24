@@ -4,18 +4,27 @@ import { Button } from "@workspace/ui/components/button";
 import { Checkbox } from "@workspace/ui/components/checkbox";
 import { Input } from "@workspace/ui/components/input";
 import { Label } from "@workspace/ui/components/label";
+import {
+	NativeSelect,
+	NativeSelectOption,
+} from "@workspace/ui/components/native-select";
 import { Textarea } from "@workspace/ui/components/textarea";
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { COUNTRY_OPTIONS } from "@/lib/site/countries";
 import { CheckoutAlert } from "./checkout-alert";
-import type { ContactDraft } from "./types";
+import { type ContactDraft, hasBillingDetails } from "./types";
 
 interface ContactBillingFormProps {
+	/** When true, offer to save the entered contact/billing to the account. */
+	canSaveToAccount: boolean;
 	error: string | null;
 	/** Optional secondary action; shown when editing already-saved contact. */
 	onCancel?: () => void;
 	onChange: (next: ContactDraft) => void;
+	onSaveToAccountChange: (next: boolean) => void;
 	onSubmit: () => void;
 	prefilledFromAccount: boolean;
+	saveToAccount: boolean;
 	submitLabel?: string;
 	submitting: boolean;
 	value: ContactDraft;
@@ -70,16 +79,29 @@ function Field({
  * name/email prefilled, so the only required field left is usually the phone.
  */
 export function ContactBillingForm({
+	canSaveToAccount,
 	error,
 	onCancel,
 	onChange,
+	onSaveToAccountChange,
 	onSubmit,
 	prefilledFromAccount,
+	saveToAccount,
 	submitLabel,
 	submitting,
 	value,
 }: ContactBillingFormProps) {
-	const [showBilling, setShowBilling] = useState(false);
+	const [showBilling, setShowBilling] = useState(() =>
+		hasBillingDetails(value),
+	);
+
+	// Reveal the billing block once a saved address arrives via prefill. Never
+	// auto-collapses, so a guest who opened it keeps it open.
+	useEffect(() => {
+		if (hasBillingDetails(value)) {
+			setShowBilling(true);
+		}
+	}, [value]);
 
 	const set = <Key extends keyof ContactDraft>(
 		key: Key,
@@ -195,13 +217,25 @@ export function ContactBillingForm({
 							onChange={(next) => set("region", next)}
 							value={value.region}
 						/>
-						<Field
-							autoComplete="country-name"
-							id="billing-country"
-							label="Country"
-							onChange={(next) => set("country", next)}
-							value={value.country}
-						/>
+						<div className="flex flex-col gap-1.5">
+							<Label htmlFor="billing-country">Country</Label>
+							<NativeSelect
+								autoComplete="country"
+								className="w-full"
+								id="billing-country"
+								onChange={(event) => set("country", event.target.value)}
+								value={value.country}
+							>
+								<NativeSelectOption value="">
+									Select a country
+								</NativeSelectOption>
+								{COUNTRY_OPTIONS.map((country) => (
+									<NativeSelectOption key={country.code} value={country.code}>
+										{country.name}
+									</NativeSelectOption>
+								))}
+							</NativeSelect>
+						</div>
 					</div>
 				</div>
 			) : (
@@ -223,6 +257,21 @@ export function ContactBillingForm({
 					value={value.notes}
 				/>
 			</div>
+
+			{canSaveToAccount && (
+				<div className="flex items-center gap-2">
+					<Checkbox
+						checked={saveToAccount}
+						id="save-to-account"
+						onCheckedChange={(checked) =>
+							onSaveToAccountChange(checked === true)
+						}
+					/>
+					<Label className="font-normal text-sm" htmlFor="save-to-account">
+						Save this contact and billing info to my account for next time
+					</Label>
+				</div>
+			)}
 
 			{error && <CheckoutAlert variant="error">{error}</CheckoutAlert>}
 

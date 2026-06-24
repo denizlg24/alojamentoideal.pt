@@ -5,6 +5,7 @@ import {
 } from "@workspace/auth";
 import type { OrderConfirmationFacts } from "@workspace/core/commerce";
 import type { OrderBillingAddressSnapshot } from "@workspace/db";
+import { countryName } from "@/lib/site/countries";
 
 const FALLBACK_IMAGE_URL =
 	"https://alojamentoideal.pt/alojamento-ideal-logo.png";
@@ -76,12 +77,15 @@ function formatBillingAddress(address: OrderBillingAddressSnapshot): string {
 		.map(stringPart)
 		.filter((part): part is string => part !== null)
 		.join(" ");
+	const countryCode = stringPart(address.country);
 	const parts = [
 		stringPart(address.line1),
 		stringPart(address.line2),
 		cityLine || null,
 		stringPart(address.region),
-		stringPart(address.country),
+		// Stored as an ISO-2 code; show the readable country name. Older orders
+		// stored the full name, which countryName passes through unchanged.
+		countryCode ? countryName(countryCode) : null,
 	].filter((part): part is string => part !== null);
 
 	return parts.length > 0 ? parts.join(", ") : "Not provided";
