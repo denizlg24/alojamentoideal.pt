@@ -3,6 +3,7 @@ import {
 	parseAddCartItemBody,
 	parseApplyDiscountBody,
 	parseCreateCartBody,
+	parseCreatePaymentIntentBody,
 	parseDeleteCartItemBody,
 	parseDraftOrderBody,
 	parseOrderContactBody,
@@ -32,6 +33,42 @@ describe("commerce request parsers", () => {
 
 	test("rejects a non-UUID cart id", () => {
 		const parsed = parseCreateCartBody({ cartId: "cart_1" });
+
+		expect(parsed.success).toBe(false);
+	});
+
+	test("accepts create-payment-intent requests with valid UUIDs", () => {
+		const parsed = parseCreatePaymentIntentBody({
+			cartId: "11111111-1111-4111-8111-111111111111",
+			idempotencyKey: "payment-123",
+			orderId: "22222222-2222-4222-8222-222222222222",
+		});
+
+		expect(parsed.success).toBe(true);
+		if (!parsed.success) {
+			throw parsed.error;
+		}
+		expect(parsed.data).toEqual({
+			cartId: "11111111-1111-4111-8111-111111111111",
+			idempotencyKey: "payment-123",
+			orderId: "22222222-2222-4222-8222-222222222222",
+		});
+	});
+
+	test("rejects create-payment-intent requests with invalid cartId", () => {
+		const parsed = parseCreatePaymentIntentBody({
+			cartId: "cart_1",
+			orderId: "22222222-2222-4222-8222-222222222222",
+		});
+
+		expect(parsed.success).toBe(false);
+	});
+
+	test("rejects create-payment-intent requests with invalid orderId", () => {
+		const parsed = parseCreatePaymentIntentBody({
+			cartId: "11111111-1111-4111-8111-111111111111",
+			orderId: "order_1",
+		});
 
 		expect(parsed.success).toBe(false);
 	});

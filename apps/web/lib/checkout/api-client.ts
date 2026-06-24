@@ -61,12 +61,14 @@ export interface CreateCartInput {
 	idempotencyKey?: string;
 }
 
+const segment = (value: string) => encodeURIComponent(value);
+
 export function createCart(body: CreateCartInput = {}): Promise<CartResponse> {
 	return request<CartResponse>("/api/cart", jsonBody(body));
 }
 
 export function getCart(cartId: string): Promise<CartResponse> {
-	return request<CartResponse>(`/api/cart/${cartId}`);
+	return request<CartResponse>(`/api/cart/${segment(cartId)}`);
 }
 
 export interface AddCartItemInput {
@@ -87,7 +89,7 @@ export function addCartItem(
 	body: AddCartItemInput,
 ): Promise<CartMutationResponse> {
 	return request<CartMutationResponse>(
-		`/api/cart/${cartId}/items`,
+		`/api/cart/${segment(cartId)}/items`,
 		jsonBody(body),
 	);
 }
@@ -108,15 +110,18 @@ export function updateCartItem(
 	itemId: string,
 	body: UpdateCartItemInput,
 ): Promise<CartMutationResponse> {
-	return request<CartMutationResponse>(`/api/cart/${cartId}/items/${itemId}`, {
-		body: JSON.stringify(body),
-		method: "PATCH",
-	});
+	return request<CartMutationResponse>(
+		`/api/cart/${segment(cartId)}/items/${segment(itemId)}`,
+		{
+			body: JSON.stringify(body),
+			method: "PATCH",
+		},
+	);
 }
 
 export function validateCart(cartId: string): Promise<CartValidationResponse> {
 	return request<CartValidationResponse>(
-		`/api/cart/${cartId}/validate`,
+		`/api/cart/${segment(cartId)}/validate`,
 		jsonBody({}),
 	);
 }
@@ -130,11 +135,14 @@ export function applyDiscount(
 	cartId: string,
 	body: ApplyDiscountInput,
 ): Promise<CartResponse> {
-	return request<CartResponse>(`/api/cart/${cartId}/discount`, jsonBody(body));
+	return request<CartResponse>(
+		`/api/cart/${segment(cartId)}/discount`,
+		jsonBody(body),
+	);
 }
 
 export function removeDiscount(cartId: string): Promise<CartResponse> {
-	return request<CartResponse>(`/api/cart/${cartId}/discount`, {
+	return request<CartResponse>(`/api/cart/${segment(cartId)}/discount`, {
 		method: "DELETE",
 	});
 }

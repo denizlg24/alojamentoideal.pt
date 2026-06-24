@@ -14,14 +14,20 @@ export type CheckoutEventName =
 	| "payment_started";
 
 type SafeValue = boolean | number | string;
-
+type CheckoutEventData = {
+	currency?: string;
+	listingId?: string;
+	amountMinor?: number;
+	kind?: string;
+	step?: string;
+};
 export function trackCheckoutEvent(
 	name: CheckoutEventName,
-	data?: Record<string, SafeValue>,
+	data?: CheckoutEventData,
 ): void {
 	Sentry.addBreadcrumb({
 		category: "checkout",
-		data,
+		data: data as Record<string, SafeValue> | undefined,
 		level: name.includes("failed") ? "warning" : "info",
 		message: name,
 	});

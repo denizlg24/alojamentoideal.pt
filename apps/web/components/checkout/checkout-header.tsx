@@ -12,7 +12,7 @@ export function CheckoutHeader({ backHref }: { backHref: string }) {
 		<header className="sticky top-0 z-30 border-b bg-background/95 backdrop-blur supports-backdrop-filter:bg-background/80">
 			<div className="mx-auto flex h-16 w-full max-w-5xl items-center gap-3 px-4 sm:px-6">
 				<Button
-					aria-label="Back to the home"
+					aria-label="Go back"
 					asChild
 					className="rounded-full"
 					size="icon"

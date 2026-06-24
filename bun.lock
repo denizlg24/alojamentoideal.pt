@@ -17,7 +17,7 @@
     "apps/emails": {
       "name": "@workspace/emails",
       "dependencies": {
-        "@maizzle/framework": "latest",
+        "@maizzle/framework": "^6.0.2",
       },
       "devDependencies": {
         "@types/node": "^26",

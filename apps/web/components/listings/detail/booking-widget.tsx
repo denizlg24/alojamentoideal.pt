@@ -227,7 +227,11 @@ function BookingWidgetInner({
 					entry.status === "active" &&
 					entry.listingId === listingId &&
 					entry.checkIn === checkIn &&
-					entry.checkOut === checkOut,
+					entry.checkOut === checkOut &&
+					entry.adults === guests.adults &&
+					entry.children === guests.children &&
+					entry.infants === guests.infants &&
+					entry.guests === guestCapacity,
 			);
 			if (!alreadyInCart) {
 				await addCartItem(cart.id, {

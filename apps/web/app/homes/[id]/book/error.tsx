@@ -21,13 +21,13 @@ export default function BookError({
 				Something interrupted your checkout
 			</h1>
 			<p className="text-muted-foreground text-sm">
-				We hit an unexpected error. You can try again, or head back to the home
-				and start over.
+				We hit an unexpected error. You can try again, or head back to Homes and
+				start over.
 			</p>
 			<div className="flex gap-3">
 				<Button onClick={reset}>Try again</Button>
 				<Button asChild variant="outline">
-					<Link href="/">Return to home</Link>
+					<Link href="/homes">Return to Homes</Link>
 				</Button>
 			</div>
 		</div>

@@ -45,29 +45,34 @@ export function RegisterForm({
 		}
 
 		setSubmitting(true);
-		const result = await signUp.email({
-			// `callbackURL` is where the verification link lands after the email is
-			// confirmed. Pointing it at `next` returns mid-booking sign-ups straight
-			// back to their checkout once verified (auto sign-in claims the cart).
-			callbackURL: next,
-			dateOfBirth,
-			email: email.trim(),
-			name: name.trim(),
-			password,
-		});
-		setSubmitting(false);
+		try {
+			const result = await signUp.email({
+				// `callbackURL` is where the verification link lands after the email is
+				// confirmed. Pointing it at `next` returns mid-booking sign-ups straight
+				// back to their checkout once verified (auto sign-in claims the cart).
+				callbackURL: next,
+				dateOfBirth,
+				email: email.trim(),
+				name: name.trim(),
+				password,
+			});
+			setSubmitting(false);
 
-		if (result.error) {
-			setError(
-				result.error.message ??
-					"We could not create your account. Please try again.",
-			);
-			return;
+			if (result.error) {
+				setError(
+					result.error.message ??
+						"We could not create your account. Please try again.",
+				);
+				return;
+			}
+
+			// Sign-up does not create a session (email verification is required). Show
+			// the verify-email state; the cart merges automatically on first login.
+			setVerifyEmail(email.trim());
+		} catch (error) {
+			setError("We could not create your account. Please try again.");
+			setSubmitting(false);
 		}
-
-		// Sign-up does not create a session (email verification is required). Show
-		// the verify-email state; the cart merges automatically on first login.
-		setVerifyEmail(email.trim());
 	};
 
 	const handleGoogle = async () => {

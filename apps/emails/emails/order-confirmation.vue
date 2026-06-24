@@ -235,7 +235,7 @@
           <Raw>__APP_NAME__</Raw> manages its own apartments and selected local activities on Portugal's North Coast.
         </Text>
         <Text class="m-0 mt-3 text-[12px] font-semibold uppercase tracking-[1.5px] text-[#bba694]">
-          Porto | Povoa de Varzim | Leca da Palmeira | Canidelo
+          Porto | Póvoa de Varzim | Leça da Palmeira | Canidelo
         </Text>
         <Text class="m-0 mt-5 text-[12px] text-[#9f8c7e]">
           &copy; <Raw>__CURRENT_YEAR__</Raw> <Raw>__APP_NAME__</Raw>

@@ -31,33 +31,38 @@ export function LoginForm({
 		event.preventDefault();
 		setSubmitting(true);
 		setError(null);
-
-		const result = await signIn.email({ email: email.trim(), password });
-		if (result.error) {
-			setError(
-				result.error.message ??
-					"We could not sign you in. Check your details and try again.",
-			);
-			setSubmitting(false);
-			return;
-		}
-
-		// The session.create hook already merges the anonymous cart; claimCart is
-		// the idempotent backup path before returning to wherever they came from.
 		try {
-			await claimCart();
-		} catch {
-			// Non-fatal: the hook covers the common case.
-		}
+			const result = await signIn.email({ email: email.trim(), password });
+			if (result.error) {
+				setError(
+					result.error.message ??
+						"We could not sign you in. Check your details and try again.",
+				);
+				setSubmitting(false);
+				return;
+			}
 
-		if (onSuccess) {
-			// Dialog mode: stay on the current page and let it react to the new
-			// session (e.g. checkout re-claims the cart and prefills contact).
-			onSuccess();
-			return;
+			// The session.create hook already merges the anonymous cart; claimCart is
+			// the idempotent backup path before returning to wherever they came from.
+			try {
+				await claimCart();
+			} catch {
+				// Non-fatal: the hook covers the common case.
+			}
+
+			if (onSuccess) {
+				// Dialog mode: stay on the current page and let it react to the new
+				// session (e.g. checkout re-claims the cart and prefills contact).
+				onSuccess();
+				return;
+			}
+			router.push(next);
+			router.refresh();
+		} catch (err) {
+			console.error("LoginForm signIn error", err);
+			setError("We could not sign you in. Check your details and try again.");
+			setSubmitting(false);
 		}
-		router.push(next);
-		router.refresh();
 	};
 
 	const handleGoogle = async () => {

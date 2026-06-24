@@ -7,7 +7,13 @@ export function safeNextPath(
 	value: string | null | undefined,
 	fallback = "/",
 ): string {
-	if (!value?.startsWith("/") || value.startsWith("//")) {
+	if (
+		!value?.startsWith("/") ||
+		value.startsWith("//") ||
+		value.startsWith("/\\") ||
+		value.startsWith("/%5C") ||
+		value.startsWith("/%2F:")
+	) {
 		return fallback;
 	}
 	return value;

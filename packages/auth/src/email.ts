@@ -220,9 +220,14 @@ export interface OrderConfirmationEmailInput {
 	manageUrl: string;
 }
 
+function safeSubjectPart(value: string): string {
+	return value.replace(/[\r\n]+/g, " ").trim();
+}
+
 export function buildOrderConfirmationEmail(
 	input: OrderConfirmationEmailInput,
 ): EmailMessage {
+	const safeTitleForSubject = safeSubjectPart(input.accommodationTitle);
 	const safeUrl = escapeHtml(input.manageUrl);
 	const cardInfo = input.cardLastFour ? ` ending in ${input.cardLastFour}` : "";
 	const safeCardInfo = escapeHtml(cardInfo);
@@ -231,7 +236,7 @@ export function buildOrderConfirmationEmail(
 		const html = applyPlaceholders(TEMPLATES.orderConfirmationHtml, {
 			APP_NAME,
 			ORDER_NUMBER: escapeHtml(input.orderNumber),
-			ACCOMMODATION_TITLE: escapeHtml(input.accommodationTitle),
+			ACCOMMODATION_TITLE: safeTitleForSubject,
 			ACCOMMODATION_IMAGE: escapeHtml(input.accommodationImage),
 			CHECK_IN: escapeHtml(input.checkIn),
 			CHECK_OUT: escapeHtml(input.checkOut),
@@ -263,11 +268,11 @@ export function buildOrderConfirmationEmail(
 					MANAGE_URL: input.manageUrl,
 					CURRENT_YEAR,
 				})
-			: `Booking confirmed at ${input.accommodationTitle}!\n\nReservation code: ${input.orderNumber}\n\n${input.checkIn} to ${input.checkOut}\n${input.guests}\n\nTotal: ${input.totalPrice}\nPayment: ${input.paymentMethod}${cardInfo}\n\nManage: ${input.manageUrl}`;
+			: `Booking confirmed at ${safeTitleForSubject}!\n\nReservation code: ${input.orderNumber}\n\n${input.checkIn} to ${input.checkOut}\n${input.guests}\n\nTotal: ${input.totalPrice}\nPayment: ${input.paymentMethod}${cardInfo}\n\nManage: ${input.manageUrl}`;
 
 		return {
 			html,
-			subject: `Booking confirmed at ${input.accommodationTitle}`,
+			subject: `Booking confirmed at ${safeTitleForSubject}`,
 			text,
 		};
 	}

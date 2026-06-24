@@ -36,6 +36,9 @@ export function DiscountCodeForm({
 	}
 
 	const submit = () => {
+		if (pending) {
+			return;
+		}
 		const trimmed = code.trim();
 		if (trimmed) {
 			onApply(trimmed);

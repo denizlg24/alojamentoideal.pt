@@ -26,6 +26,7 @@ import {
 	useState,
 } from "react";
 import { useSession } from "@/lib/auth/client";
+import { safeNextPath } from "@/lib/auth/redirect";
 import { AuthReturnLink } from "./auth-return-link";
 import { ForgotPasswordForm } from "./forgot-password-form";
 import { LoginForm } from "./login-form";
@@ -99,7 +100,7 @@ export function AuthDialogProvider({ children }: { children: ReactNode }) {
 			return;
 		}
 		setView(options?.view ?? "login");
-		setNext(options?.next ?? "/");
+		setNext(safeNextPath(options?.next));
 		setOpen(true);
 	}, []);
 

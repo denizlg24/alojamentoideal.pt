@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import type Stripe from "stripe";
+import Stripe from "stripe";
 import { StripeConfigurationError } from "./client";
 import {
 	constructStripeEvent,
@@ -64,12 +64,27 @@ describe("constructStripeEvent", () => {
 
 	test("normalizes a verification failure to a signature error", async () => {
 		const stripe = fakeStripe(() => {
-			throw new Error("No signatures found matching the expected signature");
+			throw new Stripe.errors.StripeSignatureVerificationError(
+				"bad-sig",
+				"{raw}",
+				{ message: "No signatures found matching the expected signature" },
+			);
 		});
 
 		await expect(
 			constructStripeEvent(stripe, "{raw}", "bad-sig", "whsec_x"),
 		).rejects.toBeInstanceOf(StripeWebhookSignatureError);
+	});
+
+	test("propagates non-signature construction failures unchanged", async () => {
+		const failure = new SyntaxError("Unexpected token");
+		const stripe = fakeStripe(() => {
+			throw failure;
+		});
+
+		await expect(
+			constructStripeEvent(stripe, "{raw}", "sig", "whsec_x"),
+		).rejects.toBe(failure);
 	});
 });
 

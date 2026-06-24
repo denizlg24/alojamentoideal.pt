@@ -1,5 +1,5 @@
 import { CART_COOKIE_NAME, cart, getDb, schema } from "@workspace/db";
-import { betterAuth } from "better-auth";
+import { betterAuth, z } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { admin } from "better-auth/plugins";
 import { and, eq, isNull } from "drizzle-orm";
@@ -42,6 +42,9 @@ export function createAuth() {
 					input: true,
 					required: false,
 					type: "string",
+					validator: {
+						input: z.string().date(),
+					},
 				},
 			},
 		},

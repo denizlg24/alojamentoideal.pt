@@ -29,8 +29,12 @@ function readInt(
 ): number {
 	const raw = Array.isArray(value) ? value[0] : value;
 	const parsed = raw ? Number.parseInt(raw, 10) : Number.NaN;
+	const boundedFallback =
+		max !== undefined
+			? Math.min(Math.max(fallback, min), max)
+			: Math.max(fallback, min);
 	if (!Number.isFinite(parsed) || parsed < min) {
-		return fallback;
+		return boundedFallback;
 	}
 	return max !== undefined ? Math.min(parsed, max) : parsed;
 }

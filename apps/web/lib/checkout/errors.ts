@@ -42,8 +42,7 @@ const FRIENDLY_MESSAGES: Record<string, string> = {
 	cart_changed: "Your stay was updated. Please review the new details.",
 	cart_converted:
 		"We are preparing your payment step. Please review your details to finish.",
-	cart_expired:
-		"This booking session expired. Please start again from the home.",
+	cart_expired: "This booking session expired. Please start again from Homes.",
 	cart_not_found: "We could not find this booking session.",
 	cart_not_mutable: "This booking can no longer be changed.",
 	dates_unavailable:

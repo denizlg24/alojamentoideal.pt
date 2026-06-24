@@ -89,7 +89,7 @@ export function isResumeUsable(
 		return true;
 	}
 	const expiresMs = Date.parse(state.checkoutExpiresAt);
-	return Number.isNaN(expiresMs) || expiresMs > nowMs;
+	return !Number.isNaN(expiresMs) && expiresMs > nowMs;
 }
 
 export function readResumeState(): CheckoutResumeState | null {

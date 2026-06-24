@@ -320,12 +320,13 @@ export function CheckoutController({
 					listingId: initialListing.id,
 				};
 
+				const targetStayKey = stayKeyToken(staySeed);
+
 				const existing = loaded.items.find(
 					(entry) =>
 						entry.status === "active" &&
-						entry.listingId === initialListing.id &&
-						entry.checkIn === initialStay.checkIn &&
-						entry.checkOut === initialStay.checkOut,
+						stayKeyToken(stayKeyFromItem(initialListing.id, entry)) ===
+							targetStayKey,
 				);
 
 				if (!existing) {
@@ -648,7 +649,18 @@ export function CheckoutController({
 				kind: intent.kind,
 			});
 		} catch (error) {
-			setContactError(toCheckoutError(error).message);
+			const err = toCheckoutError(error);
+			if (ORDER_RESTART_CODES.has(err.code) && item) {
+				clearResumeState();
+				setDraftOrder(null);
+				setPayment(null);
+				await rebuildCart(stayKeyFromItem(initialListing.id, item));
+				setNotice(
+					"Your payment session expired. We refreshed your cart so you can continue.",
+				);
+				return;
+			}
+			setContactError(err.message);
 		} finally {
 			setPreparing(false);
 		}
@@ -659,6 +671,8 @@ export function CheckoutController({
 		handleValidationFailure,
 		initialListing.id,
 		stayKey,
+		item,
+		rebuildCart,
 	]);
 
 	// Edits the contact on the existing draft order in place. The contact does

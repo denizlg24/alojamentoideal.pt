@@ -70,6 +70,12 @@ export async function createOrUpdatePaymentIntent(
 			params.existingPaymentIntentId,
 		);
 
+		if (existing.currency.toLowerCase() !== currency) {
+			throw new Error(
+				`Stripe PaymentIntent currency mismatch: expected ${params.currency}, got ${existing.currency}`,
+			);
+		}
+
 		if (
 			UPDATABLE_STATUSES.has(existing.status) &&
 			existing.amount !== params.amountMinor

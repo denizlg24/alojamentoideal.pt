@@ -44,22 +44,30 @@ export function ResetPasswordForm({ token }: { token: string | null }) {
 			setError("Those passwords do not match.");
 			return;
 		}
+		try {
+			setSubmitting(true);
+			const result = await authClient.resetPassword({
+				newPassword: password,
+				token,
+			});
+			setSubmitting(false);
 
-		setSubmitting(true);
-		const result = await authClient.resetPassword({
-			newPassword: password,
-			token,
-		});
-		setSubmitting(false);
-
-		if (result.error) {
+			if (result.error) {
+				setError(
+					result.error.message ??
+						"We could not reset your password. The link may have expired.",
+				);
+				return;
+			}
+			setDone(true);
+		} catch (error) {
+			setSubmitting(false);
 			setError(
-				result.error.message ??
-					"We could not reset your password. The link may have expired.",
+				error instanceof Error
+					? error.message
+					: "We could not reset your password. The link may have expired.",
 			);
-			return;
 		}
-		setDone(true);
 	};
 
 	if (done) {

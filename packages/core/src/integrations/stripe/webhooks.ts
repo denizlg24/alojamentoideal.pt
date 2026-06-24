@@ -1,4 +1,4 @@
-import type Stripe from "stripe";
+import Stripe from "stripe";
 import { StripeConfigurationError } from "./client";
 
 /**
@@ -53,11 +53,10 @@ export async function constructStripeEvent(
 			secret,
 		);
 	} catch (error) {
-		throw new StripeWebhookSignatureError(
-			error instanceof Error
-				? error.message
-				: "Invalid Stripe webhook signature",
-		);
+		if (error instanceof Stripe.errors.StripeSignatureVerificationError) {
+			throw new StripeWebhookSignatureError(error.message);
+		}
+		throw error;
 	}
 }
 

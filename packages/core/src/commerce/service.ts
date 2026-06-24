@@ -363,8 +363,8 @@ export class CommerceService {
 				.from(orderTable)
 				.leftJoin(cartTable, eq(cartTable.id, orderTable.cartId))
 				.where(eq(orderTable.publicReference, publicReference))
-				.limit(1);
-
+				.limit(1)
+				.for("update");
 			if (
 				!row ||
 				!isOrderAccessGranted(
@@ -374,7 +374,6 @@ export class CommerceService {
 			) {
 				throw new CommerceError("order_not_found", "Order not found.", 404);
 			}
-
 			if (row.status !== "draft") {
 				throw new CommerceError(
 					"order_not_payable",
@@ -382,7 +381,6 @@ export class CommerceService {
 					409,
 				);
 			}
-
 			await tx
 				.update(orderContactTable)
 				.set({
@@ -408,7 +406,7 @@ export class CommerceService {
 		orderId: string,
 		paymentIntentId: string,
 	): Promise<void> {
-		await this.#db
+		const [updated] = await this.#db
 			.update(orderTable)
 			.set({ stripePaymentIntentId: paymentIntentId, updatedAt: new Date() })
 			.where(
@@ -416,7 +414,27 @@ export class CommerceService {
 					eq(orderTable.id, orderId),
 					isNull(orderTable.stripePaymentIntentId),
 				),
+			)
+			.returning({ id: orderTable.id });
+		if (updated) return;
+		const [existing] = await this.#db
+			.select({ stripePaymentIntentId: orderTable.stripePaymentIntentId })
+			.from(orderTable)
+			.where(eq(orderTable.id, orderId))
+			.limit(1);
+		if (!existing) {
+			throw new CommerceError("order_not_found", "Order not found.", 404);
+		}
+		if (
+			existing.stripePaymentIntentId !== null &&
+			existing.stripePaymentIntentId !== paymentIntentId
+		) {
+			throw new CommerceError(
+				"payment_unavailable",
+				"Order is already linked to a different payment intent.",
+				409,
 			);
+		}
 	}
 
 	/**
