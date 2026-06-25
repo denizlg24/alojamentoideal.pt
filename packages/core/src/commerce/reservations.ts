@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import type { HostifyClient } from "../integrations/hostify";
 import {
 	HostifyApiError,
@@ -612,4 +613,50 @@ function toMutateFailure(classified: ClassifiedError): MutateHoldResult {
 		kind: classified.transient ? "transient" : "permanent",
 		message: classified.message,
 	};
+}
+
+/** Prefix marking a synthetic reservation id produced by the dry-run gateway. */
+export const STUB_RESERVATION_PREFIX = "STUB";
+
+/**
+ * Dry-run {@link ProviderReservationGateway} that performs no provider I/O.
+ *
+ * Used as a development/production safety switch (`HOSTIFY_BOOKINGS_ENABLED=false`,
+ * wired in `apps/web/lib/api/commerce.ts`): every hold operation succeeds with a
+ * synthetic reservation id, so the full reserve-first saga — order state machine,
+ * Stripe charge, confirmation/refund emails and the reconciler cron — runs exactly
+ * as in production, but **no real Hostify reservation or transaction is created**.
+ *
+ * The synthetic id is a unique `STUB-<uuid>`, so it never collides on the
+ * `(provider, external_account_id, provider_reservation_id)` unique index and is
+ * trivially recognisable in the database. `findExistingHold` returns null because
+ * the orchestrator already dedupes retries on the persisted `providerReservationId`
+ * before it ever reaches the gateway.
+ */
+export class StubReservationGateway implements ProviderReservationGateway {
+	async placeHold(request: HostifyHoldRequest): Promise<PlaceHoldResult> {
+		return {
+			kind: "created",
+			providerStatus: request.reservation.status,
+			raw: { stub: true },
+			reservationId: `${STUB_RESERVATION_PREFIX}-${randomUUID()}`,
+			transactionId: null,
+		};
+	}
+
+	async confirmHold(_args: ConfirmHoldArgs): Promise<MutateHoldResult> {
+		return { kind: "ok", providerStatus: "accepted", raw: { stub: true } };
+	}
+
+	async cancelHold(_args: CancelHoldArgs): Promise<MutateHoldResult> {
+		return {
+			kind: "ok",
+			providerStatus: "cancelled_by_host",
+			raw: { stub: true },
+		};
+	}
+
+	async findExistingHold(_query: FindHoldQuery): Promise<PlacedHold | null> {
+		return null;
+	}
 }

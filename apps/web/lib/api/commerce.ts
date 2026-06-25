@@ -12,6 +12,8 @@ import {
 	CommerceService,
 	HostifyReservationGateway,
 	mapStripePaymentStatus,
+	type ProviderReservationGateway,
+	StubReservationGateway,
 } from "@workspace/core/commerce";
 import { createHostifyClientFromEnv } from "@workspace/core/integrations/hostify";
 import {
@@ -30,6 +32,31 @@ import { quoteFailure } from "./hostify-errors";
 
 // Matches CART_TTL_MS in the commerce service (~14 days).
 const CART_COOKIE_MAX_AGE_SECONDS = 14 * 24 * 60 * 60;
+
+/**
+ * Dev/prod safety switch. Real Hostify reservations are created only when this is
+ * not explicitly "false" (default on, opt-out — mirrors `COMMERCE_AUTO_REFUND`).
+ * When disabled, the reserve-first saga runs end-to-end against a no-op gateway so
+ * no real bookings are placed in the Hostify account. See `StubReservationGateway`.
+ */
+const hostifyBookingsEnabled = process.env.HOSTIFY_BOOKINGS_ENABLED !== "false";
+
+let warnedHostifyDisabled = false;
+
+function resolveHostifyGateway(
+	hostifyClient: ReturnType<typeof createHostifyClientFromEnv>,
+): ProviderReservationGateway {
+	if (hostifyBookingsEnabled) {
+		return new HostifyReservationGateway({ client: hostifyClient });
+	}
+	if (!warnedHostifyDisabled) {
+		warnedHostifyDisabled = true;
+		console.warn(
+			"HOSTIFY_BOOKINGS_ENABLED=false: reservation saga is running in dry-run mode; no real Hostify bookings will be created.",
+		);
+	}
+	return new StubReservationGateway();
+}
 
 export async function readJson(request: Request): Promise<unknown> {
 	try {
@@ -133,10 +160,11 @@ export function commerceService(): CommerceService {
 			? (request) => createRefund(stripe, request)
 			: undefined,
 		// The reservation saga dispatches through a provider-keyed gateway; Hostify
-		// is the only provider today (Bokun slots in here later).
+		// is the only provider today (Bokun slots in here later). A no-op stub
+		// replaces the live gateway when HOSTIFY_BOOKINGS_ENABLED=false.
 		resolveReservationGateway: (provider) =>
 			provider === HOSTIFY_PROVIDER
-				? new HostifyReservationGateway({ client: hostifyClient })
+				? resolveHostifyGateway(hostifyClient)
 				: undefined,
 		// The reconciler reads live PaymentIntent state when a webhook never arrived.
 		retrievePaymentIntent: stripe

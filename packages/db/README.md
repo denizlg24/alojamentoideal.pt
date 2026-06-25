@@ -14,12 +14,18 @@ tables here.
 
 ## Environment
 
-| Variable       | Required | Default                                                          |
-| -------------- | -------- | ---------------------------------------------------------------- |
-| `DATABASE_URL` | yes\*    | `postgres://postgres:postgres@localhost:5432/alojamentoideal`    |
+| Variable                  | Required | Default                                                       |
+| ------------------------- | -------- | ------------------------------------------------------------- |
+| `DATABASE_URL`            | yes\*    | `postgres://postgres:postgres@localhost:5432/alojamentoideal` |
+| `DATABASE_POOL_MAX`       | no       | `10`                                                          |
+| `DATABASE_BUILD_POOL_MAX` | no       | `1` during `next build`                                      |
 
 \* The default matches the local `docker-compose` Postgres, so local dev works
 without setting it. Always set it explicitly in deployed environments.
+
+`DATABASE_BUILD_POOL_MAX` caps each build worker's Postgres pool while Next.js
+prerenders cached catalog pages. Keep it low on hosted databases with small
+connection limits.
 
 ## Local database
 
