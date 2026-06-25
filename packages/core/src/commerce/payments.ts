@@ -142,17 +142,24 @@ export type MarkOrderPaidResult =
 	| { outcome: "already_finalized" }
 	| { outcome: "not_found" };
 
-/** Stripe failure details persisted on a failed order. */
+/** Stripe failure details recorded on a draft order after a failed attempt. */
 export interface OrderPaymentFailureInput {
 	failureCode: string | null;
 	failureDetail: string | null;
 }
 
-/** Outcome of marking an order failed from a `payment_intent.payment_failed`. */
-export type MarkOrderPaymentFailedResult =
+/**
+ * Outcome of recording a `payment_intent.payment_failed` attempt. A declined or
+ * unauthenticated card returns the PaymentIntent to `requires_payment_method`,
+ * so the order keeps its draft/pending status and stays retryable; only the
+ * failure code/detail is persisted. `recorded` reflects that non-terminal write;
+ * `already_finalized` means the order was already confirmed/cancelled;
+ * `not_found` means the referenced order is unknown.
+ */
+export type RecordOrderPaymentFailureResult =
 	| { outcome: "already_finalized" }
-	| { outcome: "failed" }
-	| { outcome: "not_found" };
+	| { outcome: "not_found" }
+	| { outcome: "recorded" };
 
 const ORDER_BOOKING_STATUSES: ReadonlySet<OrderBookingStatus> = new Set([
 	"cancelled",

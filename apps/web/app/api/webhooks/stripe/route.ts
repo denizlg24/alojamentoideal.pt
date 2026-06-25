@@ -96,7 +96,7 @@ async function handlePaymentFailed(
 		return;
 	}
 
-	await commerceService().markOrderPaymentFailed(event.orderId, {
+	await commerceService().recordOrderPaymentFailure(event.orderId, {
 		failureCode: event.failureCode,
 		failureDetail: event.failureDetail,
 	});
