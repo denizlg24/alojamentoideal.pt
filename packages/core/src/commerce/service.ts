@@ -30,11 +30,11 @@ import {
 } from "./orders";
 import {
 	type MarkOrderPaidResult,
-	type MarkOrderPaymentFailedResult,
 	type OrderPaymentFailureInput,
 	type OrderStatusRecord,
 	type PayableOrder,
 	type PaymentAmount,
+	type RecordOrderPaymentFailureResult,
 	toOrderBookingStatus,
 } from "./payments";
 import type {
@@ -567,20 +567,22 @@ export class CommerceService {
 	}
 
 	/**
-	 * Marks a draft/pending order as failed from a `payment_intent.payment_failed`
-	 * webhook, recording Stripe's failure code/detail. Idempotent the same way as
-	 * `markOrderPaid`: a re-delivery of an already-finalized order is a no-op.
+	 * Records a `payment_intent.payment_failed` attempt against a draft/pending
+	 * order without finalizing it. A declined or unauthenticated card returns the
+	 * PaymentIntent to `requires_payment_method`, so the order stays payable and
+	 * the guest can retry on the same intent; only Stripe's failure code/detail is
+	 * persisted. The checkout window still gates payability (`order_expired`).
+	 * Idempotent like `markOrderPaid`: an already-finalized order is left untouched.
 	 */
-	async markOrderPaymentFailed(
+	async recordOrderPaymentFailure(
 		orderId: string,
 		failure: OrderPaymentFailureInput,
-	): Promise<MarkOrderPaymentFailedResult> {
+	): Promise<RecordOrderPaymentFailureResult> {
 		const [updated] = await this.#db
 			.update(orderTable)
 			.set({
 				failureCode: failure.failureCode,
 				failureDetail: failure.failureDetail,
-				status: "failed",
 				updatedAt: new Date(),
 			})
 			.where(
@@ -592,7 +594,7 @@ export class CommerceService {
 			.returning({ id: orderTable.id });
 
 		if (updated) {
-			return { outcome: "failed" };
+			return { outcome: "recorded" };
 		}
 
 		const [existing] = await this.#db

@@ -855,18 +855,24 @@ export function CheckoutController({
 			return true;
 		} catch (error) {
 			const err = toCheckoutError(error);
-			setReviewError(err.message);
-			if (ORDER_RESTART_CODES.has(err.code)) {
-				setPayment(null);
-				setDraftOrder(null);
-				clearResumeState();
-			}
 			trackCheckoutEvent("payment_failed", {
 				listingId: initialListing.id,
 			});
+			// A genuinely non-payable order (expired/cancelled checkout window) can no
+			// longer be charged. Rebuild a fresh, mutable cart for the same stay so the
+			// guest restarts cleanly instead of being stranded on the frozen, converted
+			// cart; rebuildCart clears payment/draftOrder/resume.
+			if (ORDER_RESTART_CODES.has(err.code) && item) {
+				await rebuildCart(stayKeyFromItem(initialListing.id, item));
+				setNotice(
+					"Your payment session expired. We refreshed your cart so you can continue.",
+				);
+				return false;
+			}
+			setReviewError(err.message);
 			return false;
 		}
-	}, [cart, draftOrder, initialListing.id, payment]);
+	}, [cart, draftOrder, initialListing.id, item, payment, rebuildCart]);
 
 	const navigateToCompletion = useCallback(() => {
 		if (!payment) {
@@ -902,14 +908,24 @@ export function CheckoutController({
 			);
 		} catch (error) {
 			const err = toCheckoutError(error);
-			setReviewError(err.message);
-			if (ORDER_RESTART_CODES.has(err.code)) {
-				setPayment(null);
-				setDraftOrder(null);
-				clearResumeState();
+			if (ORDER_RESTART_CODES.has(err.code) && item) {
+				await rebuildCart(stayKeyFromItem(initialListing.id, item));
+				setNotice(
+					"Your booking session expired. We refreshed your cart so you can continue.",
+				);
+				return;
 			}
+			setReviewError(err.message);
 		}
-	}, [cart, draftOrder, navigateToCompletion, termsAccepted]);
+	}, [
+		cart,
+		draftOrder,
+		initialListing.id,
+		item,
+		navigateToCompletion,
+		rebuildCart,
+		termsAccepted,
+	]);
 
 	const returnUrl = useMemo(() => {
 		if (typeof window === "undefined" || !payment) {
@@ -1072,7 +1088,12 @@ export function CheckoutController({
 				state={payTimingState}
 			/>
 			{payment?.kind === "payment_intent" ? (
-				<StripePaymentForm clientSecret={payment.clientSecret}>
+				// Key on the client secret: Stripe Elements cannot swap its bound secret
+				// after mount, so a refreshed PaymentIntent must remount the provider.
+				<StripePaymentForm
+					clientSecret={payment.clientSecret}
+					key={payment.clientSecret}
+				>
 					{stepsTail}
 				</StripePaymentForm>
 			) : (
