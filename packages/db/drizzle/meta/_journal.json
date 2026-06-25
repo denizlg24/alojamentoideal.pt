@@ -120,6 +120,27 @@
       "when": 1782320856923,
       "tag": "0016_aspiring_vivisector",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1782381109937,
+      "tag": "0017_provider_booking_retry",
+      "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1782382531097,
+      "tag": "0018_provider_booking_transaction_id",
+      "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1782385706274,
+      "tag": "0019_chilly_wonder_man",
+      "breakpoints": true
     }
   ]
 }

@@ -10,7 +10,7 @@
       fallback="'Hanken Grotesk', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif"
       :weights="[400, 500, 600, 700]"
     />
-    <Preheader>Confirm your email to finish setting up your Alojamento Ideal account.</Preheader>
+    <Preheader>Your payment did not match the booking total, so we have refunded you in full.</Preheader>
 
     <Container class="max-w-[560px] mx-auto px-6 py-10 sm:px-4">
       <Section class="px-2 pb-8">
@@ -35,7 +35,7 @@
 
       <Section class="bg-[#fffdf9] px-9 pt-11 pb-10 rounded-[20px] sm:px-6">
         <Text class="m-0 text-[13px] font-semibold leading-5 text-[#b4512c]">
-          Welcome
+          Full refund issued
         </Text>
 
         <Spacer class="h-4" />
@@ -43,30 +43,53 @@
         <Heading
           class="m-0 font-bricolage-grotesque text-[34px] font-semibold leading-[38px] text-[#2b211b] sm:text-[28px] sm:leading-[32px]"
         >
-          Confirm your email.
+          We've refunded your payment.
         </Heading>
 
         <Spacer class="h-5" />
 
         <Text class="m-0 text-[16px] leading-7 text-[#6a5d52]">
-          You're almost there. Confirm this email address to finish setting up your <Raw>__APP_NAME__</Raw> account.
+          <Raw>__GREETING__</Raw>
+        </Text>
+
+        <Spacer class="h-3" />
+
+        <Text class="m-0 text-[16px] leading-7 text-[#6a5d52]">
+          We received a payment for booking <Raw>__ORDER_NUMBER__</Raw>, but the charged amount did not match the booking total. We have cancelled that payment and refunded you in full.
+        </Text>
+
+        <Spacer class="h-7" />
+
+        <table cellpadding="0" cellspacing="0" class="w-full border-t border-b border-[#ece1cf]" role="presentation">
+          <tr>
+            <td class="py-4 pr-4 align-middle">
+              <Text class="m-0 text-[13px] leading-5 text-[#94826f]">
+                Refund on its way
+              </Text>
+            </td>
+            <td class="py-4 pl-4 text-right align-middle">
+              <Text class="m-0 font-bricolage-grotesque text-[22px] font-semibold leading-7 text-[#b4512c]">
+                <Raw>__REFUND_AMOUNT__</Raw>
+              </Text>
+            </td>
+          </tr>
+        </table>
+
+        <Spacer class="h-5" />
+
+        <Text class="m-0 text-[15px] leading-7 text-[#6a5d52]">
+          It is heading back to your original payment method now and can take a few business days to appear, depending on your bank.
         </Text>
 
         <Spacer class="h-8" />
 
         <Button
-          href="__VERIFY_URL__"
+          href="__BROWSE_URL__"
           variant="solid"
           class="bg-[#2b211b] px-7 py-4 text-[15px] font-semibold text-[#fffdf9] no-underline rounded-full"
         >
-          Confirm email &rarr;
+          Try booking again &rarr;
         </Button>
-
-        <Spacer class="h-6" />
-
-        <Text class="m-0 text-[14px] leading-6 text-[#8a7c6f]">
-          This link expires in 24 hours. If you did not create an account, you can safely ignore this email.
-        </Text>
 
         <Spacer class="h-7" />
 
@@ -74,11 +97,8 @@
 
         <Spacer class="h-5" />
 
-        <Text class="m-0 text-[13px] leading-5 text-[#8a7c6f]">
-          Trouble with the button? Paste this link into your browser:
-        </Text>
-        <Text class="m-0 mt-1 break-all text-[13px] leading-5 text-[#b4512c]">
-          <Raw>__VERIFY_URL__</Raw>
+        <Text class="m-0 text-[14px] leading-6 text-[#8a7c6f]">
+          Need a hand completing a fresh booking? Just reply to this email and a real person on our team will help.
         </Text>
       </Section>
 

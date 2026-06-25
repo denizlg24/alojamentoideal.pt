@@ -3,6 +3,7 @@ export * from "./idempotency";
 export * from "./money";
 export * from "./orders";
 export * from "./payments";
+export * from "./reservations";
 export * from "./schemas";
 export * from "./service";
 export * from "./state";

@@ -112,6 +112,10 @@ interface EmailTemplates {
 	passwordResetText?: string;
 	orderConfirmationHtml?: string;
 	orderConfirmationText?: string;
+	orderCouldNotConfirmHtml?: string;
+	orderCouldNotConfirmText?: string;
+	orderAmountMismatchRefundHtml?: string;
+	orderAmountMismatchRefundText?: string;
 }
 
 async function loadTemplates(): Promise<EmailTemplates> {
@@ -282,6 +286,125 @@ export function buildOrderConfirmationEmail(
 		subject: `Booking confirmed at ${input.accommodationTitle}`,
 		text: `Booking confirmed at ${input.accommodationTitle}!\n\nReservation code: ${input.orderNumber}\n\nCheck-in: ${input.checkIn}\nCheck-out: ${input.checkOut}\nGuests: ${input.guests}\n\nTotal: ${input.totalPrice}\nPayment: ${input.paymentMethod}${cardInfo}\n\nManage: ${input.manageUrl}`,
 	};
+}
+
+export interface OrderCompensationEmailInput {
+	/** Pre-built greeting line, e.g. "Hi Ana," or "Hi there,". */
+	greeting: string;
+	orderNumber: string;
+	/** Formatted refund amount, e.g. "€640.00". */
+	refundAmount: string;
+	/** Link guests can use to start a fresh booking (e.g. the homes index). */
+	browseUrl: string;
+}
+
+function compensationPlaceholders(
+	input: OrderCompensationEmailInput,
+	transform: (value: string) => string,
+): Record<string, string> {
+	return {
+		APP_NAME,
+		BROWSE_URL: transform(input.browseUrl),
+		CURRENT_YEAR,
+		GREETING: transform(input.greeting),
+		ORDER_NUMBER: transform(input.orderNumber),
+		REFUND_AMOUNT: transform(input.refundAmount),
+	};
+}
+
+const identity = (value: string): string => value;
+
+/**
+ * Builds the "we couldn't confirm your booking, so you've been refunded" email
+ * for the post-charge compensation path. Uses the branded template when the
+ * emails package is present, falling back to a plain body otherwise.
+ */
+export function buildOrderCouldNotConfirmEmail(
+	input: OrderCompensationEmailInput,
+): EmailMessage {
+	const subject = `We couldn't confirm booking ${safeSubjectPart(input.orderNumber)}: full refund issued`;
+
+	if (TEMPLATES.orderCouldNotConfirmHtml) {
+		const html = applyPlaceholders(
+			TEMPLATES.orderCouldNotConfirmHtml,
+			compensationPlaceholders(input, escapeHtml),
+		);
+		const text = TEMPLATES.orderCouldNotConfirmText
+			? applyPlaceholders(
+					TEMPLATES.orderCouldNotConfirmText,
+					compensationPlaceholders(input, identity),
+				)
+			: orderCouldNotConfirmFallbackText(input);
+		return { html, subject, text };
+	}
+
+	const text = orderCouldNotConfirmFallbackText(input);
+	return { html: plainCompensationHtml(text), subject, text };
+}
+
+/**
+ * Builds the refund email for a Stripe amount/currency mismatch: the captured
+ * payment did not match the order total, so it was cancelled and refunded.
+ */
+export function buildOrderAmountMismatchRefundEmail(
+	input: OrderCompensationEmailInput,
+): EmailMessage {
+	const subject = `Refund issued for booking ${safeSubjectPart(input.orderNumber)}`;
+
+	if (TEMPLATES.orderAmountMismatchRefundHtml) {
+		const html = applyPlaceholders(
+			TEMPLATES.orderAmountMismatchRefundHtml,
+			compensationPlaceholders(input, escapeHtml),
+		);
+		const text = TEMPLATES.orderAmountMismatchRefundText
+			? applyPlaceholders(
+					TEMPLATES.orderAmountMismatchRefundText,
+					compensationPlaceholders(input, identity),
+				)
+			: orderAmountMismatchFallbackText(input);
+		return { html, subject, text };
+	}
+
+	const text = orderAmountMismatchFallbackText(input);
+	return { html: plainCompensationHtml(text), subject, text };
+}
+
+function orderCouldNotConfirmFallbackText(
+	input: OrderCompensationEmailInput,
+): string {
+	return [
+		input.greeting,
+		"",
+		`We're sorry: we were unable to confirm booking ${input.orderNumber} for your stay, so we have cancelled it and are refunding you in full.`,
+		`A full refund of ${input.refundAmount} is on its way back to your original payment method. It can take a few business days to appear, depending on your bank.`,
+		"",
+		`If you'd still like to stay with us, you can start a fresh booking at ${input.browseUrl}, or just reply to this email and we'll help.`,
+		"",
+		`The ${APP_NAME} team`,
+	].join("\n");
+}
+
+function orderAmountMismatchFallbackText(
+	input: OrderCompensationEmailInput,
+): string {
+	return [
+		input.greeting,
+		"",
+		`We received a payment for booking ${input.orderNumber}, but the charged amount did not match the booking total. We have cancelled that payment and issued a full refund.`,
+		`A full refund of ${input.refundAmount} is on its way back to your original payment method. It can take a few business days to appear, depending on your bank.`,
+		"",
+		`If you'd still like to stay with us, you can try booking again at ${input.browseUrl}, or just reply to this email and we'll help.`,
+		"",
+		`The ${APP_NAME} team`,
+	].join("\n");
+}
+
+function plainCompensationHtml(text: string): string {
+	const paragraphs = text
+		.split("\n")
+		.map((line) => (line === "" ? "<br/>" : `<p>${escapeHtml(line)}</p>`))
+		.join("");
+	return `<div style="font-family:system-ui,sans-serif;line-height:1.5">${paragraphs}</div>`;
 }
 
 export interface VerificationEmail {

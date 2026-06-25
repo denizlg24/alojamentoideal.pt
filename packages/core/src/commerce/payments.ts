@@ -98,6 +98,16 @@ export interface OrderStatusResponse {
 	publicReference: string;
 }
 
+export type OrderFinalizationEmailKind =
+	| "confirmation"
+	| "refund_amount_mismatch"
+	| "refund_unconfirmed";
+
+export type OrderCompensationEmailKind = Exclude<
+	OrderFinalizationEmailKind,
+	"confirmation"
+>;
+
 /**
  * Contact + amount facts needed to send a single order-confirmation email.
  * Returned only on the first draft -> confirmed transition so re-delivered
@@ -115,6 +125,7 @@ export interface OrderConfirmationFacts {
 	email: string;
 	guests: number;
 	name: string;
+	orderId: string;
 	publicReference: string;
 }
 
@@ -126,14 +137,18 @@ export interface PaymentAmount {
 
 /**
  * Outcome of marking an order paid from a verified `payment_intent.succeeded`
- * webhook. `confirmed` carries the email facts; `already_finalized` means a
- * prior delivery (or another worker) already settled the order; `not_found`
- * means the metadata referenced an order we do not have; `amount_mismatch`
- * means the captured amount/currency disagreed with the persisted order total,
- * so the order is deliberately left unconfirmed for manual reconciliation.
+ * webhook under the reserve-first saga. `markOrderPaid` no longer jumps to
+ * `confirmed`: it records the captured amount and moves a held order to
+ * `pending`, then the caller drives `confirmOrderReservations` to confirm the
+ * provider hold (which is where the confirmation email originates). `marked`
+ * means the paid amount was recorded (the order is `pending`, awaiting hold
+ * confirmation); `already_finalized` means the order already reached a terminal
+ * state; `not_found` means the metadata referenced an unknown order;
+ * `amount_mismatch` means the captured amount/currency disagreed with the
+ * persisted total, so the money was taken but must be refunded by compensation.
  */
 export type MarkOrderPaidResult =
-	| { confirmation: OrderConfirmationFacts; outcome: "confirmed" }
+	| { outcome: "marked" }
 	| {
 			expected: PaymentAmount;
 			outcome: "amount_mismatch";
@@ -141,6 +156,93 @@ export type MarkOrderPaidResult =
 	  }
 	| { outcome: "already_finalized" }
 	| { outcome: "not_found" };
+
+/**
+ * Outcome of placing every provider hold for an order at PaymentIntent creation
+ * (reserve-first). `held` moves the order `draft -> pending` and lets the route
+ * return a PaymentIntent; `unavailable` means a hold was rejected (dates gone)
+ * so no PaymentIntent is created and no money is taken; `transient_error` means
+ * a provider call failed retryably (the route should ask the guest to retry);
+ * `not_holdable` means the order was not in a holdable state.
+ */
+export type HoldOrderResult =
+	| { outcome: "held" }
+	| { message: string; outcome: "unavailable" }
+	| { outcome: "transient_error" }
+	| { outcome: "not_holdable" };
+
+/**
+ * Facts the caller needs to send the "refunded — we couldn't confirm" email and
+ * raise a Sentry alert after an order is compensated. Assembled from durable
+ * state only on the transition into `cancelled`, so a re-run never re-emails.
+ */
+export interface OrderCompensationFacts {
+	amountRefundedMinor: number;
+	currency: string;
+	email: string;
+	emailKind: OrderCompensationEmailKind;
+	name: string;
+	orderId: string;
+	publicReference: string;
+	reason: string;
+}
+
+/**
+ * Outcome of confirming an order's provider holds after payment. `confirmed`
+ * carries the one-shot confirmation email facts; `compensated` means a hold
+ * confirm failed permanently and the order was refunded (facts for the customer
+ * email); `manual_recovery` means auto-refund is disabled and the order is
+ * flagged for an operator; `pending_retry` means a transient failure left the
+ * order `pending` for the reconciler cron; `not_applicable` means the order was
+ * not in a confirmable state (e.g. already confirmed, or never paid).
+ */
+export type ConfirmOrderReservationsResult =
+	| { confirmation: OrderConfirmationFacts; outcome: "confirmed" }
+	| { compensation: OrderCompensationFacts; outcome: "compensated" }
+	| { outcome: "manual_recovery" }
+	| { outcome: "pending_retry" }
+	| { outcome: "not_applicable" };
+
+/**
+ * Outcome of releasing an order's provider holds (payment failed terminally or
+ * an abandoned checkout expired). `cancelled` moved the order to `failed`;
+ * `pending_retry` means a hold cancel failed transiently and the cron will retry;
+ * `already_settled` means the order was already terminal; `not_found` is unknown.
+ */
+export type CancelOrderReservationsResult =
+	| { outcome: "cancelled" }
+	| { outcome: "pending_retry" }
+	| { outcome: "already_settled" }
+	| { outcome: "not_found" };
+
+/**
+ * Outcome of compensating a charged order whose booking could not be confirmed.
+ * `compensated` issued a full refund and moved the order to `cancelled`;
+ * `already_compensated` is the idempotent re-run; `manual_recovery` means
+ * auto-refund is disabled so the order is flagged instead of refunded.
+ */
+export type CompensateOrderResult =
+	| { compensation: OrderCompensationFacts; outcome: "compensated" }
+	| { outcome: "already_compensated" }
+	| { outcome: "manual_recovery" }
+	| { outcome: "not_found" };
+
+/** Live PaymentIntent facts the reconciler reads when a webhook never arrived. */
+export interface PaymentIntentLiveStatus {
+	amountMinor: number;
+	currency: string;
+	status: CheckoutPaymentStatus;
+}
+
+/** Aggregate counters returned by a reconciler cron pass. */
+export interface ReconcileReservationsSummary {
+	cancelled: number;
+	compensated: number;
+	confirmed: number;
+	expired: number;
+	rescheduled: number;
+	scanned: number;
+}
 
 /** Stripe failure details recorded on a draft order after a failed attempt. */
 export interface OrderPaymentFailureInput {

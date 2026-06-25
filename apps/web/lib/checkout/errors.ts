@@ -60,6 +60,8 @@ const FRIENDLY_MESSAGES: Record<string, string> = {
 	quote_expired: "Your stay price was refreshed. Please review the new total.",
 	quote_revalidation_failed:
 		"We could not confirm the latest price. Please try again.",
+	reservation_unavailable:
+		"These dates are no longer available. Please choose a different period.",
 	too_many_guests: "This home cannot accommodate that many guests.",
 };
 

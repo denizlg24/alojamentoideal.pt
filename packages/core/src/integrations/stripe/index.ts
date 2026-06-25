@@ -18,6 +18,11 @@ export {
 	retrievePaymentIntentSnapshot,
 } from "./payment-intents";
 export {
+	createRefund,
+	type RefundRequest,
+	type RefundResult,
+} from "./refunds";
+export {
 	constructStripeEvent,
 	getStripeWebhookSecret,
 	interpretStripeEvent,

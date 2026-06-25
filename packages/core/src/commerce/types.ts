@@ -28,6 +28,13 @@ export interface CommerceQuoteInput {
 	adults: number;
 	children: number;
 	dates: StayDates;
+	/**
+	 * When set, bypasses the read-through quote cache and re-prices live. Left
+	 * unset (cached) for cart pricing, which reuses the entry the booking widget
+	 * already warmed; availability is re-checked at the reservation hold, so a
+	 * cache hit never commits a charge against stale availability.
+	 */
+	forceFresh?: boolean;
 	guests: number;
 	infants: number;
 	listingId: string;

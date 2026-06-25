@@ -1,4 +1,9 @@
 import * as Sentry from "@sentry/nextjs";
+import type {
+	OrderCompensationFacts,
+	OrderConfirmationFacts,
+	OrderFinalizationEmailKind,
+} from "@workspace/core/commerce";
 import {
 	constructStripeEvent,
 	createStripeClientFromEnv,
@@ -14,17 +19,25 @@ import { accountProfileRepository } from "@/lib/api/account";
 import { commerceService } from "@/lib/api/commerce";
 import { withApiRoute } from "@/lib/api/route";
 import { sendOrderConfirmationEmail } from "@/lib/email/order-confirmation";
+import {
+	sendOrderAmountMismatchRefundEmail,
+	sendOrderCompensationEmail,
+} from "@/lib/email/order-could-not-confirm";
 
 function stripeSessionLogId(sessionId: string): string {
 	return hashIdentifier(`stripe-identity:${sessionId}`);
 }
 
 /**
- * Settles an order whose PaymentIntent succeeded. `markOrderPaid` is idempotent,
- * so a re-delivered event is a no-op and the confirmation email is sent only on
- * the first transition. Email transport failures are logged but never fail the
- * webhook: the order is already confirmed and a 5xx would only trigger a retry
- * that, finding the order finalized, would not resend the email anyway.
+ * Settles an order whose PaymentIntent succeeded under the reserve-first saga.
+ * `markOrderPaid` records the captured amount and moves the order to `pending`;
+ * `confirmOrderReservations` then flips the provider hold to accepted and is
+ * where the single confirmation email originates. Both are idempotent, so a
+ * re-delivered event is a no-op. The webhook is only an optimisation: the
+ * reconciler cron is the durability authority, so any failure here is logged,
+ * never 5xx'd (a retry would just re-find the settled order). A permanent
+ * confirm failure (or an amount mismatch — money was taken) routes to
+ * compensation, which refunds and emails the guest.
  */
 async function handlePaymentSucceeded(
 	event: Extract<RelevantStripeEvent, { type: "payment_succeeded" }>,
@@ -36,59 +49,185 @@ async function handlePaymentSucceeded(
 		return;
 	}
 
-	const result = await commerceService().markOrderPaid(event.orderId, {
-		amountMinor: event.amountReceivedMinor,
-		currency: event.currency,
-	});
-
-	if (result.outcome === "not_found") {
-		logger.warn("Stripe webhook referenced an unknown order", {
-			orderId: event.orderId,
+	try {
+		const service = commerceService();
+		const marked = await service.markOrderPaid(event.orderId, {
+			amountMinor: event.amountReceivedMinor,
+			currency: event.currency,
 		});
-		return;
-	}
-	if (result.outcome === "amount_mismatch") {
-		// The captured amount disagrees with the persisted order total. The order
-		// is left unconfirmed on purpose; surface it loudly for reconciliation
-		// since the customer was charged but the booking is not settled.
-		const detail = {
-			expectedCurrency: result.expected.currency,
-			expectedMinor: result.expected.amountMinor,
+
+		if (marked.outcome === "not_found") {
+			logger.warn("Stripe webhook referenced an unknown order", {
+				orderId: event.orderId,
+			});
+			return;
+		}
+		if (marked.outcome === "amount_mismatch") {
+			// The captured amount disagrees with the persisted total: the guest was
+			// charged the wrong amount. Compensate (refund) and surface loudly.
+			const detail = {
+				expectedCurrency: marked.expected.currency,
+				expectedMinor: marked.expected.amountMinor,
+				orderId: event.orderId,
+				paymentIntentId: event.paymentIntentId,
+				receivedCurrency: marked.received.currency,
+				receivedMinor: marked.received.amountMinor,
+			};
+			logger.error(
+				"Stripe payment amount does not match the order total",
+				detail,
+			);
+			Sentry.captureException(
+				new Error("Stripe payment amount does not match the order total"),
+				{ extra: detail, level: "error" },
+			);
+			const compensated = await service.compensateOrder(
+				event.orderId,
+				"amount_mismatch",
+			);
+			if (compensated.outcome === "compensated") {
+				await sendFinalizationEmail(
+					service,
+					compensated.compensation.emailKind,
+					compensated.compensation,
+					() => sendOrderAmountMismatchRefundEmail(compensated.compensation),
+				);
+			}
+			return;
+		}
+		if (marked.outcome === "already_finalized") {
+			return;
+		}
+
+		await finalizeReservation(service, event.orderId, event.paymentIntentId);
+	} catch (error) {
+		const captured = error instanceof Error ? error : new Error(String(error));
+		logger.error("Failed to settle paid order from Stripe webhook", {
+			error: captured.message,
 			orderId: event.orderId,
 			paymentIntentId: event.paymentIntentId,
-			receivedCurrency: result.received.currency,
-			receivedMinor: result.received.amountMinor,
-		};
-		logger.error(
-			"Stripe payment amount does not match the order total",
-			detail,
-		);
-		Sentry.captureException(
-			new Error("Stripe payment amount does not match the order total"),
-			{ extra: detail, level: "error" },
-		);
+		});
+		Sentry.captureException(captured, {
+			extra: {
+				orderId: event.orderId,
+				paymentIntentId: event.paymentIntentId,
+			},
+			level: "error",
+		});
+	}
+}
+
+/**
+ * Drives the provider hold confirmation after payment and dispatches the right
+ * customer email. Shared by the webhook and any future inline caller.
+ */
+async function finalizeReservation(
+	service: ReturnType<typeof commerceService>,
+	orderId: string,
+	paymentIntentId: string,
+): Promise<void> {
+	const result = await service.confirmOrderReservations(orderId);
+	switch (result.outcome) {
+		case "confirmed":
+			if (!result.confirmation.email) {
+				logger.warn("Confirmed order has no contact email; skipping email", {
+					orderId,
+				});
+				await service.markFinalizationEmailSent(orderId, "confirmation");
+				return;
+			}
+			await sendFinalizationEmail(
+				service,
+				"confirmation",
+				result.confirmation,
+				() => sendOrderConfirmationEmail(result.confirmation),
+			);
+			return;
+		case "compensated":
+			Sentry.captureException(
+				new Error("Order refunded: provider hold could not be confirmed"),
+				{ extra: { orderId, paymentIntentId }, level: "error" },
+			);
+			await sendFinalizationEmail(
+				service,
+				result.compensation.emailKind,
+				result.compensation,
+				() => sendOrderCompensationEmail(result.compensation),
+			);
+			return;
+		case "manual_recovery":
+			Sentry.captureException(
+				new Error("Order needs manual recovery: auto-refund disabled"),
+				{ extra: { orderId, paymentIntentId }, level: "error" },
+			);
+			return;
+		default:
+			// pending_retry / not_applicable: the reconciler cron will finish it.
+			logger.info("Reservation confirmation deferred to reconciler", {
+				orderId,
+				outcome: result.outcome,
+			});
+			return;
+	}
+}
+
+async function sendFinalizationEmail(
+	service: ReturnType<typeof commerceService>,
+	kind: OrderFinalizationEmailKind,
+	facts: OrderConfirmationFacts | OrderCompensationFacts,
+	send: () => Promise<void>,
+): Promise<void> {
+	const claimed = await service.claimFinalizationEmail(facts.orderId, kind);
+	if (!claimed) {
 		return;
 	}
-	if (result.outcome === "already_finalized") {
-		return;
-	}
-	if (!result.confirmation.email) {
-		logger.warn("Confirmed order has no contact email; skipping email", {
-			orderId: event.orderId,
+
+	try {
+		await send();
+	} catch (error) {
+		const message = error instanceof Error ? error.message : String(error);
+		await service.recordFinalizationEmailFailure(facts.orderId, kind, message);
+		logger.error("Failed to send order email", {
+			error: message,
+			publicReference: facts.publicReference,
 		});
 		return;
 	}
 
 	try {
-		await sendOrderConfirmationEmail(result.confirmation);
+		await service.markFinalizationEmailSent(facts.orderId, kind);
 	} catch (error) {
-		logger.error("Failed to send order confirmation email", {
-			error: error instanceof Error ? error.message : String(error),
-			orderId: event.orderId,
+		const message = error instanceof Error ? error.message : String(error);
+		await service.recordFinalizationEmailSentStateFailure(
+			facts.orderId,
+			kind,
+			message,
+		);
+		logger.error("Order email sent, but marking it sent failed", {
+			error: message,
+			publicReference: facts.publicReference,
 		});
+		Sentry.captureException(
+			error instanceof Error ? error : new Error(String(error)),
+			{
+				extra: {
+					emailKind: kind,
+					orderId: facts.orderId,
+					publicReference: facts.publicReference,
+				},
+				level: "error",
+			},
+		);
 	}
 }
 
+/**
+ * Records a failed payment attempt without releasing the provider hold. A card
+ * decline returns the PaymentIntent to `requires_payment_method`, so the order
+ * stays payable and the guest can retry on the same intent (commit 310d246).
+ * Releasing the hold here would break retry; an abandoned hold is instead
+ * released by the reconciler cron once the checkout window expires.
+ */
 async function handlePaymentFailed(
 	event: Extract<RelevantStripeEvent, { type: "payment_failed" }>,
 ): Promise<void> {

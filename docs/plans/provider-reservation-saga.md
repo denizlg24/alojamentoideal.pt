@@ -345,8 +345,114 @@ Modify:
   webhook → `resyncAccommodationListing`) is adjacent but separate; not in scope
   here beyond storing `providerReservationId` so a future webhook can correlate.
 
+## Implementation status: M5 backend (2026-06-25)
+
+The backend (Parts A–F, H) is implemented and green: `bun test ./packages/core`
+(253 pass), `typecheck` for `@workspace/db` / `@workspace/core` / `web`, and a
+targeted `biome check` on the files touched for this backend pass. Frontend
+(Part G) and a real-Hostify validation pass remain.
+
+### What shipped
+
+- **Schema/migrations.** Retry/diagnostic columns + partial index on
+  `provider_bookings` (`0017_provider_booking_retry.sql`) and a
+  `provider_transaction_id` column (`0018_provider_booking_transaction_id.sql`).
+  `0019_chilly_wonder_man.sql` adds refund tracking, durable finalization-email
+  retry state, the refunded-lte-paid check, and null-account-safe provider
+  booking unique indexes. Last applied migration was `0016`, not `0012` as the
+  plan stated, so this backend ships `0017`/`0018`/`0019`. `ProviderBooking` row
+  type exported from `@workspace/db`.
+- **Gateway + mapper** (`packages/core/src/commerce/reservations.ts`):
+  `buildCreateReservationInput` / `buildTransactionInput` / `buildHoldRequest`
+  pure mappers, a provider-keyed `ProviderReservationGateway` interface, and
+  `HostifyReservationGateway`. Unit-tested (`reservations.test.ts`).
+- **Saga** on `CommerceService`: `holdOrderReservations`,
+  `confirmOrderReservations`, `cancelOrderReservations`, `compensateOrder`,
+  `reconcileReservations`, plus reworked `markOrderPaid`. New result types in
+  `commerce/payments.ts`.
+- **Refunds** (`integrations/stripe/refunds.ts`, exported; tested).
+- **Triggers**: payment-intent route places the hold before charging and
+  surfaces `reservation_unavailable` (409) / transient (503); the webhook
+  confirms (or compensates) and keeps failed payments retryable.
+- **Cron**: `GET /api/cron/commerce/reservations`, registered in the external
+  scheduler runbook at `docs/sync-routes.md` with a 5-minute release-blocking
+  cadence. Do not use Vercel Cron Jobs for this project.
+- **Wiring**: `commerceService()` injects the Hostify gateway, the Stripe refund
+  helper, and a live-PaymentIntent reader; `COMMERCE_AUTO_REFUND=false` switches
+  D4 to manual-hold.
+- **Email/observability**: confirmation + refund emails fire from the webhook and
+  the cron. The order transition stores a durable finalization-email signal and
+  transport success clears it; failures record retry state for the cron. The
+  amount-mismatch path uses neutral payment-discrepancy copy, while provider
+  confirmation failure uses the "could-not-confirm / refunded" copy. `trackEvent`
+  for `reservation_provisioned` / `order_confirmed` / `order_compensated`.
+
+### Decisions taken (deviations from the plan above)
+
+1. **Hostify transaction is wired** (the legacy "incomplete accommodation
+   transaction" the plan omitted). At hold we `POST /transactions`
+   (`is_completed: 0`, `type: "accommodation"`) and persist its id; on confirm we
+   `PUT` it to `is_completed: 1` with the Stripe payment ref; on cancel we set it
+   back to `is_completed: 0` with an audit note. The client's `transactions.create`
+   schema was changed from success-only to `hostifySchemas.transaction` so the id
+   is no longer stripped. Transaction writes are **best-effort** (the reservation
+   write is the authoritative inventory action; a transaction failure never fails
+   the hold/confirm/cancel and is reconciled separately).
+2. **Confirm = `reservations.update status=accepted`; cancel = `update
+   status=cancelled_by_host`.** The inbox `acceptReservation`/`declineReservation`
+   endpoints are NOT used: their input is `{ thread_id }` (inquiry threads), not a
+   host-created reservation id. Chosen from the type contract; still wants a
+   real-response check (see open items).
+3. **`payment_failed` does NOT release the hold.** Per commit 310d246 (failed
+   payments stay retryable on the same intent) and the user's note, the webhook
+   only records the failure. Hold release on an **abandoned** checkout is solely
+   the reconciler cron's expiry job. This is what cancels a Hostify reservation
+   created for a cart the guest then abandons.
+4. **Gateway is provider-call-only; DB-aware hold ops live on `CommerceService`.**
+   The plan put `createHold/confirmHold/cancelHold(providerBookingId)` in
+   `reservations.ts`; instead those DB steps are private service methods and the
+   gateway exposes pure provider calls, so the gateway is testable without a DB
+   and the service keeps sole ownership of persistence.
+5. **`pending` is split by `amountPaidMinor`**: `0` = held-unpaid (PaymentIntent
+   open), `> 0` = paid-awaiting-confirm. `getPayableOrder` now also accepts a
+   held-unpaid `pending` order so checkout resume / PI refresh still works.
+6. **Unavailable/permanent create failure fails the order** (sets `failed` and
+   releases sibling holds) rather than leaving it `draft`; a draft order carrying
+   cancelled bookings would be inconsistent and un-resumable.
+7. **Bounded retries**: a transient confirm/cancel escalates to permanent
+   (→ compensation / `needsRecovery`) once `attemptCount` hits the cap
+   (`maxReservationAttempts`, default 6); backoff 60s→30min.
+8. **Compensation refunds `amountPaidMinor`** from Postgres (our source of truth),
+   not the Hostify transaction amount the legacy read back.
+
+### Open / remaining
+
+- **Part G (frontend).** `readOrderStatus` already returns the new
+  `bookingStatus`, but the completion page copy ("payment received, finalizing" on
+  `pending`, "refunded: we couldn't confirm" on `cancelled`) and the checkout
+  UI handling of the `reservation_unavailable` (409) / 503 responses are not done.
+- **Real-Hostify validation.** Confirm against a live response: the
+  accept/cancel status verbs, that a host `pending` reservation truly blocks the
+  calendar, the `transactions.create` response shape (`{ success, transaction:{id} }`
+  assumed from the legacy), and that `reservations.list` filters reliably back the
+  reconcile-before-create dedupe.
+- **External scheduler release gate.** `vercel.json` intentionally has no `crons`
+  block. The existing Hostify crons run from an external scheduler via
+  `Authorization: Bearer $CRON_SECRET`; `/api/cron/commerce/reservations` must be
+  registered there before release (5-minute cadence; alert on `pending` older
+  than `checkoutExpiresAt + grace`). See `docs/sync-routes.md`.
+- **DB-integration saga tests** (hold→confirm happy path, payment-fail, compensation,
+  abandoned-hold expiry, webhook-missed cron resolve, idempotent re-delivery,
+  double-book guard). No DB test harness exists in the repo yet; only the gateway /
+  mapper / refund seams are unit-tested so far.
+- **Minor gaps**: zero-total orders place no hold (out of scope);
+  `fees[]`/`security_price` are not mapped (no persisted Hostify `fee_id`); no
+  distinct `order_paid` funnel event.
+
 ## References
 
 - Roadmap M5 (`docs/roadmap.md:187`), M6 email-from-durable-state (`:202`).
-- `docs/data-architecture.md` provider-booking mapping.
+- `docs/data-architecture.md` provider-booking mapping; legacy reservation +
+  transaction flow in `app/actions/createReservation.ts`,
+  `app/api/webhook/stripe/route.ts`, `app/actions/cancelReservation.ts`.
 - Existing crons: `apps/web/app/api/cron/hostify/*/route.ts`.

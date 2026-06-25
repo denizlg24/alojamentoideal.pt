@@ -20,6 +20,7 @@ export type CommerceErrorCode =
 	| "pricing_unavailable"
 	| "quote_expired"
 	| "quote_revalidation_failed"
+	| "reservation_unavailable"
 	| "too_many_guests";
 
 export interface CommerceIssue {

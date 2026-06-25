@@ -33,6 +33,18 @@ const templates: TemplateEntry[] = [
 		textFile: "order-confirmation.txt",
 		exportName: "orderConfirmation",
 	},
+	{
+		name: "order-could-not-confirm",
+		htmlFile: "order-could-not-confirm.html",
+		textFile: "order-could-not-confirm.txt",
+		exportName: "orderCouldNotConfirm",
+	},
+	{
+		name: "order-amount-mismatch-refund",
+		htmlFile: "order-amount-mismatch-refund.html",
+		textFile: "order-amount-mismatch-refund.txt",
+		exportName: "orderAmountMismatchRefund",
+	},
 ];
 
 function loadFile(filePath: string): string | null {

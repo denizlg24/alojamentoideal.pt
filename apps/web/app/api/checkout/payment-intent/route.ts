@@ -72,6 +72,28 @@ export const POST = withApiRoute(
 				throw error;
 			}
 
+			// Reserve-first gate: place the Hostify hold before charging. No hold ->
+			// no PaymentIntent -> no charge. Availability is re-checked against the
+			// provider here, so a quote->book race fails before money is taken.
+			const hold = await service.holdOrderReservations(order.orderId);
+			if (hold.outcome === "unavailable") {
+				throw new CommerceError("reservation_unavailable", hold.message, 409);
+			}
+			if (hold.outcome === "transient_error") {
+				throw new CommerceError(
+					"payment_unavailable",
+					"We could not hold this stay just now. Please try again.",
+					503,
+				);
+			}
+			if (hold.outcome === "not_holdable") {
+				throw new CommerceError(
+					"order_not_payable",
+					"This order can no longer be paid.",
+					409,
+				);
+			}
+
 			const snapshot = await createOrUpdatePaymentIntent(stripe, {
 				amountMinor: order.totalMinor,
 				cartId: parsed.data.cartId,

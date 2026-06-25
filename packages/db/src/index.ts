@@ -17,6 +17,7 @@ export type {
 	LocalizedText,
 	OrderBillingAddressSnapshot,
 	ProcessedAmenity,
+	ProviderBooking,
 	ProviderBookingStatus,
 } from "./schema";
 export * as schemaTables from "./schema";

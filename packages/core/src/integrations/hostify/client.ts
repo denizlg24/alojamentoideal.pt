@@ -874,11 +874,13 @@ export class HostifyClient {
 			input: T.HostifyCreateTransactionInput,
 			context?: T.HostifyRequestContext,
 		) =>
+			// The create response carries the new transaction (`{ success, transaction
+			// }`); parse it so callers can persist `transaction.id`.
 			this.mutate(
 				"POST",
 				"/transactions",
 				input,
-				hostifySuccessSchema,
+				hostifySchemas.transaction,
 				context,
 			),
 		createTag: (
