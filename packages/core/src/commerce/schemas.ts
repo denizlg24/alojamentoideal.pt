@@ -205,7 +205,9 @@ export function parseAddCartItemBody(
 		return parsed;
 	}
 
-	const quote = parseQuoteBody({ ...parsed.data, forceFresh: true });
+	// Cart-add reuses the quote the widget already warmed for these exact dates;
+	// the reservation hold re-checks availability before any charge.
+	const quote = parseQuoteBody({ ...parsed.data, forceFresh: false });
 	if (!quote.success) {
 		return quote;
 	}

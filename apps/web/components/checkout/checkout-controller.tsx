@@ -773,6 +773,15 @@ export function CheckoutController({
 			void saveContactToAccount();
 		} catch (error) {
 			const err = toCheckoutError(error);
+			// Reserve-first: the provider hold was rejected (dates gone) before any
+			// charge, and the order was failed server-side. Rebuild a fresh cart for
+			// the same stay and prompt new dates instead of stranding the guest.
+			if (err.code === "reservation_unavailable" && item) {
+				await rebuildCart(stayKeyFromItem(initialListing.id, item));
+				setDialog("dates");
+				setNotice(err.message);
+				return;
+			}
 			if (ORDER_RESTART_CODES.has(err.code) && item) {
 				clearResumeState();
 				setDraftOrder(null);
@@ -858,6 +867,14 @@ export function CheckoutController({
 			trackCheckoutEvent("payment_failed", {
 				listingId: initialListing.id,
 			});
+			// The provider hold became unavailable before charging: rebuild a fresh
+			// cart for the same stay and prompt new dates.
+			if (err.code === "reservation_unavailable" && item) {
+				await rebuildCart(stayKeyFromItem(initialListing.id, item));
+				setDialog("dates");
+				setNotice(err.message);
+				return false;
+			}
 			// A genuinely non-payable order (expired/cancelled checkout window) can no
 			// longer be charged. Rebuild a fresh, mutable cart for the same stay so the
 			// guest restarts cleanly instead of being stranded on the frozen, converted

@@ -26,7 +26,7 @@ import { cn } from "@workspace/ui/lib/utils";
 import { format } from "date-fns";
 import { ChevronDown, ShoppingCart } from "lucide-react";
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import type { DateRange } from "react-day-picker";
 import { nightsBetween, parseIsoDate, toIsoDate } from "@/lib/catalog/dates";
@@ -117,6 +117,7 @@ function BookingWidgetInner({
 	minNights,
 }: BookingWidgetProps) {
 	const searchParams = useSearchParams();
+	const router = useRouter();
 	const [range, setRange] = useState<DateRange | undefined>(() => {
 		const checkIn = searchParams.get("checkIn");
 		const checkOut = searchParams.get("checkOut");
@@ -192,6 +193,15 @@ function BookingWidgetInner({
 		!guestLimitError &&
 		!minStayError &&
 		reserveHref !== null;
+
+	// Warm the checkout route once the stay is stable and bookable so navigation
+	// overlaps the click. The Reserve <Link> only auto-prefetches in the viewport,
+	// which on mobile is hidden inside the reserve drawer until it is opened.
+	useEffect(() => {
+		if (canReserve && reserveHref) {
+			router.prefetch(reserveHref);
+		}
+	}, [canReserve, reserveHref, router]);
 
 	const handleAddToCart = async () => {
 		if (!checkIn || !checkOut || adding) {

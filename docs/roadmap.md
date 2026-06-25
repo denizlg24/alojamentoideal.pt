@@ -4,7 +4,7 @@ This is the recommended build order for Alojamento Ideal as an end-to-end app.
 The goal is to move from backend foundations to a usable customer booking flow,
 then into operations, automation, and polish.
 
-## Status (as of 2026-06-22)
+## Status (as of 2026-06-25)
 
 Legend: ✅ done · 🟡 in progress / partial · ⬜ not started
 
@@ -13,26 +13,57 @@ Legend: ✅ done · 🟡 in progress / partial · ⬜ not started
 | 0 | Foundations (cache, sync, platform) | ✅ | Hostify incremental sync cron, content processing, and the `accommodation_listing` projection with FTS + trigram + geo search index. Rate limiting (Redis) and observability (Sentry errors + PostgreSQL analytics) wired through `withApiRoute`. |
 | 1 | Catalog Browsing | ✅ | Catalog read API done: `GET /api/catalog/listings` (filter/sort/paginate) and `/api/catalog/listings/[externalId]` (localized detail), with Next.js `use cache` + cron-driven `revalidateTag` invalidation. Frontend: `/homes` grid, filter bar (dates/guests/rooms/rating/amenities), and Leaflet map. Detail page (`/homes/[id]`) shipped with gallery + full-screen gallery route, amenities dialog, reviews (synced via cron), location map, share button, room/sleeping layout, and skeleton fallbacks. |
 | 2 | Live Availability and Quote | ✅ | Detail-page booking widget runs live Hostify quotes via `POST /api/accommodations/quote` (`AccommodationQuoteService`, Redis short-lived quote cache w/ `forceFresh` bypass), debounced + stale-abort. Availability calendar from `/api/accommodations/calendar`, date/guest pickers, guest-type/tax overhaul, min-stay + capacity enforcement, price breakdown (fees + VAT), and clear unavailable/provider-error states. Re-validation immediately before booking moves into checkout (M3/M4); see Open debt. |
-| 3 | Cart and Checkout Shell | 🟡 | Backend foundation is in place: DB-backed cart/order schema, `CommerceService`, idempotent cart mutations, cart validation, and draft-order API routes (`POST /api/cart`, `/api/cart/[cartId]`, `/api/cart/[cartId]/items`, `/api/cart/[cartId]/items/[itemId]`, `/api/cart/[cartId]/validate`, `/api/checkout/draft-order`). Frontend remains partial: `Reserve` still links to `/homes/[id]/book` (route not built) and `Add to cart` is a UI stub with no persisted client cart store. No provider side effects. |
-| 4 | Payment Foundation | ⬜ | Stripe PaymentIntent from server-side order total; payment attempts + idempotency. |
-| 5 | Provider Reservation Saga | ⬜ | Durable Hostify reservation confirm/compensate workflow. |
-| 6 | Customer Order Experience | ⬜ | Confirmation page + email from durable state. |
+| 3 | Cart and Checkout Shell | ✅ | Backend (DB-backed cart/order schema, `CommerceService`, idempotent cart mutations, cart validation, draft-order routes) plus the frontend shell: `/homes/[id]/book` checkout with a persisted client cart, contact/billing capture, draft-order creation, and the `/booking/complete` view. Cart pricing reuses the booking widget's short-lived warmed quote (the `forceFresh` bypass is now opt-in) and the checkout route is prefetched on a stable, bookable selection to hide Hostify latency. |
+| 4 | Payment Foundation | ✅ | Stripe PaymentIntent created from the server-side order total (never client-submitted), one idempotent intent per draft order, retry-safe card failures, `payment_intent.succeeded` / `payment_failed` webhook handling, a Stripe refund helper, and reconciliation from live PaymentIntent state when a webhook never arrives. |
+| 5 | Provider Reservation Saga | 🟡 | Reserve-first saga **backend** shipped and green: a Hostify hold is placed at PaymentIntent creation (no hold → no charge), confirmed on payment success, compensated (auto full refund) on permanent confirm failure / amount mismatch, with a reconciler cron (`/api/cron/commerce/reservations`) as the durability authority, bounded retry/backoff columns, a provider-keyed gateway (`reservations.ts`) + Hostify transaction wiring, and migrations `0017`–`0019`. Remaining: completion-page UI (Part G), real-Hostify response validation, DB-integration saga tests, and registering the cron in the external scheduler. See `docs/plans/provider-reservation-saga.md`. |
+| 6 | Customer Order Experience | 🟡 | Confirmation, "could not confirm / refunded", and amount-mismatch emails now fire from durable saga state (webhook/cron), not optimistic frontend actions, and `readOrderStatus` exposes the held/confirmed/cancelled booking status. Remaining: the completion-page copy for those states and the checkout UI handling of the `reservation_unavailable` (409) / transient (503) responses. |
 | 7 | Admin Operations | ⬜ | Order/recovery dashboard, sync health. |
 | 8 | Guest Registration and Compliance | ⬜ | Encrypted guest data + Hostkit/SIBA submission. |
 | 9 | Activities and Mixed Cart | ⬜ | Bokun browse/quote/reserve + mixed-cart allocation. |
 | 10 | Fiscal Documents, Messaging, Post-Stay | ⬜ | Invoices/credit notes, messaging, reconciliation. |
-| 11 | Analytics and Optimization | 🟡 | Per-request analytics events persisted to PostgreSQL and errors to Sentry. Commercial funnel events (search → view → quote → checkout → payment → confirm) **not built**. |
+| 11 | Analytics and Optimization | 🟡 | Per-request analytics events persisted to PostgreSQL and errors to Sentry. Durable-state booking events (`reservation_provisioned`, `order_confirmed`, `order_compensated`) now emitted from the saga; the broader commercial funnel (search → view → quote → checkout → payment) is still partial. |
 
-Current focus: milestones 1 and 2 are complete (browsing + live detail-page
-quote), and milestone 3 has its backend foundation. Next is to wire the
-booking-widget CTAs into a persisted cart client and `/homes/[id]/book`
-checkout shell, then hand contact/billing details into draft-order creation.
+Current focus: milestones 1–4 are complete (browsing, live quote, checkout
+shell, payment foundation) and the M5 reserve-first reservation saga backend is
+in. Next is the customer-facing tail of M5/M6: the `/booking/complete`
+held → confirmed → refunded states, the checkout UI handling of an unavailable
+hold, real-Hostify validation of the hold/cancel verbs, and DB-integration saga
+tests.
 
 ## Technical Notes and Debt
 
 Running list of known shortcuts and follow-ups noticed during implementation.
 Keep this honest: when a debt item is paid, move the detail into the relevant
 milestone and delete it here.
+
+### Done in the reservation-saga + payment + checkout-latency iteration (2026-06-25)
+
+- ✅ **M4 payment foundation.** Server-side Stripe PaymentIntent per draft order
+  (idempotency key `pi:{orderId}`), retry-safe card failures, `succeeded` /
+  `payment_failed` webhook handling, a `createRefund` helper
+  (`integrations/stripe/refunds.ts`), and live-PaymentIntent reconciliation for
+  webhook-missed orders.
+- ✅ **M5 reserve-first saga (backend).** `holdOrderReservations` /
+  `confirmOrderReservations` / `cancelOrderReservations` / `compensateOrder` /
+  `reconcileReservations` on `CommerceService`; a provider-keyed
+  `ProviderReservationGateway` + `HostifyReservationGateway` with pure mappers in
+  `reservations.ts`; Hostify hold + best-effort transaction wiring; bounded
+  retry/backoff + `needsRecovery` columns; migrations `0017`–`0019`; reconciler
+  cron `GET /api/cron/commerce/reservations`. Full decisions and deviations are in
+  `docs/plans/provider-reservation-saga.md` (status section, 2026-06-25).
+- ✅ **M6 emails from durable state.** Confirmation, "could not confirm /
+  refunded", and amount-mismatch templates fire from the saga (webhook/cron) with
+  a durable finalization-email retry signal; `readOrderStatus` exposes the new
+  booking status.
+- ✅ **Checkout latency.** Cart add / edit / conversion reuse the short-TTL quote
+  the booking widget already warmed instead of always re-pricing live (`forceFresh`
+  is now opt-in via `CommerceQuoteInput`); availability is still re-checked at the
+  hold, so no charge commits against stale availability. The `/homes/[id]/book`
+  route is prefetched once a stay is stable and bookable (`router.prefetch`),
+  warming the route outside the viewport (e.g. the mobile reserve drawer).
+- ✅ Validation: `bun test ./packages/core` (253 pass) plus the commerce/schemas
+  suites, `@workspace/core` / `@workspace/db` / `web` typecheck, and targeted
+  `biome check` on touched files.
 
 ### Done in the cart API hardening iteration (2026-06-22)
 
@@ -100,12 +131,31 @@ milestone and delete it here.
 ### Open debt
 
 - 🟡 **Always fetch live Hostify price + availability before booking.** The
-  detail page now re-quotes live against Hostify (full fees + VAT), so the grid
-  estimate is no longer the last word. Cart validation and draft-order creation
-  now revalidate active items with fresh Hostify quote snapshots before
-  checkout state advances. Remaining before payment/provider side effects: wire
-  the frontend quote/cart flow to those APIs and surface stale or unavailable
-  failures gracefully.
+  detail page re-quotes live (full fees + VAT) and the frontend cart/checkout
+  flow is now wired through those APIs end to end. The authoritative availability
+  commit is the reserve-first hold at PaymentIntent creation, which re-checks
+  Hostify before any charge; cart pricing intentionally reuses the widget's
+  short-TTL warmed quote (opt-in `forceFresh`) rather than re-pricing live, since
+  the hold is the real guard. Remaining: the checkout UI still needs to surface
+  the `reservation_unavailable` (409) / transient (503) hold responses gracefully
+  (M5 Part G).
+- ⬜ **M5 real-Hostify validation.** Confirm against live responses: the
+  accept verb (`reservations.update status=accepted`) and cancel verb
+  (`status=cancelled_by_host`), that a host `pending` reservation truly blocks the
+  calendar, the `transactions.create` response shape, and that `reservations.list`
+  filters reliably back the reconcile-before-create dedupe.
+- ⬜ **Reconciler cron registration.** `vercel.json` intentionally has no `crons`
+  block; `/api/cron/commerce/reservations` must be registered in the external
+  scheduler (`Authorization: Bearer $CRON_SECRET`, ~5-minute cadence, alert on
+  `pending` older than `checkoutExpiresAt + grace`) before release. See
+  `docs/sync-routes.md`.
+- ⬜ **DB-integration saga tests.** Only the gateway / mapper / refund seams are
+  unit-tested. The hold→confirm happy path, payment-fail, compensation,
+  abandoned-hold expiry, webhook-missed cron resolve, idempotent re-delivery, and
+  double-book guard need a DB harness, which the repo does not have yet.
+- ⬜ **Saga minor gaps.** Zero-total orders place no hold; `fees[]` /
+  `security_price` are not mapped (no persisted Hostify `fee_id`); no distinct
+  `order_paid` funnel event.
 - ⬜ **Hostify reservation webhook → cache invalidation.** Build the webhook
   endpoint that calls `resyncAccommodationListing(listingId)` so out-of-band
   bookings (other channels/OTAs) correct our availability without waiting for

@@ -11,14 +11,17 @@ import {
 	cartItem as cartItemTable,
 	cart as cartTable,
 	type Database,
+	type OrderBillingAddressSnapshot,
 	orderContact as orderContactTable,
 	orderItemCharge as orderItemChargeTable,
 	orderItem as orderItemTable,
 	order as orderTable,
 	providerBooking as providerBookingTable,
 } from "@workspace/db";
-import { and, asc, eq, gt, inArray, isNull, lte, sql } from "drizzle-orm";
+import { and, asc, eq, gt, inArray, isNull, lte, or, sql } from "drizzle-orm";
 import { parseQuoteBody } from "../accommodations";
+import type { RefundRequest, RefundResult } from "../integrations/stripe";
+import { trackEvent } from "../observability";
 import { CommerceError, invalidRequest } from "./errors";
 import { hashIdempotencyRequest, idempotencyExpiresAt } from "./idempotency";
 import { housingFeeMinor, normalizeAccommodationQuoteSnapshot } from "./money";
@@ -29,14 +32,30 @@ import {
 	generatePublicOrderReference,
 } from "./orders";
 import {
+	type CancelOrderReservationsResult,
+	type CompensateOrderResult,
+	type ConfirmOrderReservationsResult,
+	type HoldOrderResult,
 	type MarkOrderPaidResult,
+	type OrderCompensationEmailKind,
+	type OrderCompensationFacts,
+	type OrderConfirmationFacts,
+	type OrderFinalizationEmailKind,
 	type OrderPaymentFailureInput,
 	type OrderStatusRecord,
 	type PayableOrder,
 	type PaymentAmount,
+	type PaymentIntentLiveStatus,
+	type ReconcileReservationsSummary,
 	type RecordOrderPaymentFailureResult,
 	toOrderBookingStatus,
 } from "./payments";
+import {
+	buildHoldRequest,
+	type ProviderReservationGateway,
+	type ReservationChargeInput,
+	reservationTag,
+} from "./reservations";
 import type {
 	AddCartItemBody,
 	ApplyDiscountBody,
@@ -67,11 +86,56 @@ const CART_TTL_MS = 14 * 24 * 60 * 60 * 1000;
 const CHECKOUT_TTL_MS = 30 * 60 * 1000;
 const DEFAULT_PROPERTY_TIMEZONE = "Europe/Lisbon";
 
+// Reservation-saga retry/backoff bounds (Part A columns drive the cron).
+const RESERVATION_RETRY_BASE_MS = 60 * 1000;
+const RESERVATION_RETRY_MAX_MS = 30 * 60 * 1000;
+const DEFAULT_MAX_RESERVATION_ATTEMPTS = 6;
+const DEFAULT_RESERVATION_SOURCE = "alojamentoideal";
+// Grace past `checkoutExpiresAt` before the cron releases an abandoned hold.
+const ABANDONED_HOLD_GRACE_MS = 5 * 60 * 1000;
+const REFUND_REQUESTED_FAILURE_DETAIL =
+	"Compensation refund requested; awaiting Stripe result.";
+const REFUND_COMPLETED_FAILURE_DETAIL =
+	"Compensation refund accepted by Stripe.";
+const REFUND_STATE_UNKNOWN_FAILURE_DETAIL =
+	"Compensation refund was already requested, but no local Stripe refund id is recorded. Verify Stripe before retrying.";
+const FINALIZATION_EMAIL_RETRY_BASE_MS = 5 * 60 * 1000;
+const FINALIZATION_EMAIL_RETRY_MAX_MS = 60 * 60 * 1000;
+const FINALIZATION_EMAIL_CLAIM_MS = 5 * 60 * 1000;
+
 type Transaction = Parameters<Parameters<Database["transaction"]>[0]>[0];
 type DbExecutor = Database | Transaction;
 
 function stayDateToTimestamp(value: string): Date {
 	return new Date(`${value}T00:00:00.000Z`);
+}
+
+function compensationRefundIdempotencyKey(
+	orderId: string,
+	paymentIntentId: string,
+	amountMinor: number,
+): string {
+	return `refund:${orderId}:${paymentIntentId}:${amountMinor}`;
+}
+
+function compensationEmailKindForReason(
+	reason: string,
+): OrderCompensationEmailKind {
+	return reason === "amount_mismatch"
+		? "refund_amount_mismatch"
+		: "refund_unconfirmed";
+}
+
+function isCompensationEmailKind(
+	kind: string | null,
+): kind is OrderCompensationEmailKind {
+	return kind === "refund_amount_mismatch" || kind === "refund_unconfirmed";
+}
+
+function isFinalizationEmailKind(
+	kind: string | null,
+): kind is OrderFinalizationEmailKind {
+	return kind === "confirmation" || isCompensationEmailKind(kind);
 }
 
 export interface CommerceServiceOptions {
@@ -89,6 +153,26 @@ export interface CommerceServiceOptions {
 	 * failures so the service can distinguish "invalid" from "unavailable".
 	 */
 	resolveDiscount: (code: string) => Promise<AppliedDiscountSnapshot | null>;
+	/**
+	 * Resolves the provider-keyed reservation gateway the saga dispatches through.
+	 * Optional so cart/quote-only callers and unit tests need not wire a provider
+	 * client; the saga reports `transient_error`/`not_holdable` when absent.
+	 */
+	resolveReservationGateway?: (
+		provider: string,
+	) => ProviderReservationGateway | undefined;
+	/** Issues a Stripe refund during compensation; required for auto-refund (D4). */
+	refundPayment?: (request: RefundRequest) => Promise<RefundResult>;
+	/** Reads live PaymentIntent status for the reconciler (webhook-missed path). */
+	retrievePaymentIntent?: (
+		paymentIntentId: string,
+	) => Promise<PaymentIntentLiveStatus>;
+	/** Auto full-refund on permanent post-charge failure (D4). Defaults to true. */
+	autoRefundOnFailure?: boolean;
+	/** Retry cap before a hold step is flagged `needsRecovery`. Defaults to 6. */
+	maxReservationAttempts?: number;
+	/** Hostify `source` tag stamped on every direct hold. */
+	reservationSource?: string;
 }
 
 interface CreateCartInput {
@@ -109,6 +193,69 @@ interface RevalidatedSnapshot {
 interface RevalidatedCartDiscount {
 	applied: AppliedDiscountSnapshot | null;
 	resolved: AppliedDiscountSnapshot | null;
+}
+
+/** One provider booking joined with its order item + accommodation detail. */
+interface SagaBooking {
+	attemptCount: number;
+	charges: ReservationChargeInput[];
+	checkIn: string;
+	checkOut: string;
+	guests: number;
+	hostifyListingId: string;
+	imageUrlSnapshot: string | null;
+	itemTotalMinor: number;
+	normalizedStatus: string;
+	orderItemId: string;
+	pets: number;
+	provider: string;
+	providerBookingId: string;
+	providerReservationId: string | null;
+	providerTransactionId: string | null;
+	titleSnapshot: string;
+}
+
+/** Everything the saga needs to drive one order's provider holds. */
+interface SagaContext {
+	bookings: SagaBooking[];
+	contact: {
+		billingAddress: OrderBillingAddressSnapshot;
+		email: string;
+		name: string;
+		phoneE164: string;
+	} | null;
+	order: {
+		amountPaidMinor: number;
+		amountRefundedMinor: number;
+		checkoutExpiresAt: Date | null;
+		currency: string;
+		finalizationEmailAttemptCount: number;
+		finalizationEmailKind: string | null;
+		finalizationEmailNextAttemptAt: Date;
+		finalizationEmailSentAt: Date | null;
+		failureCode: string | null;
+		id: string;
+		publicReference: string;
+		refundRequestedAt: Date | null;
+		status: string;
+		stripePaymentIntentId: string | null;
+		stripeRefundId: string | null;
+		stripeRefundIdempotencyKey: string | null;
+	};
+}
+
+type HoldItemResult =
+	| "held"
+	| "transient"
+	| "permanent"
+	| { unavailable: string };
+type MutateItemResult = "ok" | "transient" | "permanent";
+type PersistHoldPlacedResult = "already_linked" | "conflict" | "persisted";
+
+/** Email side-effects the reconciler delegates back to the app (transport seam). */
+interface ReconcileHandlers {
+	onCompensated?: (facts: OrderCompensationFacts) => Promise<void>;
+	onConfirmed?: (facts: OrderConfirmationFacts) => Promise<void>;
 }
 
 interface CartJoinedRow {
@@ -156,6 +303,12 @@ export class CommerceService {
 	readonly #quoteAccommodation: CommerceServiceOptions["quoteAccommodation"];
 	readonly #quoteTtlSeconds: number;
 	readonly #resolveDiscount: CommerceServiceOptions["resolveDiscount"];
+	readonly #resolveReservationGateway: CommerceServiceOptions["resolveReservationGateway"];
+	readonly #refundPayment: CommerceServiceOptions["refundPayment"];
+	readonly #retrievePaymentIntent: CommerceServiceOptions["retrievePaymentIntent"];
+	readonly #autoRefundOnFailure: boolean;
+	readonly #maxReservationAttempts: number;
+	readonly #reservationSource: string;
 
 	constructor(options: CommerceServiceOptions) {
 		this.#accountId = options.accountId;
@@ -165,6 +318,14 @@ export class CommerceService {
 		this.#quoteAccommodation = options.quoteAccommodation;
 		this.#quoteTtlSeconds = options.quoteTtlSeconds;
 		this.#resolveDiscount = options.resolveDiscount;
+		this.#resolveReservationGateway = options.resolveReservationGateway;
+		this.#refundPayment = options.refundPayment;
+		this.#retrievePaymentIntent = options.retrievePaymentIntent;
+		this.#autoRefundOnFailure = options.autoRefundOnFailure ?? true;
+		this.#maxReservationAttempts =
+			options.maxReservationAttempts ?? DEFAULT_MAX_RESERVATION_ATTEMPTS;
+		this.#reservationSource =
+			options.reservationSource ?? DEFAULT_RESERVATION_SOURCE;
 	}
 
 	async createCart(
@@ -207,6 +368,7 @@ export class CommerceService {
 	): Promise<PayableOrder> {
 		const [row] = await this.#db
 			.select({
+				amountPaidMinor: orderTable.amountPaidMinor,
 				cartId: orderTable.cartId,
 				cartToken: cartTable.cartToken,
 				checkoutExpiresAt: orderTable.checkoutExpiresAt,
@@ -233,7 +395,15 @@ export class CommerceService {
 			throw new CommerceError("order_not_found", "Order not found.", 404);
 		}
 
-		if (row.status !== "draft") {
+		// Reserve-first moves a held-but-unpaid order to `pending` before the
+		// PaymentIntent is returned, so a checkout resume (or a retry on the same
+		// intent) must still treat a `pending` order with no recorded payment as
+		// payable. A `pending` order that has already recorded a payment, or any
+		// terminal state, is no longer payable.
+		const payable =
+			row.status === "draft" ||
+			(row.status === "pending" && row.amountPaidMinor === 0);
+		if (!payable) {
 			throw new CommerceError(
 				"order_not_payable",
 				"This order can no longer be paid.",
@@ -444,17 +614,16 @@ export class CommerceService {
 	}
 
 	/**
-	 * Marks a draft/pending order as paid in response to a signature-verified
-	 * `payment_intent.succeeded` webhook. Before confirming, the captured amount
-	 * and currency are asserted against the persisted order total: a mismatch
-	 * (e.g. a re-quote between intent creation and capture, or tampering) returns
-	 * `amount_mismatch` and leaves the order unconfirmed for manual review rather
-	 * than silently confirming a wrong total. The guarded UPDATE is the
-	 * idempotency authority: a re-delivered event (or a racing worker) finds the
-	 * order already finalized and returns `already_finalized` without
-	 * re-confirming, so the caller sends exactly one confirmation email. There is
-	 * no owner check here because the trust boundary is Stripe's webhook
-	 * signature, not a session.
+	 * Records a verified `payment_intent.succeeded` against an order under the
+	 * reserve-first saga. The captured amount/currency are asserted against the
+	 * persisted total first: a mismatch returns `amount_mismatch` (the money was
+	 * taken, so the caller compensates with a refund). On a match the order is
+	 * moved to `pending` with `amountPaidMinor` recorded — it is NOT confirmed
+	 * here. Confirmation (and the single confirmation email) happen in
+	 * `confirmOrderReservations`, which flips the provider hold from pending to
+	 * accepted. The guarded UPDATE is the idempotency authority: a re-delivered
+	 * event finds a terminal order and returns `already_finalized`. There is no
+	 * owner check; the trust boundary is Stripe's webhook signature.
 	 */
 	async markOrderPaid(
 		orderId: string,
@@ -481,6 +650,24 @@ export class CommerceService {
 				payment.amountMinor !== order.totalMinor ||
 				payment.currency.toUpperCase() !== order.currency.toUpperCase()
 			) {
+				const [updated] = await tx
+					.update(orderTable)
+					.set({
+						amountPaidMinor: payment.amountMinor,
+						failureCode: "amount_mismatch",
+						status: "pending",
+						updatedAt: new Date(),
+					})
+					.where(
+						and(
+							eq(orderTable.id, orderId),
+							inArray(orderTable.status, ["draft", "pending"]),
+						),
+					)
+					.returning({ id: orderTable.id });
+				if (!updated) {
+					return { outcome: "already_finalized" };
+				}
 				return {
 					expected: {
 						amountMinor: order.totalMinor,
@@ -495,7 +682,7 @@ export class CommerceService {
 				.update(orderTable)
 				.set({
 					amountPaidMinor: payment.amountMinor,
-					status: "confirmed",
+					status: "pending",
 					updatedAt: new Date(),
 				})
 				.where(
@@ -504,10 +691,7 @@ export class CommerceService {
 						inArray(orderTable.status, ["draft", "pending"]),
 					),
 				)
-				.returning({
-					currency: orderTable.currency,
-					publicReference: orderTable.publicReference,
-				});
+				.returning({ id: orderTable.id });
 
 			// Lost the race to another finalizer between the read and the guarded
 			// update; the order is already settled.
@@ -515,54 +699,7 @@ export class CommerceService {
 				return { outcome: "already_finalized" };
 			}
 
-			const [contact] = await tx
-				.select({
-					billingAddress: orderContactTable.billingAddress,
-					email: orderContactTable.email,
-					name: orderContactTable.name,
-					phoneE164: orderContactTable.phoneE164,
-				})
-				.from(orderContactTable)
-				.where(eq(orderContactTable.orderId, orderId))
-				.limit(1);
-
-			const [reservation] = await tx
-				.select({
-					checkIn: accommodationItemDetailTable.checkIn,
-					checkOut: accommodationItemDetailTable.checkOut,
-					guests: accommodationItemDetailTable.guests,
-					imageUrl: orderItemTable.imageUrlSnapshot,
-					title: orderItemTable.titleSnapshot,
-				})
-				.from(orderItemTable)
-				.innerJoin(
-					accommodationItemDetailTable,
-					eq(accommodationItemDetailTable.orderItemId, orderItemTable.id),
-				)
-				.where(eq(orderItemTable.orderId, orderId))
-				.orderBy(asc(orderItemTable.position))
-				.limit(1);
-
-			return {
-				confirmation: {
-					accommodationImage: reservation?.imageUrl ?? null,
-					accommodationTitle:
-						reservation?.title ?? "Your Alojamento Ideal stay",
-					amountPaidMinor: payment.amountMinor,
-					billingAddress: contact?.billingAddress ?? {},
-					checkIn: reservation?.checkIn ?? "To be confirmed",
-					checkOut: reservation?.checkOut ?? "To be confirmed",
-					contactPhone: contact?.phoneE164 ?? "",
-					currency: updated.currency,
-					// The contact is captured at draft creation, so a confirmed order
-					// always has one; fall back rather than risk an unhandled throw.
-					email: contact?.email ?? "",
-					guests: reservation?.guests ?? 0,
-					name: contact?.name ?? "",
-					publicReference: updated.publicReference,
-				},
-				outcome: "confirmed",
-			};
+			return { outcome: "marked" };
 		});
 	}
 
@@ -2071,6 +2208,1858 @@ export class CommerceService {
 			return response;
 		});
 	}
+
+	// ---------------------------------------------------------------------------
+	// Provider reservation saga (M5, reserve-first). The order-level methods loop
+	// over every provider_booking regardless of provider, dispatching through the
+	// injected provider-keyed gateway so the orchestrator stays provider-agnostic.
+	// Provider network calls happen outside transactions (like quoting); durable
+	// state is persisted with guarded UPDATEs so the webhook and cron converge.
+	// ---------------------------------------------------------------------------
+
+	/**
+	 * Places a provider hold for every item of an order at PaymentIntent creation.
+	 * Any item that comes back `unavailable` (or fails permanently) releases the
+	 * holds already placed in this pass and fails the order without taking money,
+	 * so the gate is: no hold -> no PaymentIntent -> no charge. A transient
+	 * provider failure leaves the order holdable for the next attempt; the cron
+	 * releases anything abandoned. On full success the order moves to `pending`.
+	 */
+	async holdOrderReservations(orderId: string): Promise<HoldOrderResult> {
+		const context = await this.#loadSagaContext(orderId);
+		if (!context) {
+			return { outcome: "not_holdable" };
+		}
+		const { order } = context;
+		const holdable =
+			order.status === "draft" ||
+			(order.status === "pending" && order.amountPaidMinor === 0);
+		if (!holdable) {
+			return { outcome: "not_holdable" };
+		}
+
+		let sawTransient = false;
+		for (const booking of context.bookings) {
+			const result = await this.#createHold(context, booking);
+			if (typeof result === "object") {
+				await this.#releaseHeldSiblings(context, booking.providerBookingId);
+				await this.#failOrder(orderId, "reservation_unavailable");
+				return { message: result.unavailable, outcome: "unavailable" };
+			}
+			if (result === "permanent") {
+				await this.#releaseHeldSiblings(context, booking.providerBookingId);
+				await this.#failOrder(orderId, "reservation_create_failed");
+				return {
+					message: "This stay can no longer be booked.",
+					outcome: "unavailable",
+				};
+			}
+			if (result === "transient") {
+				sawTransient = true;
+			}
+		}
+
+		if (sawTransient) {
+			return { outcome: "transient_error" };
+		}
+
+		const [updated] = await this.#db
+			.update(orderTable)
+			.set({ status: "pending", updatedAt: new Date() })
+			.where(
+				and(
+					eq(orderTable.id, orderId),
+					inArray(orderTable.status, ["draft", "pending"]),
+					eq(orderTable.amountPaidMinor, 0),
+				),
+			)
+			.returning({ id: orderTable.id });
+		if (!updated) {
+			return { outcome: "not_holdable" };
+		}
+		trackEvent({
+			metadata: { orderId },
+			name: "reservation_provisioned",
+			provider: this.#provider,
+			type: "integration",
+		});
+		return { outcome: "held" };
+	}
+
+	/**
+	 * Confirms every provider hold after a successful payment, then settles the
+	 * order. All holds confirmed -> order `confirmed` (+ one confirmation email);
+	 * a permanent confirm failure -> `compensateOrder` (refund); a transient
+	 * failure leaves the order `pending` for the reconciler cron. Idempotent: a
+	 * re-run on an already-confirmed order is a no-op.
+	 */
+	async confirmOrderReservations(
+		orderId: string,
+	): Promise<ConfirmOrderReservationsResult> {
+		const context = await this.#loadSagaContext(orderId);
+		if (!context) {
+			return { outcome: "not_applicable" };
+		}
+		const { order } = context;
+		if (order.status !== "pending" || order.amountPaidMinor <= 0) {
+			return { outcome: "not_applicable" };
+		}
+
+		let sawTransient = false;
+		let sawPermanent = false;
+		for (const booking of context.bookings) {
+			const result = await this.#confirmHold(
+				booking,
+				order.stripePaymentIntentId,
+			);
+			if (result === "transient") {
+				sawTransient = true;
+			} else if (result === "permanent") {
+				sawPermanent = true;
+			}
+		}
+
+		if (sawPermanent) {
+			const compensation = await this.compensateOrder(
+				orderId,
+				"reservation_confirm_failed",
+			);
+			if (compensation.outcome === "compensated") {
+				return {
+					compensation: compensation.compensation,
+					outcome: "compensated",
+				};
+			}
+			if (compensation.outcome === "manual_recovery") {
+				return { outcome: "manual_recovery" };
+			}
+			return { outcome: "not_applicable" };
+		}
+
+		if (sawTransient) {
+			return { outcome: "pending_retry" };
+		}
+
+		const now = new Date();
+		const [updated] = await this.#db
+			.update(orderTable)
+			.set({
+				confirmedAt: now,
+				finalizationEmailAttemptCount: 0,
+				finalizationEmailKind: "confirmation",
+				finalizationEmailLastError: null,
+				finalizationEmailNextAttemptAt: now,
+				finalizationEmailSentAt: null,
+				status: "confirmed",
+				updatedAt: now,
+			})
+			.where(and(eq(orderTable.id, orderId), eq(orderTable.status, "pending")))
+			.returning({ id: orderTable.id });
+		if (!updated) {
+			// A concurrent confirmer won the transition; the email is theirs to send.
+			return { outcome: "not_applicable" };
+		}
+
+		trackEvent({
+			metadata: { orderId },
+			name: "order_confirmed",
+			provider: this.#provider,
+			type: "integration",
+		});
+		return {
+			confirmation: this.#buildConfirmationFacts(context),
+			outcome: "confirmed",
+		};
+	}
+
+	/**
+	 * Releases every provider hold for an order (payment failed terminally, or an
+	 * abandoned checkout expired) and moves the order to `failed`. A transient
+	 * cancel failure leaves the order for the cron to retry.
+	 */
+	async cancelOrderReservations(
+		orderId: string,
+		reason: string,
+	): Promise<CancelOrderReservationsResult> {
+		const context = await this.#loadSagaContext(orderId);
+		if (!context) {
+			return { outcome: "not_found" };
+		}
+		const { order } = context;
+		if (
+			order.status === "failed" ||
+			order.status === "cancelled" ||
+			order.status === "confirmed"
+		) {
+			return { outcome: "already_settled" };
+		}
+
+		if ((await this.#cancelOrderHolds(context, reason)) === "transient") {
+			return { outcome: "pending_retry" };
+		}
+
+		const [updated] = await this.#db
+			.update(orderTable)
+			.set({ status: "failed", updatedAt: new Date() })
+			.where(
+				and(
+					eq(orderTable.id, orderId),
+					inArray(orderTable.status, ["draft", "pending"]),
+				),
+			)
+			.returning({ id: orderTable.id });
+		return updated ? { outcome: "cancelled" } : { outcome: "already_settled" };
+	}
+
+	/**
+	 * Compensates a charged order whose booking could not be confirmed: a full
+	 * refund of the captured amount, order -> `cancelled`, and every hold
+	 * released. Config-gated (D4): when auto-refund is disabled (or no refunder /
+	 * intent is wired) the order is flagged `needsRecovery` for an operator
+	 * instead. Idempotent: a re-run finds the order already `cancelled`.
+	 */
+	async compensateOrder(
+		orderId: string,
+		reason: string,
+	): Promise<CompensateOrderResult> {
+		const refundPayment = this.#refundPayment;
+		const emailKind = compensationEmailKindForReason(reason);
+		const prepared = await this.#db.transaction(async (tx) => {
+			const context = await this.#loadSagaContext(orderId, tx, {
+				lockOrder: true,
+			});
+			if (!context) {
+				return { outcome: "not_found" } as const;
+			}
+			const { order } = context;
+			if (order.status === "cancelled") {
+				return { outcome: "already_compensated" } as const;
+			}
+			const compensable =
+				order.amountPaidMinor > 0 &&
+				(order.status === "pending" || order.status === "confirmed");
+			if (!compensable) {
+				return { outcome: "not_found" } as const;
+			}
+
+			if (
+				!this.#autoRefundOnFailure ||
+				!refundPayment ||
+				!order.stripePaymentIntentId
+			) {
+				await this.#flagOrderForRecovery(context, reason, tx);
+				trackEvent({
+					metadata: { mode: "manual", orderId, reason },
+					name: "order_compensated",
+					provider: this.#provider,
+					severity: "warning",
+					type: "integration",
+				});
+				return { outcome: "manual_recovery" } as const;
+			}
+			if (order.refundRequestedAt && !order.stripeRefundId) {
+				await this.#flagOrderForRecovery(
+					context,
+					REFUND_STATE_UNKNOWN_FAILURE_DETAIL,
+					tx,
+				);
+				trackEvent({
+					metadata: { mode: "refund_state_unknown", orderId, reason },
+					name: "order_compensated",
+					provider: this.#provider,
+					severity: "error",
+					type: "integration",
+				});
+				return { outcome: "manual_recovery" } as const;
+			}
+
+			const now = new Date();
+			const idempotencyKey =
+				order.stripeRefundIdempotencyKey ??
+				compensationRefundIdempotencyKey(
+					order.id,
+					order.stripePaymentIntentId,
+					order.amountPaidMinor,
+				);
+
+			const [updated] = await tx
+				.update(orderTable)
+				.set({
+					failureCode: reason,
+					failureDetail: REFUND_REQUESTED_FAILURE_DETAIL,
+					refundRequestedAt: order.refundRequestedAt ?? now,
+					stripeRefundIdempotencyKey: idempotencyKey,
+					updatedAt: now,
+				})
+				.where(
+					and(
+						eq(orderTable.id, orderId),
+						inArray(orderTable.status, ["pending", "confirmed"]),
+						or(
+							isNull(orderTable.stripeRefundIdempotencyKey),
+							eq(orderTable.stripeRefundIdempotencyKey, idempotencyKey),
+						),
+					),
+				)
+				.returning({ id: orderTable.id });
+			if (!updated) {
+				return { outcome: "already_compensated" } as const;
+			}
+
+			return {
+				amountMinor: order.amountPaidMinor,
+				context,
+				idempotencyKey,
+				outcome: "refund_prepared",
+				paymentIntentId: order.stripePaymentIntentId,
+			} as const;
+		});
+
+		if (prepared.outcome !== "refund_prepared") {
+			return prepared;
+		}
+		if (!refundPayment) {
+			return { outcome: "manual_recovery" };
+		}
+
+		const refund = await refundPayment({
+			amountMinor: prepared.amountMinor,
+			idempotencyKey: prepared.idempotencyKey,
+			paymentIntentId: prepared.paymentIntentId,
+			reason: "requested_by_customer",
+		});
+
+		const result = await this.#db.transaction(async (tx) => {
+			const now = new Date();
+			const [updated] = await tx
+				.update(orderTable)
+				.set({
+					amountRefundedMinor: refund.amountMinor,
+					cancelledAt: now,
+					failureCode: reason,
+					failureDetail: REFUND_COMPLETED_FAILURE_DETAIL,
+					finalizationEmailAttemptCount: 0,
+					finalizationEmailKind: emailKind,
+					finalizationEmailLastError: null,
+					finalizationEmailNextAttemptAt: now,
+					finalizationEmailSentAt: null,
+					refundCompletedAt: now,
+					status: "cancelled",
+					stripeRefundId: refund.id,
+					stripeRefundIdempotencyKey: prepared.idempotencyKey,
+					updatedAt: now,
+				})
+				.where(
+					and(
+						eq(orderTable.id, orderId),
+						inArray(orderTable.status, ["pending", "confirmed"]),
+						eq(orderTable.stripeRefundIdempotencyKey, prepared.idempotencyKey),
+					),
+				)
+				.returning({ id: orderTable.id });
+			if (!updated) {
+				return { outcome: "already_compensated" } as const;
+			}
+
+			await this.#scheduleCompensationHoldRelease(prepared.context, now, tx);
+
+			return {
+				compensation: {
+					amountRefundedMinor: refund.amountMinor,
+					currency: prepared.context.order.currency,
+					email: prepared.context.contact?.email ?? "",
+					emailKind,
+					name: prepared.context.contact?.name ?? "",
+					orderId,
+					publicReference: prepared.context.order.publicReference,
+					reason,
+				},
+				context: prepared.context,
+				outcome: "compensated",
+				refund,
+			} as const;
+		});
+
+		if (result.outcome !== "compensated") {
+			return result;
+		}
+
+		await this.#cancelOrderHolds(result.context, reason);
+
+		trackEvent({
+			metadata: {
+				amountRefundedMinor: result.refund.amountMinor,
+				orderId,
+				reason,
+			},
+			name: "order_compensated",
+			provider: this.#provider,
+			severity: "warning",
+			type: "integration",
+		});
+
+		return {
+			compensation: result.compensation,
+			outcome: "compensated",
+		};
+	}
+
+	async markFinalizationEmailSent(
+		orderId: string,
+		kind: OrderFinalizationEmailKind,
+	): Promise<void> {
+		const now = new Date();
+		await this.#db
+			.update(orderTable)
+			.set({
+				finalizationEmailLastError: null,
+				finalizationEmailSentAt: now,
+				updatedAt: now,
+			})
+			.where(
+				and(
+					eq(orderTable.id, orderId),
+					eq(orderTable.finalizationEmailKind, kind),
+					isNull(orderTable.finalizationEmailSentAt),
+				),
+			);
+	}
+
+	async claimFinalizationEmail(
+		orderId: string,
+		kind: OrderFinalizationEmailKind,
+	): Promise<boolean> {
+		const now = new Date();
+		const claimExpiresAt = new Date(
+			now.getTime() + FINALIZATION_EMAIL_CLAIM_MS,
+		);
+		const [updated] = await this.#db
+			.update(orderTable)
+			.set({
+				finalizationEmailNextAttemptAt: claimExpiresAt,
+				updatedAt: now,
+			})
+			.where(
+				and(
+					eq(orderTable.id, orderId),
+					eq(orderTable.finalizationEmailKind, kind),
+					isNull(orderTable.finalizationEmailSentAt),
+					lte(orderTable.finalizationEmailNextAttemptAt, now),
+				),
+			)
+			.returning({ id: orderTable.id });
+		return Boolean(updated);
+	}
+
+	async recordFinalizationEmailFailure(
+		orderId: string,
+		kind: OrderFinalizationEmailKind,
+		errorMessage: string,
+	): Promise<void> {
+		const [order] = await this.#db
+			.select({
+				attemptCount: orderTable.finalizationEmailAttemptCount,
+			})
+			.from(orderTable)
+			.where(
+				and(
+					eq(orderTable.id, orderId),
+					eq(orderTable.finalizationEmailKind, kind),
+					isNull(orderTable.finalizationEmailSentAt),
+				),
+			)
+			.limit(1);
+		if (!order) {
+			return;
+		}
+
+		const now = new Date();
+		const attemptCount = order.attemptCount + 1;
+		await this.#db
+			.update(orderTable)
+			.set({
+				finalizationEmailAttemptCount: attemptCount,
+				finalizationEmailLastError: errorMessage.slice(0, 1000),
+				finalizationEmailNextAttemptAt: this.#finalizationEmailBackoffFrom(
+					now,
+					attemptCount,
+				),
+				updatedAt: now,
+			})
+			.where(
+				and(
+					eq(orderTable.id, orderId),
+					eq(orderTable.finalizationEmailKind, kind),
+					isNull(orderTable.finalizationEmailSentAt),
+				),
+			);
+	}
+
+	async recordFinalizationEmailSentStateFailure(
+		orderId: string,
+		kind: OrderFinalizationEmailKind,
+		errorMessage: string,
+	): Promise<void> {
+		const now = new Date();
+		await this.#db
+			.update(orderTable)
+			.set({
+				finalizationEmailLastError:
+					`Email was sent, but marking it sent failed: ${errorMessage}`.slice(
+						0,
+						1000,
+					),
+				finalizationEmailSentAt: now,
+				updatedAt: now,
+			})
+			.where(
+				and(
+					eq(orderTable.id, orderId),
+					eq(orderTable.finalizationEmailKind, kind),
+					isNull(orderTable.finalizationEmailSentAt),
+				),
+			);
+	}
+
+	/**
+	 * One reconciler pass (the durability authority behind the webhook). Pass A
+	 * resolves due holds: paid pending orders confirm, unpaid pending orders read
+	 * live PaymentIntent state, and terminal orders keep retrying provider hold
+	 * release. Pass B releases holds on `draft` orders whose checkout window has
+	 * lapsed, the cleanup for abandoned reserve-first holds. Returns counters for
+	 * the route to log.
+	 */
+	async reconcileReservations(
+		options: {
+			limit?: number;
+			now?: Date;
+			onCompensated?: (facts: OrderCompensationFacts) => Promise<void>;
+			onConfirmed?: (facts: OrderConfirmationFacts) => Promise<void>;
+		} = {},
+	): Promise<ReconcileReservationsSummary> {
+		const now = options.now ?? new Date();
+		const limit = options.limit ?? 50;
+		const handlers = {
+			onCompensated: options.onCompensated,
+			onConfirmed: options.onConfirmed,
+		};
+		const summary: ReconcileReservationsSummary = {
+			cancelled: 0,
+			compensated: 0,
+			confirmed: 0,
+			expired: 0,
+			rescheduled: 0,
+			scanned: 0,
+		};
+
+		const duePending = await this.#db
+			.selectDistinct({ orderId: orderItemTable.orderId })
+			.from(providerBookingTable)
+			.innerJoin(
+				orderItemTable,
+				eq(orderItemTable.id, providerBookingTable.orderItemId),
+			)
+			.innerJoin(orderTable, eq(orderTable.id, orderItemTable.orderId))
+			.where(
+				and(
+					inArray(orderTable.status, ["pending", "cancelled", "failed"]),
+					or(
+						and(
+							eq(orderTable.status, "pending"),
+							gt(orderTable.amountPaidMinor, 0),
+							eq(providerBookingTable.normalizedStatus, "confirmed"),
+						),
+						and(
+							eq(providerBookingTable.normalizedStatus, "pending"),
+							eq(providerBookingTable.needsRecovery, false),
+						),
+						and(
+							eq(providerBookingTable.normalizedStatus, "failed"),
+							sql`${providerBookingTable.providerReservationId} is not null`,
+							or(
+								eq(providerBookingTable.needsRecovery, false),
+								and(
+									eq(orderTable.status, "pending"),
+									sql`${orderTable.failureCode} is distinct from 'manual_recovery'`,
+								),
+							),
+						),
+					),
+					lte(providerBookingTable.nextAttemptAt, now),
+				),
+			)
+			.limit(limit);
+
+		for (const { orderId } of duePending) {
+			summary.scanned += 1;
+			try {
+				await this.#reconcilePendingOrder(orderId, now, summary, handlers);
+			} catch (error) {
+				await this.#rescheduleOrderReconciliation(orderId, now);
+				summary.rescheduled += 1;
+				this.#trackOrderReconciliationFailure(orderId, error);
+			}
+		}
+
+		const abandonedCutoff = new Date(now.getTime() - ABANDONED_HOLD_GRACE_MS);
+		const expiredDrafts = await this.#db
+			.selectDistinct({ orderId: orderItemTable.orderId })
+			.from(providerBookingTable)
+			.innerJoin(
+				orderItemTable,
+				eq(orderItemTable.id, providerBookingTable.orderItemId),
+			)
+			.innerJoin(orderTable, eq(orderTable.id, orderItemTable.orderId))
+			.where(
+				and(
+					eq(orderTable.status, "draft"),
+					eq(orderTable.amountPaidMinor, 0),
+					lte(orderTable.checkoutExpiresAt, abandonedCutoff),
+					eq(providerBookingTable.normalizedStatus, "pending"),
+					sql`${providerBookingTable.providerReservationId} is not null`,
+				),
+			)
+			.limit(limit);
+
+		for (const { orderId } of expiredDrafts) {
+			summary.scanned += 1;
+			try {
+				const result = await this.cancelOrderReservations(
+					orderId,
+					"checkout_expired",
+				);
+				if (result.outcome === "cancelled") {
+					summary.expired += 1;
+				}
+			} catch (error) {
+				await this.#rescheduleOrderReconciliation(orderId, now);
+				summary.rescheduled += 1;
+				this.#trackOrderReconciliationFailure(orderId, error);
+			}
+		}
+
+		await this.#dispatchDueFinalizationEmails(now, limit, handlers);
+
+		return summary;
+	}
+
+	async #dispatchDueFinalizationEmails(
+		now: Date,
+		limit: number,
+		handlers: ReconcileHandlers,
+	): Promise<void> {
+		const dueKinds: OrderFinalizationEmailKind[] = [];
+		if (handlers.onConfirmed) {
+			dueKinds.push("confirmation");
+		}
+		if (handlers.onCompensated) {
+			dueKinds.push("refund_amount_mismatch", "refund_unconfirmed");
+		}
+		if (dueKinds.length === 0) {
+			return;
+		}
+		const dueEmails = await this.#db
+			.select({
+				kind: orderTable.finalizationEmailKind,
+				orderId: orderTable.id,
+			})
+			.from(orderTable)
+			.where(
+				and(
+					inArray(orderTable.finalizationEmailKind, dueKinds),
+					isNull(orderTable.finalizationEmailSentAt),
+					lte(orderTable.finalizationEmailNextAttemptAt, now),
+				),
+			)
+			.limit(limit);
+
+		for (const { kind, orderId } of dueEmails) {
+			if (!isFinalizationEmailKind(kind)) {
+				continue;
+			}
+			try {
+				await this.#dispatchPendingFinalizationEmail(orderId, handlers);
+			} catch (error) {
+				const message = error instanceof Error ? error.message : String(error);
+				await this.recordFinalizationEmailFailure(orderId, kind, message);
+				trackEvent({
+					metadata: { error: message, emailKind: kind, orderId },
+					name: "order_email_dispatch_failed",
+					provider: this.#provider,
+					severity: "warning",
+					type: "integration",
+				});
+			}
+		}
+	}
+
+	async #dispatchPendingFinalizationEmail(
+		orderId: string,
+		handlers: ReconcileHandlers,
+	): Promise<void> {
+		const context = await this.#loadSagaContext(orderId);
+		if (!context || context.order.finalizationEmailSentAt !== null) {
+			return;
+		}
+
+		if (context.order.finalizationEmailKind === "confirmation") {
+			await this.#dispatchConfirmationEmail(
+				this.#buildConfirmationFacts(context),
+				handlers,
+			);
+			return;
+		}
+
+		if (isCompensationEmailKind(context.order.finalizationEmailKind)) {
+			await this.#dispatchCompensationEmail(
+				this.#buildCompensationFacts(
+					context,
+					context.order.finalizationEmailKind,
+					context.order.failureCode ?? context.order.finalizationEmailKind,
+				),
+				handlers,
+			);
+		}
+	}
+
+	async #reconcilePendingOrder(
+		orderId: string,
+		now: Date,
+		summary: ReconcileReservationsSummary,
+		handlers: ReconcileHandlers,
+	): Promise<void> {
+		const [order] = await this.#db
+			.select({
+				amountPaidMinor: orderTable.amountPaidMinor,
+				checkoutExpiresAt: orderTable.checkoutExpiresAt,
+				currency: orderTable.currency,
+				failureCode: orderTable.failureCode,
+				status: orderTable.status,
+				stripePaymentIntentId: orderTable.stripePaymentIntentId,
+				totalMinor: orderTable.totalMinor,
+			})
+			.from(orderTable)
+			.where(eq(orderTable.id, orderId))
+			.limit(1);
+		if (!order) {
+			return;
+		}
+
+		if (order.status === "cancelled" || order.status === "failed") {
+			const context = await this.#loadSagaContext(orderId);
+			if (!context) {
+				return;
+			}
+			const result = await this.#cancelOrderHolds(
+				context,
+				order.status === "cancelled"
+					? "compensation_release_retry"
+					: "order_release_retry",
+			);
+			if (result === "transient") {
+				summary.rescheduled += 1;
+			} else {
+				summary.cancelled += 1;
+			}
+			return;
+		}
+		if (order.status !== "pending") {
+			return;
+		}
+
+		// Already-paid pending order: the hold confirm just did not complete.
+		if (order.amountPaidMinor > 0) {
+			if (order.failureCode === "amount_mismatch") {
+				const compensated = await this.compensateOrder(
+					orderId,
+					"amount_mismatch",
+				);
+				if (compensated.outcome === "compensated") {
+					summary.compensated += 1;
+					await this.#dispatchCompensationEmail(
+						compensated.compensation,
+						handlers,
+					);
+				}
+				return;
+			}
+			await this.#applyConfirmOutcome(orderId, summary, handlers);
+			return;
+		}
+
+		const expired =
+			order.checkoutExpiresAt !== null &&
+			order.checkoutExpiresAt.getTime() + ABANDONED_HOLD_GRACE_MS <=
+				now.getTime();
+
+		// Unpaid pending order: trust the live PaymentIntent over the missing webhook.
+		if (this.#retrievePaymentIntent && order.stripePaymentIntentId) {
+			const live = await this.#retrievePaymentIntent(
+				order.stripePaymentIntentId,
+			);
+			if (live.status === "succeeded") {
+				const marked = await this.markOrderPaid(orderId, {
+					amountMinor: live.amountMinor,
+					currency: live.currency,
+				});
+				if (marked.outcome === "amount_mismatch") {
+					const compensated = await this.compensateOrder(
+						orderId,
+						"amount_mismatch",
+					);
+					if (compensated.outcome === "compensated") {
+						summary.compensated += 1;
+						await this.#dispatchCompensationEmail(
+							compensated.compensation,
+							handlers,
+						);
+					}
+					return;
+				}
+				await this.#applyConfirmOutcome(orderId, summary, handlers);
+				return;
+			}
+			if (live.status === "canceled" || expired) {
+				const result = await this.cancelOrderReservations(
+					orderId,
+					"checkout_expired",
+				);
+				if (result.outcome === "cancelled") {
+					summary.expired += 1;
+				}
+				return;
+			}
+			await this.#rescheduleBookings(orderId, now);
+			summary.rescheduled += 1;
+			return;
+		}
+
+		if (expired) {
+			const result = await this.cancelOrderReservations(
+				orderId,
+				"checkout_expired",
+			);
+			if (result.outcome === "cancelled") {
+				summary.expired += 1;
+			}
+			return;
+		}
+
+		await this.#rescheduleBookings(orderId, now);
+		summary.rescheduled += 1;
+	}
+
+	async #applyConfirmOutcome(
+		orderId: string,
+		summary: ReconcileReservationsSummary,
+		handlers: ReconcileHandlers,
+	): Promise<void> {
+		const result = await this.confirmOrderReservations(orderId);
+		if (result.outcome === "confirmed") {
+			summary.confirmed += 1;
+			await this.#dispatchConfirmationEmail(result.confirmation, handlers);
+		} else if (result.outcome === "compensated") {
+			summary.compensated += 1;
+			await this.#dispatchCompensationEmail(result.compensation, handlers);
+		} else if (result.outcome === "pending_retry") {
+			summary.rescheduled += 1;
+		}
+	}
+
+	async #dispatchConfirmationEmail(
+		facts: OrderConfirmationFacts,
+		handlers: ReconcileHandlers,
+	): Promise<void> {
+		if (!facts.email) {
+			await this.markFinalizationEmailSent(facts.orderId, "confirmation");
+			return;
+		}
+		if (!handlers.onConfirmed) {
+			return;
+		}
+		if (!(await this.claimFinalizationEmail(facts.orderId, "confirmation"))) {
+			return;
+		}
+		try {
+			await handlers.onConfirmed(facts);
+		} catch (error) {
+			await this.recordFinalizationEmailFailure(
+				facts.orderId,
+				"confirmation",
+				error instanceof Error ? error.message : String(error),
+			);
+			return;
+		}
+
+		try {
+			await this.markFinalizationEmailSent(facts.orderId, "confirmation");
+		} catch (error) {
+			const message = error instanceof Error ? error.message : String(error);
+			await this.recordFinalizationEmailSentStateFailure(
+				facts.orderId,
+				"confirmation",
+				message,
+			);
+			trackEvent({
+				metadata: {
+					error: message,
+					orderId: facts.orderId,
+					publicReference: facts.publicReference,
+				},
+				name: "order_email_sent_state_update_failed",
+				provider: this.#provider,
+				severity: "error",
+				type: "integration",
+			});
+		}
+	}
+
+	async #dispatchCompensationEmail(
+		facts: OrderCompensationFacts,
+		handlers: ReconcileHandlers,
+	): Promise<void> {
+		if (!handlers.onCompensated) {
+			return;
+		}
+		if (!(await this.claimFinalizationEmail(facts.orderId, facts.emailKind))) {
+			return;
+		}
+		try {
+			await handlers.onCompensated(facts);
+		} catch (error) {
+			await this.recordFinalizationEmailFailure(
+				facts.orderId,
+				facts.emailKind,
+				error instanceof Error ? error.message : String(error),
+			);
+			return;
+		}
+
+		try {
+			await this.markFinalizationEmailSent(facts.orderId, facts.emailKind);
+		} catch (error) {
+			const message = error instanceof Error ? error.message : String(error);
+			await this.recordFinalizationEmailSentStateFailure(
+				facts.orderId,
+				facts.emailKind,
+				message,
+			);
+			trackEvent({
+				metadata: {
+					error: message,
+					orderId: facts.orderId,
+					publicReference: facts.publicReference,
+				},
+				name: "order_email_sent_state_update_failed",
+				provider: this.#provider,
+				severity: "error",
+				type: "integration",
+			});
+		}
+	}
+
+	#reservationGatewayFor(
+		provider: string,
+	): ProviderReservationGateway | undefined {
+		return this.#resolveReservationGateway?.(provider);
+	}
+
+	async #tryBookingMutationLock(
+		db: Transaction,
+		scope: string,
+		providerBookingId: string,
+	): Promise<boolean> {
+		const result = await db.execute(sql`
+			select pg_try_advisory_xact_lock(
+				hashtext(${scope}),
+				hashtext(${providerBookingId})
+			) as locked
+		`);
+		const [row] = result.rows as { locked: boolean }[];
+		return row?.locked === true;
+	}
+
+	async #loadBookingMutationState(
+		providerBookingId: string,
+		db: Transaction,
+	): Promise<Pick<
+		SagaBooking,
+		| "attemptCount"
+		| "normalizedStatus"
+		| "providerReservationId"
+		| "providerTransactionId"
+	> | null> {
+		const query = db
+			.select({
+				attemptCount: providerBookingTable.attemptCount,
+				normalizedStatus: providerBookingTable.normalizedStatus,
+				providerReservationId: providerBookingTable.providerReservationId,
+				providerTransactionId: providerBookingTable.providerTransactionId,
+			})
+			.from(providerBookingTable)
+			.where(eq(providerBookingTable.id, providerBookingId))
+			.limit(1);
+		const [booking] = await query.for("update");
+		return booking ?? null;
+	}
+
+	#backoffFrom(now: Date, attemptCount: number): Date {
+		const delay = Math.min(
+			RESERVATION_RETRY_MAX_MS,
+			RESERVATION_RETRY_BASE_MS * 2 ** Math.max(0, attemptCount - 1),
+		);
+		return new Date(now.getTime() + delay);
+	}
+
+	#finalizationEmailBackoffFrom(now: Date, attemptCount: number): Date {
+		const delay = Math.min(
+			FINALIZATION_EMAIL_RETRY_MAX_MS,
+			FINALIZATION_EMAIL_RETRY_BASE_MS * 2 ** Math.max(0, attemptCount - 1),
+		);
+		return new Date(now.getTime() + delay);
+	}
+
+	async #loadSagaContext(
+		orderId: string,
+		db: DbExecutor = this.#db,
+		options: { lockOrder?: boolean } = {},
+	): Promise<SagaContext | null> {
+		const orderQuery = db
+			.select({
+				amountPaidMinor: orderTable.amountPaidMinor,
+				amountRefundedMinor: orderTable.amountRefundedMinor,
+				checkoutExpiresAt: orderTable.checkoutExpiresAt,
+				currency: orderTable.currency,
+				finalizationEmailAttemptCount: orderTable.finalizationEmailAttemptCount,
+				finalizationEmailKind: orderTable.finalizationEmailKind,
+				finalizationEmailNextAttemptAt:
+					orderTable.finalizationEmailNextAttemptAt,
+				finalizationEmailSentAt: orderTable.finalizationEmailSentAt,
+				failureCode: orderTable.failureCode,
+				id: orderTable.id,
+				publicReference: orderTable.publicReference,
+				refundRequestedAt: orderTable.refundRequestedAt,
+				status: orderTable.status,
+				stripePaymentIntentId: orderTable.stripePaymentIntentId,
+				stripeRefundId: orderTable.stripeRefundId,
+				stripeRefundIdempotencyKey: orderTable.stripeRefundIdempotencyKey,
+			})
+			.from(orderTable)
+			.where(eq(orderTable.id, orderId))
+			.limit(1);
+		const [order] = options.lockOrder
+			? await orderQuery.for("update")
+			: await orderQuery;
+		if (!order) {
+			return null;
+		}
+
+		const [contact] = await db
+			.select({
+				billingAddress: orderContactTable.billingAddress,
+				email: orderContactTable.email,
+				name: orderContactTable.name,
+				phoneE164: orderContactTable.phoneE164,
+			})
+			.from(orderContactTable)
+			.where(eq(orderContactTable.orderId, orderId))
+			.limit(1);
+
+		const bookingRows = await db
+			.select({
+				attemptCount: providerBookingTable.attemptCount,
+				checkIn: accommodationItemDetailTable.checkIn,
+				checkOut: accommodationItemDetailTable.checkOut,
+				guests: accommodationItemDetailTable.guests,
+				hostifyListingId: accommodationItemDetailTable.hostifyListingId,
+				imageUrlSnapshot: orderItemTable.imageUrlSnapshot,
+				itemTotalMinor: orderItemTable.totalMinor,
+				normalizedStatus: providerBookingTable.normalizedStatus,
+				orderItemId: orderItemTable.id,
+				pets: accommodationItemDetailTable.pets,
+				provider: providerBookingTable.provider,
+				providerBookingId: providerBookingTable.id,
+				providerReservationId: providerBookingTable.providerReservationId,
+				providerTransactionId: providerBookingTable.providerTransactionId,
+				titleSnapshot: orderItemTable.titleSnapshot,
+			})
+			.from(providerBookingTable)
+			.innerJoin(
+				orderItemTable,
+				eq(orderItemTable.id, providerBookingTable.orderItemId),
+			)
+			.innerJoin(
+				accommodationItemDetailTable,
+				eq(accommodationItemDetailTable.orderItemId, orderItemTable.id),
+			)
+			.where(eq(orderItemTable.orderId, orderId))
+			.orderBy(asc(orderItemTable.position));
+
+		const itemIds = bookingRows.map((row) => row.orderItemId);
+		const chargeRows = itemIds.length
+			? await db
+					.select({
+						grossMinor: orderItemChargeTable.grossMinor,
+						kind: orderItemChargeTable.kind,
+						orderItemId: orderItemChargeTable.orderItemId,
+						taxMinor: orderItemChargeTable.taxMinor,
+					})
+					.from(orderItemChargeTable)
+					.where(inArray(orderItemChargeTable.orderItemId, itemIds))
+			: [];
+		const chargesByItem = new Map<string, ReservationChargeInput[]>();
+		for (const charge of chargeRows) {
+			const list = chargesByItem.get(charge.orderItemId) ?? [];
+			list.push({
+				grossMinor: charge.grossMinor,
+				kind: charge.kind,
+				taxMinor: charge.taxMinor,
+			});
+			chargesByItem.set(charge.orderItemId, list);
+		}
+
+		return {
+			bookings: bookingRows.map((row) => ({
+				...row,
+				charges: chargesByItem.get(row.orderItemId) ?? [],
+			})),
+			contact: contact ?? null,
+			order,
+		};
+	}
+
+	async #createHold(
+		context: SagaContext,
+		booking: SagaBooking,
+	): Promise<HoldItemResult> {
+		return this.#db.transaction(async (tx) => {
+			const locked = await this.#tryBookingMutationLock(
+				tx,
+				"reservation_create",
+				booking.providerBookingId,
+			);
+			if (!locked) {
+				return "transient";
+			}
+
+			const current = await this.#loadBookingMutationState(
+				booking.providerBookingId,
+				tx,
+			);
+			if (!current) {
+				return "permanent";
+			}
+			const currentBooking = { ...booking, ...current };
+			if (
+				currentBooking.providerReservationId &&
+				(currentBooking.normalizedStatus === "pending" ||
+					currentBooking.normalizedStatus === "confirmed")
+			) {
+				return "held";
+			}
+
+			const gateway = this.#reservationGatewayFor(currentBooking.provider);
+			if (!gateway || !context.contact) {
+				const exhausted = await this.#recordBookingAttempt(
+					currentBooking,
+					!gateway
+						? "reservation_gateway_unavailable"
+						: "reservation_contact_missing",
+					!gateway
+						? "Reservation gateway is not configured."
+						: "Order contact snapshot is missing.",
+					tx,
+				);
+				return exhausted ? "permanent" : "transient";
+			}
+
+			const tag = reservationTag(
+				context.order.publicReference,
+				currentBooking.orderItemId,
+			);
+
+			const existing = await gateway.findExistingHold({
+				checkIn: currentBooking.checkIn,
+				checkOut: currentBooking.checkOut,
+				listingId: currentBooking.hostifyListingId,
+				tag,
+			});
+			if (existing) {
+				if (
+					(await this.#persistHoldPlaced(
+						currentBooking.providerBookingId,
+						existing,
+						tx,
+					)) !== "conflict"
+				) {
+					return "held";
+				}
+				await this.#markBookingFailed(
+					currentBooking.providerBookingId,
+					"hold_persist_conflict",
+					`Provider reservation ${existing.reservationId} is already linked to another booking.`,
+					tx,
+				);
+				return "permanent";
+			}
+
+			const result = await gateway.placeHold(
+				buildHoldRequest({
+					charges: currentBooking.charges,
+					contact: {
+						email: context.contact.email,
+						name: context.contact.name,
+						phone: context.contact.phoneE164,
+					},
+					currency: context.order.currency,
+					detail: {
+						checkIn: currentBooking.checkIn,
+						checkOut: currentBooking.checkOut,
+						guests: currentBooking.guests,
+						hostifyListingId: currentBooking.hostifyListingId,
+						pets: currentBooking.pets,
+					},
+					itemTotalMinor: currentBooking.itemTotalMinor,
+					orderItemId: currentBooking.orderItemId,
+					publicReference: context.order.publicReference,
+					source: this.#reservationSource,
+				}),
+			);
+
+			switch (result.kind) {
+				case "created": {
+					const hold = {
+						providerStatus: result.providerStatus,
+						raw: result.raw,
+						reservationId: result.reservationId,
+						transactionId: result.transactionId,
+					};
+					const persistResult = await this.#persistHoldPlaced(
+						currentBooking.providerBookingId,
+						hold,
+						tx,
+					);
+					if (persistResult === "persisted") {
+						return "held";
+					}
+					if (persistResult === "already_linked") {
+						const release = await gateway.cancelHold({
+							reason: "duplicate_hold_lost_race",
+							reservationId: hold.reservationId,
+							transactionId: hold.transactionId,
+						});
+						if (release.kind !== "ok") {
+							trackEvent({
+								metadata: {
+									orderId: context.order.id,
+									providerBookingId: currentBooking.providerBookingId,
+									providerReservationId: hold.reservationId,
+									reason: release.message,
+								},
+								name: "duplicate_reservation_release_failed",
+								provider: this.#provider,
+								severity: "warning",
+								type: "integration",
+							});
+						}
+						return "held";
+					}
+					const release = await gateway.cancelHold({
+						reason: "hold_persist_conflict",
+						reservationId: hold.reservationId,
+						transactionId: hold.transactionId,
+					});
+					await this.#markBookingFailed(
+						currentBooking.providerBookingId,
+						"hold_persist_conflict",
+						release.kind === "ok"
+							? `Provider reservation ${hold.reservationId} was released after it could not be linked to this booking.`
+							: `Provider reservation ${hold.reservationId} could not be linked to this booking. Manual release may be required.`,
+						tx,
+					);
+					return "permanent";
+				}
+				case "unavailable":
+					await this.#markBookingCancelled(
+						currentBooking.providerBookingId,
+						"unavailable",
+						result.message,
+						tx,
+					);
+					return { unavailable: result.message };
+				case "transient":
+					return (await this.#recordBookingAttempt(
+						currentBooking,
+						result.code,
+						result.message,
+						tx,
+					))
+						? "permanent"
+						: "transient";
+				case "permanent":
+					await this.#markBookingFailed(
+						currentBooking.providerBookingId,
+						result.code,
+						result.message,
+						tx,
+					);
+					return "permanent";
+			}
+		});
+	}
+
+	async #confirmHold(
+		booking: SagaBooking,
+		paymentReference: string | null,
+	): Promise<MutateItemResult> {
+		if (booking.normalizedStatus === "confirmed") {
+			return "ok";
+		}
+		const gateway = this.#reservationGatewayFor(booking.provider);
+		if (!gateway) {
+			const exhausted = await this.#recordBookingAttempt(
+				booking,
+				"reservation_gateway_unavailable",
+				"Reservation gateway is not configured.",
+			);
+			return exhausted ? "permanent" : "transient";
+		}
+
+		const prepared = await this.#db.transaction(async (tx) => {
+			const locked = await this.#tryBookingMutationLock(
+				tx,
+				"reservation_confirm",
+				booking.providerBookingId,
+			);
+			if (!locked) {
+				return "transient";
+			}
+
+			const current = await this.#loadBookingMutationState(
+				booking.providerBookingId,
+				tx,
+			);
+			if (!current) {
+				return "permanent";
+			}
+			const currentBooking = { ...booking, ...current };
+			if (currentBooking.normalizedStatus === "confirmed") {
+				return "ok";
+			}
+			const providerReservationId = currentBooking.providerReservationId;
+			if (!providerReservationId) {
+				await this.#markBookingFailed(
+					currentBooking.providerBookingId,
+					"missing_reservation",
+					"Cannot confirm a hold that was never placed.",
+					tx,
+				);
+				return "permanent";
+			}
+
+			return {
+				booking: currentBooking,
+				providerReservationId,
+				providerTransactionId: currentBooking.providerTransactionId,
+			};
+		});
+		if (typeof prepared === "string") {
+			return prepared;
+		}
+
+		const result = await gateway.confirmHold({
+			paymentReference,
+			reservationId: prepared.providerReservationId,
+			transactionId: prepared.providerTransactionId,
+		});
+
+		return this.#db.transaction(async (tx) => {
+			const locked = await this.#tryBookingMutationLock(
+				tx,
+				"reservation_confirm",
+				booking.providerBookingId,
+			);
+			if (!locked) {
+				return "transient";
+			}
+
+			const current = await this.#loadBookingMutationState(
+				booking.providerBookingId,
+				tx,
+			);
+			if (!current) {
+				return "permanent";
+			}
+			const currentBooking = { ...prepared.booking, ...current };
+			if (currentBooking.normalizedStatus === "confirmed") {
+				return "ok";
+			}
+			if (
+				!currentBooking.providerReservationId ||
+				currentBooking.providerReservationId !== prepared.providerReservationId
+			) {
+				return "transient";
+			}
+
+			if (result.kind === "ok") {
+				await this.#markBookingConfirmed(
+					currentBooking.providerBookingId,
+					result.providerStatus,
+					result.raw,
+					tx,
+				);
+				return "ok";
+			}
+			if (result.kind === "transient") {
+				const exhausted = await this.#recordBookingAttempt(
+					currentBooking,
+					result.code,
+					result.message,
+					tx,
+				);
+				// Bounded retries: once the cap is hit, escalate to compensation rather
+				// than keep a charged order pending forever.
+				return exhausted ? "permanent" : "transient";
+			}
+			await this.#markBookingFailed(
+				currentBooking.providerBookingId,
+				result.code,
+				result.message,
+				tx,
+			);
+			return "permanent";
+		});
+	}
+
+	async #cancelHold(
+		booking: SagaBooking,
+		reason: string,
+	): Promise<MutateItemResult> {
+		return this.#db.transaction(async (tx) => {
+			const locked = await this.#tryBookingMutationLock(
+				tx,
+				"reservation_cancel",
+				booking.providerBookingId,
+			);
+			if (!locked) {
+				return "transient";
+			}
+
+			const current = await this.#loadBookingMutationState(
+				booking.providerBookingId,
+				tx,
+			);
+			if (!current) {
+				return "permanent";
+			}
+			const currentBooking = { ...booking, ...current };
+			if (currentBooking.normalizedStatus === "cancelled") {
+				return "ok";
+			}
+			if (
+				currentBooking.normalizedStatus === "failed" &&
+				!currentBooking.providerReservationId
+			) {
+				return "ok";
+			}
+			if (!currentBooking.providerReservationId) {
+				await this.#markBookingCancelled(
+					currentBooking.providerBookingId,
+					"no_hold",
+					reason,
+					tx,
+				);
+				return "ok";
+			}
+			const gateway = this.#reservationGatewayFor(currentBooking.provider);
+			if (!gateway) {
+				const exhausted = await this.#recordBookingAttempt(
+					currentBooking,
+					"reservation_gateway_unavailable",
+					"Reservation gateway is not configured.",
+					tx,
+				);
+				return exhausted ? "permanent" : "transient";
+			}
+
+			const result = await gateway.cancelHold({
+				reason,
+				reservationId: currentBooking.providerReservationId,
+				transactionId: currentBooking.providerTransactionId,
+			});
+			if (result.kind === "ok") {
+				await this.#markBookingCancelled(
+					currentBooking.providerBookingId,
+					"cancelled",
+					reason,
+					tx,
+				);
+				return "ok";
+			}
+			if (result.kind === "transient") {
+				const exhausted = await this.#recordBookingAttempt(
+					currentBooking,
+					result.code,
+					result.message,
+					tx,
+				);
+				// A hold we cannot release is flagged for an operator but must not block
+				// the order from settling to `failed`.
+				return exhausted ? "permanent" : "transient";
+			}
+			await this.#markBookingFailed(
+				currentBooking.providerBookingId,
+				result.code,
+				result.message,
+				tx,
+			);
+			return "permanent";
+		});
+	}
+
+	async #cancelOrderHolds(
+		context: SagaContext,
+		reason: string,
+	): Promise<"ok" | "transient"> {
+		let sawTransient = false;
+		const latest = await this.#loadSagaContext(context.order.id);
+		for (const booking of latest?.bookings ?? context.bookings) {
+			const result = await this.#cancelHold(booking, reason);
+			if (result === "transient") {
+				sawTransient = true;
+			}
+		}
+		return sawTransient ? "transient" : "ok";
+	}
+
+	async #scheduleCompensationHoldRelease(
+		context: SagaContext,
+		now: Date,
+		db: DbExecutor = this.#db,
+	): Promise<void> {
+		const bookingIds = context.bookings
+			.filter(
+				(booking) =>
+					booking.providerReservationId &&
+					booking.normalizedStatus !== "cancelled",
+			)
+			.map((booking) => booking.providerBookingId);
+		if (bookingIds.length === 0) {
+			return;
+		}
+		await db
+			.update(providerBookingTable)
+			.set({ needsRecovery: false, nextAttemptAt: now, updatedAt: now })
+			.where(inArray(providerBookingTable.id, bookingIds));
+	}
+
+	async #releaseHeldSiblings(
+		context: SagaContext,
+		exceptBookingId: string,
+	): Promise<void> {
+		const latest = await this.#loadSagaContext(context.order.id);
+		for (const booking of latest?.bookings ?? context.bookings) {
+			if (
+				booking.providerBookingId === exceptBookingId ||
+				!booking.providerReservationId ||
+				booking.normalizedStatus === "cancelled" ||
+				booking.normalizedStatus === "failed"
+			) {
+				continue;
+			}
+			await this.#cancelHold(booking, "sibling_unavailable");
+		}
+	}
+
+	async #persistHoldPlaced(
+		providerBookingId: string,
+		hold: {
+			providerStatus: string | null;
+			raw: Record<string, unknown>;
+			reservationId: string;
+			transactionId: string | null;
+		},
+		db: DbExecutor = this.#db,
+	): Promise<PersistHoldPlacedResult> {
+		let updated: { providerReservationId: string | null } | undefined;
+		try {
+			await db.transaction(async (savepoint) => {
+				[updated] = await savepoint
+					.update(providerBookingTable)
+					.set({
+						attemptCount: 0,
+						lastErrorCode: null,
+						lastErrorMessage: null,
+						needsRecovery: false,
+						nextAttemptAt: new Date(),
+						providerCreatedAt: new Date(),
+						providerReservationId: hold.reservationId,
+						providerStatus: hold.providerStatus,
+						providerTransactionId: hold.transactionId,
+						rawOperationalPayload: hold.raw,
+						updatedAt: new Date(),
+					})
+					.where(
+						and(
+							eq(providerBookingTable.id, providerBookingId),
+							isNull(providerBookingTable.providerReservationId),
+						),
+					)
+					.returning({
+						providerReservationId: providerBookingTable.providerReservationId,
+					});
+			});
+			if (updated?.providerReservationId === hold.reservationId) {
+				return "persisted";
+			}
+		} catch (error) {
+			if (!isProviderHoldIdentityConflict(error)) {
+				throw error;
+			}
+		}
+
+		const [current] = await db
+			.select({
+				providerReservationId: providerBookingTable.providerReservationId,
+			})
+			.from(providerBookingTable)
+			.where(eq(providerBookingTable.id, providerBookingId))
+			.limit(1);
+		if (current?.providerReservationId === hold.reservationId) {
+			return "persisted";
+		}
+		if (current?.providerReservationId) {
+			return "already_linked";
+		}
+		return "conflict";
+	}
+
+	async #markBookingConfirmed(
+		providerBookingId: string,
+		providerStatus: string | null,
+		raw: Record<string, unknown>,
+		db: DbExecutor = this.#db,
+	): Promise<void> {
+		await db
+			.update(providerBookingTable)
+			.set({
+				lastErrorCode: null,
+				lastErrorMessage: null,
+				needsRecovery: false,
+				nextAttemptAt: new Date(),
+				normalizedStatus: "confirmed",
+				providerStatus,
+				providerUpdatedAt: new Date(),
+				rawOperationalPayload: raw,
+				updatedAt: new Date(),
+			})
+			.where(eq(providerBookingTable.id, providerBookingId));
+	}
+
+	async #markBookingCancelled(
+		providerBookingId: string,
+		code: string,
+		message: string,
+		db: DbExecutor = this.#db,
+	): Promise<void> {
+		await db
+			.update(providerBookingTable)
+			.set({
+				lastErrorCode: code,
+				lastErrorMessage: message,
+				needsRecovery: false,
+				nextAttemptAt: new Date(),
+				normalizedStatus: "cancelled",
+				updatedAt: new Date(),
+			})
+			.where(eq(providerBookingTable.id, providerBookingId));
+	}
+
+	async #markBookingFailed(
+		providerBookingId: string,
+		code: string,
+		message: string,
+		db: DbExecutor = this.#db,
+	): Promise<void> {
+		await db
+			.update(providerBookingTable)
+			.set({
+				lastErrorCode: code,
+				lastErrorMessage: message,
+				needsRecovery: true,
+				nextAttemptAt: new Date(),
+				normalizedStatus: "failed",
+				updatedAt: new Date(),
+			})
+			.where(eq(providerBookingTable.id, providerBookingId));
+	}
+
+	/** Records a retryable attempt; returns true when the retry cap is exhausted. */
+	async #recordBookingAttempt(
+		booking: SagaBooking,
+		code: string,
+		message: string,
+		db: DbExecutor = this.#db,
+	): Promise<boolean> {
+		const now = new Date();
+		const attemptCount = booking.attemptCount + 1;
+		const exhausted = attemptCount >= this.#maxReservationAttempts;
+		await db
+			.update(providerBookingTable)
+			.set({
+				attemptCount,
+				lastAttemptAt: now,
+				lastErrorCode: code,
+				lastErrorMessage: message,
+				needsRecovery: exhausted,
+				nextAttemptAt: exhausted ? now : this.#backoffFrom(now, attemptCount),
+				updatedAt: now,
+			})
+			.where(eq(providerBookingTable.id, booking.providerBookingId));
+		return exhausted;
+	}
+
+	async #flagOrderForRecovery(
+		context: SagaContext,
+		reason: string,
+		db: DbExecutor = this.#db,
+	): Promise<void> {
+		const now = new Date();
+		await db
+			.update(orderTable)
+			.set({
+				failureCode: "manual_recovery",
+				failureDetail: reason,
+				updatedAt: now,
+			})
+			.where(eq(orderTable.id, context.order.id));
+
+		const bookingIds = context.bookings.map(
+			(booking) => booking.providerBookingId,
+		);
+		if (bookingIds.length === 0) {
+			return;
+		}
+		await db
+			.update(providerBookingTable)
+			.set({
+				lastErrorCode: "manual_recovery",
+				lastErrorMessage: reason,
+				needsRecovery: true,
+				updatedAt: now,
+			})
+			.where(inArray(providerBookingTable.id, bookingIds));
+	}
+
+	async #failOrder(orderId: string, reason: string): Promise<void> {
+		await this.#db
+			.update(orderTable)
+			.set({ failureCode: reason, status: "failed", updatedAt: new Date() })
+			.where(
+				and(
+					eq(orderTable.id, orderId),
+					inArray(orderTable.status, ["draft", "pending"]),
+					eq(orderTable.amountPaidMinor, 0),
+				),
+			);
+	}
+
+	async #rescheduleBookings(orderId: string, now: Date): Promise<void> {
+		const next = new Date(now.getTime() + RESERVATION_RETRY_BASE_MS);
+		await this.#db
+			.update(providerBookingTable)
+			.set({ nextAttemptAt: next, updatedAt: now })
+			.where(
+				and(
+					eq(providerBookingTable.normalizedStatus, "pending"),
+					eq(providerBookingTable.needsRecovery, false),
+					inArray(
+						providerBookingTable.orderItemId,
+						this.#db
+							.select({ id: orderItemTable.id })
+							.from(orderItemTable)
+							.where(eq(orderItemTable.orderId, orderId)),
+					),
+				),
+			);
+	}
+
+	async #rescheduleOrderReconciliation(
+		orderId: string,
+		now: Date,
+	): Promise<void> {
+		const next = new Date(now.getTime() + RESERVATION_RETRY_BASE_MS);
+		await this.#db
+			.update(providerBookingTable)
+			.set({ nextAttemptAt: next, updatedAt: now })
+			.where(
+				and(
+					inArray(providerBookingTable.normalizedStatus, [
+						"confirmed",
+						"failed",
+						"pending",
+					]),
+					eq(providerBookingTable.needsRecovery, false),
+					lte(providerBookingTable.nextAttemptAt, now),
+					inArray(
+						providerBookingTable.orderItemId,
+						this.#db
+							.select({ id: orderItemTable.id })
+							.from(orderItemTable)
+							.where(eq(orderItemTable.orderId, orderId)),
+					),
+				),
+			);
+	}
+
+	#trackOrderReconciliationFailure(orderId: string, error: unknown): void {
+		trackEvent({
+			metadata: {
+				error: error instanceof Error ? error.message : String(error),
+				orderId,
+			},
+			name: "order_reconciliation_failed",
+			provider: this.#provider,
+			severity: "warning",
+			type: "integration",
+		});
+	}
+
+	#buildCompensationFacts(
+		context: SagaContext,
+		emailKind: OrderCompensationEmailKind,
+		reason: string,
+	): OrderCompensationFacts {
+		return {
+			amountRefundedMinor: context.order.amountRefundedMinor,
+			currency: context.order.currency,
+			email: context.contact?.email ?? "",
+			emailKind,
+			name: context.contact?.name ?? "",
+			orderId: context.order.id,
+			publicReference: context.order.publicReference,
+			reason,
+		};
+	}
+
+	#buildConfirmationFacts(context: SagaContext): OrderConfirmationFacts {
+		const [first] = context.bookings;
+		return {
+			accommodationImage: first?.imageUrlSnapshot ?? null,
+			accommodationTitle: first?.titleSnapshot ?? "Your Alojamento Ideal stay",
+			amountPaidMinor: context.order.amountPaidMinor,
+			billingAddress: context.contact?.billingAddress ?? {},
+			checkIn: first?.checkIn ?? "To be confirmed",
+			checkOut: first?.checkOut ?? "To be confirmed",
+			contactPhone: context.contact?.phoneE164 ?? "",
+			currency: context.order.currency,
+			email: context.contact?.email ?? "",
+			guests: first?.guests ?? 0,
+			name: context.contact?.name ?? "",
+			orderId: context.order.id,
+			publicReference: context.order.publicReference,
+		};
+	}
 }
 
 function constantTimeEquals(a: string, b: string): boolean {
@@ -2169,6 +4158,23 @@ function isPublicReferenceConflict(error: unknown): boolean {
 	);
 }
 
+/** A 23505 on a provider hold identity index means another row owns that id. */
+const PROVIDER_HOLD_IDENTITY_CONSTRAINTS = new Set([
+	"provider_bookings_provider_reservation_uidx",
+	"provider_bookings_provider_reservation_null_account_uidx",
+	"provider_bookings_provider_transaction_uidx",
+	"provider_bookings_provider_transaction_null_account_uidx",
+]);
+
+function isProviderHoldIdentityConflict(error: unknown): boolean {
+	const pgError = findPostgresError(error);
+	return (
+		pgError?.code === "23505" &&
+		(pgError.constraint === undefined ||
+			PROVIDER_HOLD_IDENTITY_CONSTRAINTS.has(pgError.constraint))
+	);
+}
+
 function mergeQuoteInput(
 	current: CommerceQuoteInput,
 	update: UpdateCartItemBody,
@@ -2178,7 +4184,8 @@ function mergeQuoteInput(
 		checkIn: update.checkIn ?? current.dates.checkIn,
 		checkOut: update.checkOut ?? current.dates.checkOut,
 		children: update.children ?? current.children,
-		forceFresh: true,
+		// Cart-edit reuses cache too; the hold re-checks availability before charge.
+		forceFresh: false,
 		guests: update.guests ?? current.guests,
 		infants: update.infants ?? current.infants,
 		listingId: update.listingId ?? current.listingId,

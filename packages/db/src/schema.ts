@@ -386,11 +386,13 @@ export const accommodationListing = pgTable(
 		searchBody: text("search_text"),
 		searchLocation: text("search_location"),
 		searchTitle: text("search_title"),
-		searchVector: tsvector("search_vector").generatedAlwaysAs(
-			sql`setweight(to_tsvector('simple', immutable_unaccent(coalesce(search_title, ''))), 'A')
+		searchVector: tsvector("search_vector")
+			.notNull()
+			.generatedAlwaysAs(
+				sql`setweight(to_tsvector('simple', immutable_unaccent(coalesce(search_title, ''))), 'A')
 				|| setweight(to_tsvector('simple', immutable_unaccent(coalesce(search_location, ''))), 'B')
 				|| setweight(to_tsvector('simple', immutable_unaccent(coalesce(search_text, ''))), 'C')`,
-		),
+			),
 		sectionHashes: jsonb("section_hashes")
 			.$type<ListingSectionHashes>()
 			.notNull(),
@@ -864,8 +866,25 @@ export const order = pgTable(
 			.default(0),
 		failureCode: text("failure_code"),
 		failureDetail: text("failure_detail"),
+		finalizationEmailAttemptCount: integer("finalization_email_attempt_count")
+			.notNull()
+			.default(0),
+		finalizationEmailKind: text("finalization_email_kind"),
+		finalizationEmailLastError: text("finalization_email_last_error"),
+		finalizationEmailNextAttemptAt: timestampWithTimezone(
+			"finalization_email_next_attempt_at",
+		)
+			.notNull()
+			.defaultNow(),
+		finalizationEmailSentAt: timestampWithTimezone(
+			"finalization_email_sent_at",
+		),
 		publicReference: text("public_reference").notNull(),
 		status: text("status").notNull().default("draft"),
+		refundCompletedAt: timestampWithTimezone("refund_completed_at"),
+		refundRequestedAt: timestampWithTimezone("refund_requested_at"),
+		stripeRefundId: text("stripe_refund_id"),
+		stripeRefundIdempotencyKey: text("stripe_refund_idempotency_key"),
 		stripePaymentIntentId: text("stripe_payment_intent_id"),
 		subtotalMinor: bigint("subtotal_minor", { mode: "number" }).notNull(),
 		taxMinor: bigint("tax_minor", { mode: "number" }).notNull().default(0),
@@ -880,9 +899,20 @@ export const order = pgTable(
 		index("orders_cart_id_idx").on(table.cartId),
 		index("orders_status_created_at_idx").on(table.status, table.createdAt),
 		index("orders_user_id_idx").on(table.userId),
+		index("orders_finalization_email_pending_idx")
+			.on(table.finalizationEmailNextAttemptAt)
+			.where(
+				sql`${table.finalizationEmailKind} is not null and ${table.finalizationEmailSentAt} is null`,
+			),
 		uniqueIndex("orders_stripe_payment_intent_id_uidx").on(
 			table.stripePaymentIntentId,
 		),
+		uniqueIndex("orders_stripe_refund_id_uidx")
+			.on(table.stripeRefundId)
+			.where(sql`${table.stripeRefundId} is not null`),
+		uniqueIndex("orders_stripe_refund_idempotency_key_uidx")
+			.on(table.stripeRefundIdempotencyKey)
+			.where(sql`${table.stripeRefundIdempotencyKey} is not null`),
 		// Monetary columns are non-negative minor units (discount_minor is a
 		// positive amount subtracted from total_minor, mirroring carts).
 		check("orders_subtotal_minor_nonneg", sql`${table.subtotalMinor} >= 0`),
@@ -896,6 +926,18 @@ export const order = pgTable(
 		check(
 			"orders_amount_refunded_minor_nonneg",
 			sql`${table.amountRefundedMinor} >= 0`,
+		),
+		check(
+			"orders_amount_refunded_lte_paid",
+			sql`${table.amountRefundedMinor} <= ${table.amountPaidMinor}`,
+		),
+		check(
+			"orders_finalization_email_attempt_count_nonneg",
+			sql`${table.finalizationEmailAttemptCount} >= 0`,
+		),
+		check(
+			"orders_finalization_email_kind_check",
+			sql`${table.finalizationEmailKind} is null or ${table.finalizationEmailKind} in ('confirmation', 'refund_amount_mismatch', 'refund_unconfirmed')`,
 		),
 		check(
 			"orders_status_check",
@@ -1001,6 +1043,9 @@ export const providerBooking = pgTable(
 		provider: text("provider").notNull(),
 		externalAccountId: text("external_account_id"),
 		providerReservationId: text("provider_reservation_id"),
+		// Hostify financial-record id for the accommodation transaction created with
+		// the hold (incomplete) and completed on payment acceptance.
+		providerTransactionId: text("provider_transaction_id"),
 		providerStatus: text("provider_status"),
 		normalizedStatus: text("normalized_status")
 			.$type<ProviderBookingStatus>()
@@ -1013,6 +1058,18 @@ export const providerBooking = pgTable(
 		rawOperationalPayload: jsonb("raw_operational_payload").$type<
 			Record<string, unknown>
 		>(),
+		// Retry/backoff bookkeeping for the reservation saga. Each hold operation
+		// (create/confirm/cancel) is a retryable step the reconciler cron schedules
+		// via `nextAttemptAt`; `needsRecovery` is the operator-visible "stuck"
+		// signal once attempts are exhausted (until the M7 dashboard exists).
+		attemptCount: integer("attempt_count").notNull().default(0),
+		lastAttemptAt: timestampWithTimezone("last_attempt_at"),
+		nextAttemptAt: timestampWithTimezone("next_attempt_at")
+			.defaultNow()
+			.notNull(),
+		lastErrorCode: text("last_error_code"),
+		lastErrorMessage: text("last_error_message"),
+		needsRecovery: boolean("needs_recovery").notNull().default(false),
 		createdAt: timestampWithTimezone("created_at").notNull().defaultNow(),
 		updatedAt: timestampWithTimezone("updated_at").notNull().defaultNow(),
 	},
@@ -1020,19 +1077,46 @@ export const providerBooking = pgTable(
 		uniqueIndex("provider_bookings_order_item_uidx").on(table.orderItemId),
 		uniqueIndex("provider_bookings_provider_reservation_uidx")
 			.on(table.provider, table.externalAccountId, table.providerReservationId)
-			.where(sql`${table.providerReservationId} is not null`),
+			.where(
+				sql`${table.providerReservationId} is not null and ${table.externalAccountId} is not null`,
+			),
+		uniqueIndex("provider_bookings_provider_reservation_null_account_uidx")
+			.on(table.provider, table.providerReservationId)
+			.where(
+				sql`${table.providerReservationId} is not null and ${table.externalAccountId} is null`,
+			),
+		uniqueIndex("provider_bookings_provider_transaction_uidx")
+			.on(table.provider, table.externalAccountId, table.providerTransactionId)
+			.where(
+				sql`${table.providerTransactionId} is not null and ${table.externalAccountId} is not null`,
+			),
+		uniqueIndex("provider_bookings_provider_transaction_null_account_uidx")
+			.on(table.provider, table.providerTransactionId)
+			.where(
+				sql`${table.providerTransactionId} is not null and ${table.externalAccountId} is null`,
+			),
 		index("provider_bookings_provider_date_idx").on(
 			table.provider,
 			table.stayStartsAt,
 			table.stayEndsAt,
 		),
 		index("provider_bookings_status_idx").on(table.normalizedStatus),
+		// Reconciler scan: pending holds whose next attempt is due.
+		index("provider_bookings_pending_next_attempt_idx")
+			.on(table.nextAttemptAt)
+			.where(sql`${table.normalizedStatus} = 'pending'`),
 		check(
 			"provider_bookings_status_check",
 			sql`${table.normalizedStatus} in ('pending', 'confirmed', 'cancelled', 'failed', 'completed')`,
 		),
+		check(
+			"provider_bookings_attempt_count_nonneg",
+			sql`${table.attemptCount} >= 0`,
+		),
 	],
 );
+
+export type ProviderBooking = typeof providerBooking.$inferSelect;
 
 export const bookingGuest = pgTable(
 	"booking_guests",

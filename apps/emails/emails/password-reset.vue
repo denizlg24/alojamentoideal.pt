@@ -1,5 +1,5 @@
 <template>
-  <Layout class="bg-[#f4eee5] font-hanken-grotesk">
+  <Layout class="bg-[#efe7d9] font-hanken-grotesk">
     <Font
       family="Hanken Grotesk"
       fallback="ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif"
@@ -12,89 +12,84 @@
     />
     <Preheader>Reset your Alojamento Ideal password.</Preheader>
 
-    <Container class="max-w-[620px] mx-auto px-5 py-8 sm:px-4">
-      <Section class="bg-[#5d473d] px-8 py-7 sm:px-6">
-        <table cellpadding="0" cellspacing="0" class="w-full" role="presentation">
+    <Container class="max-w-[560px] mx-auto px-6 py-10 sm:px-4">
+      <Section class="px-2 pb-8">
+        <table cellpadding="0" cellspacing="0" role="presentation">
           <tr>
-            <td class="w-[58px] align-middle">
+            <td class="w-[34px] align-middle">
               <Img
                 src="https://alojamentoideal.pt/alojamento-ideal-logo.png"
                 alt="Alojamento Ideal"
-                width="50"
+                width="28"
                 class="block"
               />
             </td>
-            <td class="align-middle">
-              <Text
-                class="m-0 font-bricolage-grotesque text-[22px] leading-6 text-[#fffaf2]"
-              >
+            <td class="pl-3 align-middle">
+              <Text class="m-0 font-bricolage-grotesque text-[17px] leading-5 text-[#2b211b]">
                 <Raw>__APP_NAME__</Raw>
-              </Text>
-              <Text class="m-0 mt-1 text-[12px] font-semibold uppercase tracking-[2px] text-[#dfcdbd]">
-                Find your ideal stay.
               </Text>
             </td>
           </tr>
         </table>
       </Section>
 
-      <Section class="bg-[#fffaf2] px-8 py-10 sm:px-6">
-        <Text class="m-0 text-[12px] font-bold uppercase tracking-[2px] text-[#8f6f5b]">
+      <Section class="bg-[#fffdf9] px-9 pt-11 pb-10 rounded-[20px] sm:px-6">
+        <Text class="m-0 text-[13px] font-semibold leading-5 text-[#b4512c]">
           Password reset
         </Text>
 
         <Spacer class="h-4" />
 
         <Heading
-          class="m-0 font-bricolage-grotesque text-[36px] font-semibold leading-[40px] text-[#2c211c] sm:text-[30px] sm:leading-[35px]"
+          class="m-0 font-bricolage-grotesque text-[34px] font-semibold leading-[38px] text-[#2b211b] sm:text-[28px] sm:leading-[32px]"
         >
-          Reset your password
+          Reset your password.
         </Heading>
 
         <Spacer class="h-5" />
 
-        <Text class="m-0 text-[16px] leading-7 text-[#5c514b]">
+        <Text class="m-0 text-[16px] leading-7 text-[#6a5d52]">
           We received a request to reset your <Raw>__APP_NAME__</Raw> password. Use the button below to choose a new one.
-        </Text>
-
-        <Spacer class="h-7" />
-
-        <Button
-          href="__RESET_URL__"
-          variant="solid"
-          class="bg-[#2c211c] px-7 py-4 text-[15px] font-bold text-[#fffaf2] no-underline rounded-[24px]"
-        >
-          Reset password
-        </Button>
-
-        <Spacer class="h-6" />
-
-        <Text class="m-0 text-[14px] leading-6 text-[#7a6b62]">
-          This link expires in 15 minutes. If you did not ask for a reset, you can ignore this email.
         </Text>
 
         <Spacer class="h-8" />
 
-        <Hr class="m-0 border-[#eadccd]" />
+        <Button
+          href="__RESET_URL__"
+          variant="solid"
+          class="bg-[#2b211b] px-7 py-4 text-[15px] font-semibold text-[#fffdf9] no-underline rounded-full"
+        >
+          Reset password &rarr;
+        </Button>
+
+        <Spacer class="h-6" />
+
+        <Text class="m-0 text-[14px] leading-6 text-[#8a7c6f]">
+          This link expires in 15 minutes. If you did not ask for a reset, you can safely ignore this email.
+        </Text>
+
+        <Spacer class="h-7" />
+
+        <Hr class="m-0 border-[#ece1cf]" />
 
         <Spacer class="h-5" />
 
-        <Text class="m-0 text-[13px] leading-5 text-[#81746d]">
-          If the button does not work, paste this link into your browser:
+        <Text class="m-0 text-[13px] leading-5 text-[#8a7c6f]">
+          Trouble with the button? Paste this link into your browser:
         </Text>
-        <Text class="m-0 mt-2 break-all text-[13px] leading-5 text-[#5d473d]">
+        <Text class="m-0 mt-1 break-all text-[13px] leading-5 text-[#b4512c]">
           <Raw>__RESET_URL__</Raw>
         </Text>
       </Section>
 
-      <Section class="bg-[#2c211c] px-8 py-7 sm:px-6">
-        <Text class="m-0 text-[13px] leading-5 text-[#e8d9c8]">
-          <Raw>__APP_NAME__</Raw> manages its own apartments and selected local activities on Portugal's North Coast.
+      <Section class="px-9 pt-8 pb-2 sm:px-6">
+        <Text class="m-0 text-[13px] leading-6 text-[#8a7c6f]">
+          <Raw>__APP_NAME__</Raw> owns and cares for its own apartments along Portugal's North Coast.
         </Text>
-        <Text class="m-0 mt-3 text-[12px] font-semibold uppercase tracking-[1.5px] text-[#bba694]">
-          Porto | Póvoa de Varzim | Leça da Palmeira | Canidelo
+        <Text class="m-0 mt-2 text-[13px] leading-6 text-[#a3937f]">
+          Porto &middot; Póvoa de Varzim &middot; Leça da Palmeira &middot; Canidelo
         </Text>
-        <Text class="m-0 mt-5 text-[12px] text-[#9f8c7e]">
+        <Text class="m-0 mt-4 text-[12px] leading-5 text-[#b3a690]">
           &copy; <Raw>__CURRENT_YEAR__</Raw> <Raw>__APP_NAME__</Raw>
         </Text>
       </Section>

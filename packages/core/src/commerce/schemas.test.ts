@@ -141,7 +141,7 @@ describe("commerce request parsers", () => {
 			adults: 2,
 			children: 2,
 			clientMutationId: "client-123",
-			forceFresh: true,
+			forceFresh: false,
 			guests: 4,
 			idempotencyKey: "add-12345",
 			infants: 1,

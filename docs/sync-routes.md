@@ -22,6 +22,7 @@ missing or invalid, it returns `401`.
 | `/api/cron/hostify/listings` | Pulls Hostify listing changes into the local listing cache. | Every 15 minutes, or at least hourly. | Revalidates catalog list pages and each changed listing detail tag. |
 | `/api/cron/hostify/reviews` | Pulls Hostify review changes and rating aggregates. | Every 30 minutes to 1 hour. | Revalidates catalog list pages and each listing whose review aggregate changed. |
 | `/api/cron/hostify/pricing` | Advances the rolling nightly advisory price cache by one listing batch. | Every 15 minutes, or at least hourly. | Revalidates advisory pricing used by homes list filters and cards when nights changed. |
+| `/api/cron/commerce/reservations` | Confirms paid provider holds, refunds failed confirmations, retries finalization emails, and releases abandoned checkout holds. | Every 5 minutes. This is a release blocker for reserve-first checkout. | Do not wire this with Vercel Cron Jobs. Register it in the same external scheduler as the Hostify crons with `Authorization: Bearer $CRON_SECRET`. |
 
 ## Example pings
 
@@ -37,6 +38,10 @@ curl -fsS \
 curl -fsS \
   -H "Authorization: Bearer $CRON_SECRET" \
   https://alojamentoideal.pt/api/cron/hostify/pricing
+
+curl -fsS \
+  -H "Authorization: Bearer $CRON_SECRET" \
+  https://alojamentoideal.pt/api/cron/commerce/reservations
 ```
 
 ## Notes

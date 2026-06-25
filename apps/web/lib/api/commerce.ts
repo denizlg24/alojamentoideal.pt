@@ -10,11 +10,15 @@ import {
 	type CommerceParseResult,
 	type CommerceQuoteInput,
 	CommerceService,
+	HostifyReservationGateway,
+	mapStripePaymentStatus,
 } from "@workspace/core/commerce";
 import { createHostifyClientFromEnv } from "@workspace/core/integrations/hostify";
 import {
+	createRefund,
 	createStripeClientFromEnv,
 	resolvePromotionCode,
+	retrievePaymentIntentSnapshot,
 	StripeConfigurationError,
 } from "@workspace/core/integrations/stripe";
 import { getRedis } from "@workspace/core/redis";
@@ -86,6 +90,19 @@ export function cartCookie(token: string): string {
 	return attributes.join("; ");
 }
 
+function optionalStripeClient(): ReturnType<
+	typeof createStripeClientFromEnv
+> | null {
+	try {
+		return createStripeClientFromEnv();
+	} catch (error) {
+		if (error instanceof StripeConfigurationError) {
+			return null;
+		}
+		throw error;
+	}
+}
+
 /**
  * Builds a request-scoped CommerceService. Fresh instantiation per call is
  * intentional: the service is stateless and the underlying Hostify, Redis and
@@ -93,8 +110,10 @@ export function cartCookie(token: string): string {
  */
 export function commerceService(): CommerceService {
 	const config = getAccommodationsConfig();
+	const hostifyClient = createHostifyClientFromEnv();
+	const stripe = optionalStripeClient();
 	const quoteService = new AccommodationQuoteService({
-		client: createHostifyClientFromEnv(),
+		client: hostifyClient,
 		currency: config.currency,
 		redis: getRedis(),
 		ttlSeconds: config.quoteCacheTtlSeconds,
@@ -102,9 +121,37 @@ export function commerceService(): CommerceService {
 
 	return new CommerceService({
 		accountId: config.hostifyAccountId,
+		// Default on; Finance can switch to manual-hold via env (D4).
+		autoRefundOnFailure:
+			process.env.COMMERCE_AUTO_REFUND !== "false" && stripe !== null,
 		currency: config.currency,
 		db: getDb(),
 		provider: HOSTIFY_PROVIDER,
+		// One full refund per failed order. When Stripe is not configured, leave
+		// the hook absent so the saga enters the manual-recovery path.
+		refundPayment: stripe
+			? (request) => createRefund(stripe, request)
+			: undefined,
+		// The reservation saga dispatches through a provider-keyed gateway; Hostify
+		// is the only provider today (Bokun slots in here later).
+		resolveReservationGateway: (provider) =>
+			provider === HOSTIFY_PROVIDER
+				? new HostifyReservationGateway({ client: hostifyClient })
+				: undefined,
+		// The reconciler reads live PaymentIntent state when a webhook never arrived.
+		retrievePaymentIntent: stripe
+			? async (paymentIntentId) => {
+					const snapshot = await retrievePaymentIntentSnapshot(
+						stripe,
+						paymentIntentId,
+					);
+					return {
+						amountMinor: snapshot.amountMinor,
+						currency: snapshot.currency,
+						status: mapStripePaymentStatus(snapshot.status),
+					};
+				}
+			: undefined,
 		quoteAccommodation: async (
 			input: CommerceQuoteInput,
 		): Promise<AccommodationQuoteResult> => {
@@ -112,7 +159,10 @@ export function commerceService(): CommerceService {
 				return await quoteService.quote({
 					...input,
 					accountId: config.hostifyAccountId,
-					forceFresh: true,
+					// Cart pricing reuses the short-TTL quote the booking widget warmed
+					// rather than always re-pricing live; callers opt into a fresh price
+					// via `forceFresh`. Availability is still re-checked at the hold.
+					forceFresh: input.forceFresh ?? false,
 					providerId: HOSTIFY_PROVIDER,
 				});
 			} catch (error) {
@@ -131,18 +181,12 @@ export function commerceService(): CommerceService {
 		resolveDiscount: async (
 			code: string,
 		): Promise<AppliedDiscountSnapshot | null> => {
-			let stripe: ReturnType<typeof createStripeClientFromEnv>;
-			try {
-				stripe = createStripeClientFromEnv();
-			} catch (error) {
-				if (error instanceof StripeConfigurationError) {
-					throw new CommerceError(
-						"discount_unavailable",
-						"Discounts are not available right now.",
-						503,
-					);
-				}
-				throw error;
+			if (!stripe) {
+				throw new CommerceError(
+					"discount_unavailable",
+					"Discounts are not available right now.",
+					503,
+				);
 			}
 			return resolvePromotionCode(stripe, code);
 		},
