@@ -13,9 +13,13 @@ import { withApiRoute } from "@/lib/api/route";
  * Creates (or reuses) the Stripe PaymentIntent backing an existing draft order
  * so the client can mount Elements. Used by the resume path, where the order
  * already exists; the happy path goes through prepare-payment, which creates
- * the draft order and the intent in one round trip. The payable amount is
- * re-read from the persisted order server-side; the client never supplies it.
+ * the draft order and the intent in one round trip. The slow provider
+ * reservation hold is intentionally deferred to checkout.hold_reservation, right
+ * before Stripe confirmation. The payable amount is re-read from the persisted
+ * order server-side; the client never supplies it.
  */
+export const maxDuration = 60;
+
 export const POST = withApiRoute(
 	{ name: "checkout.payment_intent", rateLimit: { bucket: "checkout.write" } },
 	async (request: Request): Promise<Response> => {

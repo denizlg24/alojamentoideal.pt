@@ -29,15 +29,17 @@ function stripeSessionLogId(sessionId: string): string {
 }
 
 /**
- * Settles an order whose PaymentIntent succeeded under the reserve-first saga.
+ * Settles an order whose PaymentIntent succeeded under the hold-before-confirm
+ * saga.
  * `markOrderPaid` records the captured amount and moves the order to `pending`;
  * `confirmOrderReservations` then flips the provider hold to accepted and is
  * where the single confirmation email originates. Both are idempotent, so a
  * re-delivered event is a no-op. The webhook is only an optimisation: the
  * reconciler cron is the durability authority, so any failure here is logged,
  * never 5xx'd (a retry would just re-find the settled order). A permanent
- * confirm failure (or an amount mismatch — money was taken) routes to
- * compensation, which refunds and emails the guest.
+ * confirm failure, including a malicious or stale client confirming without a
+ * provider hold, routes to compensation, which refunds and emails the guest.
+ * An amount mismatch follows the same compensation path because money was taken.
  */
 async function handlePaymentSucceeded(
 	event: Extract<RelevantStripeEvent, { type: "payment_succeeded" }>,

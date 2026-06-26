@@ -70,6 +70,7 @@ import {
 	type InitialStay,
 	profileInputFromContactDraft,
 } from "./types";
+import { usePendingMessages } from "./use-pending-messages";
 
 const CART_STORAGE_KEY = CHECKOUT_CART_STORAGE_KEY;
 
@@ -93,6 +94,23 @@ const ORDER_RESTART_CODES = new Set([
 	"order_not_found",
 	"order_not_payable",
 ]);
+
+const CHECKOUT_BOOTSTRAP_MESSAGES = [
+	"Checking your stay details.",
+	"Refreshing live price and availability.",
+	"Loading your booking summary.",
+] as const;
+
+const PAYMENT_PREPARATION_MESSAGES = [
+	"Creating your booking order.",
+	"Preparing your secure payment form.",
+	"Connecting to the payment provider.",
+] as const;
+
+const PAYMENT_ELEMENT_MESSAGES = [
+	"Loading the secure payment form.",
+	"Connecting to Stripe.",
+] as const;
 
 type DialogKind = "currency" | "dates" | "guests" | "price" | null;
 
@@ -162,6 +180,50 @@ function PaymentElementSkeleton() {
 				<Skeleton className="h-12 w-full rounded-lg" />
 			</div>
 			<Skeleton className="h-12 w-full rounded-lg" />
+		</div>
+	);
+}
+
+interface PaymentLoadingStatusProps {
+	detail?: string;
+	message: string;
+}
+
+function PaymentLoadingStatus({ detail, message }: PaymentLoadingStatusProps) {
+	return (
+		<div
+			aria-live="polite"
+			className="rounded-xl border bg-muted/60 px-4 py-3"
+			role="status"
+		>
+			<div className="flex items-start gap-3">
+				<span
+					aria-hidden
+					className="mt-1.5 size-2.5 shrink-0 rounded-full bg-foreground/70"
+				/>
+				<div className="flex flex-col gap-1">
+					<p className="font-medium text-sm">{message}</p>
+					<p className="text-muted-foreground text-sm">
+						{detail ??
+							'You will not be charged until you review the details and press "Confirm and pay".'}
+					</p>
+				</div>
+			</div>
+		</div>
+	);
+}
+
+function CheckoutBootstrapLoading() {
+	const message = usePendingMessages(true, CHECKOUT_BOOTSTRAP_MESSAGES, 3500);
+
+	return (
+		<div className="flex flex-col gap-4">
+			<PaymentLoadingStatus
+				detail="This usually takes a few seconds while we refresh availability."
+				message={message}
+			/>
+			<Skeleton className="h-40 w-full rounded-2xl" />
+			<Skeleton className="h-64 w-full rounded-2xl" />
 		</div>
 	);
 }
@@ -538,6 +600,17 @@ export function CheckoutController({
 		}
 	}, [clientSecret]);
 
+	const preparationMessage = usePendingMessages(
+		preparing && !payment,
+		PAYMENT_PREPARATION_MESSAGES,
+		4500,
+	);
+	const paymentElementMessage = usePendingMessages(
+		payment?.kind === "payment_intent" && !paymentElementReady,
+		PAYMENT_ELEMENT_MESSAGES,
+		4500,
+	);
+
 	const handleValidationFailure = useCallback(
 		(result: CartValidationResponse) => {
 			const failure = result.failures[0];
@@ -899,7 +972,9 @@ export function CheckoutController({
 			// The cart is frozen into the draft order, so re-read the payable order
 			// and PaymentIntent server-side rather than validating the converted
 			// cart. The order amount is snapshotted at draft creation; a mismatch
-			// here means the intent was rebuilt, so remount and ask for review.
+			// here means the intent was rebuilt, so remount and ask for review. Once
+			// the intent still matches, place the provider hold before Stripe is
+			// allowed to confirm payment.
 			const refreshed = await api.createPaymentIntent({
 				cartId: cart.id,
 				orderId: draftOrder.orderId,
@@ -921,6 +996,10 @@ export function CheckoutController({
 				);
 				return false;
 			}
+			await api.holdReservation({
+				cartId: cart.id,
+				orderId: draftOrder.orderId,
+			});
 			return true;
 		} catch (error) {
 			const err = toCheckoutError(error);
@@ -1081,6 +1160,7 @@ export function CheckoutController({
 	) : showPaymentLoading ? (
 		<div className="flex flex-col gap-4">
 			{payingAsHeader(false)}
+			<PaymentLoadingStatus message={preparationMessage} />
 			<div className={PAYMENT_AREA_MIN_HEIGHT}>
 				<PaymentElementSkeleton />
 			</div>
@@ -1103,7 +1183,8 @@ export function CheckoutController({
 					/>
 				</div>
 				{!paymentElementReady && (
-					<div className="absolute inset-0">
+					<div className="absolute inset-0 flex flex-col gap-4">
+						<PaymentLoadingStatus message={paymentElementMessage} />
 						<PaymentElementSkeleton />
 					</div>
 				)}
@@ -1248,16 +1329,7 @@ export function CheckoutController({
 	return (
 		<>
 			<CheckoutLayout
-				steps={
-					phase === "loading" ? (
-						<div className="flex flex-col gap-4">
-							<Skeleton className="h-40 w-full rounded-2xl" />
-							<Skeleton className="h-64 w-full rounded-2xl" />
-						</div>
-					) : (
-						steps
-					)
-				}
+				steps={phase === "loading" ? <CheckoutBootstrapLoading /> : steps}
 				summary={summary}
 			/>
 

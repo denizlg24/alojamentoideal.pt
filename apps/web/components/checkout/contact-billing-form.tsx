@@ -9,7 +9,11 @@ import { useEffect, useState } from "react";
 import { CountrySelect } from "@/components/form/country-select";
 import { PhoneInput } from "@/components/form/phone-input";
 import { CheckoutAlert } from "./checkout-alert";
-import { type ContactDraft, hasBillingDetails } from "./types";
+import {
+	type ContactDraft,
+	hasBillingDetails,
+	isContactComplete,
+} from "./types";
 
 interface ContactBillingFormProps {
 	/** When true, offer to save the entered contact/billing to the account. */
@@ -25,14 +29,6 @@ interface ContactBillingFormProps {
 	submitLabel?: string;
 	submitting: boolean;
 	value: ContactDraft;
-}
-
-function isContactComplete(value: ContactDraft): boolean {
-	return (
-		value.name.trim().length > 0 &&
-		/.+@.+\..+/.test(value.email.trim()) &&
-		value.phone.trim().length >= 3
-	);
 }
 
 interface FieldProps {
