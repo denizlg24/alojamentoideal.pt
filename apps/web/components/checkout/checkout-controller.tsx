@@ -996,9 +996,21 @@ export function CheckoutController({
 				);
 				return false;
 			}
-			await api.holdReservation({
+			const hold = await api.holdReservation({
 				cartId: cart.id,
 				orderId: draftOrder.orderId,
+			});
+			setDraftOrder({
+				checkoutExpiresAt: hold.checkoutExpiresAt,
+				orderId: hold.orderId,
+				publicReference: hold.publicReference,
+			});
+			writeResumeState({
+				cartId: cart.id,
+				checkoutExpiresAt: hold.checkoutExpiresAt,
+				orderId: hold.orderId,
+				publicReference: hold.publicReference,
+				stayKey,
 			});
 			return true;
 		} catch (error) {
@@ -1028,7 +1040,15 @@ export function CheckoutController({
 			setReviewError(err.message);
 			return false;
 		}
-	}, [cart, draftOrder, initialListing.id, item, payment, rebuildCart]);
+	}, [
+		cart,
+		draftOrder,
+		initialListing.id,
+		item,
+		payment,
+		rebuildCart,
+		stayKey,
+	]);
 
 	const navigateToCompletion = useCallback(() => {
 		if (!payment) {
