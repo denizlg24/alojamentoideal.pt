@@ -138,6 +138,25 @@ function pendingSummaryItemOf(
 	};
 }
 
+/**
+ * Stand-in for the Stripe Payment Element while the draft order + PaymentIntent
+ * are created in the background. Mirrors the Element's rough shape (method tabs,
+ * card number, expiry/CVC) so the optimistic swap from the contact form does not
+ * shift the layout when the real Element mounts.
+ */
+function PaymentElementSkeleton() {
+	return (
+		<div aria-busy="true" className="flex flex-col gap-3">
+			<Skeleton className="h-10 w-full rounded-lg" />
+			<Skeleton className="h-12 w-full rounded-lg" />
+			<div className="grid grid-cols-2 gap-3">
+				<Skeleton className="h-12 w-full rounded-lg" />
+				<Skeleton className="h-12 w-full rounded-lg" />
+			</div>
+		</div>
+	);
+}
+
 export function CheckoutController({
 	initialListing,
 	initialStay,
@@ -974,9 +993,32 @@ export function CheckoutController({
 	// but hides while the guest is editing their contact details.
 	const paymentState = payTimingDone ? "active" : "upcoming";
 	// Show the contact form before payment, and again when editing it in place.
-	const showContactForm = !payment || editingContact;
+	// Once the guest submits their contact details, optimistically swap to the
+	// payment step with a skeleton while the draft order + PaymentIntent settle in
+	// the background, instead of stranding them on a disabled "Saving" button.
+	const showContactForm = editingContact || (!payment && !preparing);
+	const showPaymentLoading = preparing && !payment && !editingContact;
 	const showReview = hasPayment && !editingContact;
 	const reviewState = showReview ? "active" : "upcoming";
+
+	// "Paying as …" row shared by the loading skeleton and the live Payment
+	// Element. Editing is only possible once a draft order exists, so the button
+	// is disabled while the optimistic skeleton is shown.
+	const payingAsHeader = (canEdit: boolean) => (
+		<div className="flex flex-wrap items-center justify-between gap-2">
+			<p className="text-muted-foreground text-sm">
+				Paying as {contact.name || contact.email || "guest"}
+			</p>
+			<Button
+				className="p-0 text-sm underline"
+				disabled={!canEdit}
+				onClick={canEdit ? () => setEditingContact(true) : undefined}
+				variant="link"
+			>
+				Edit contact details
+			</Button>
+		</div>
+	);
 
 	const paymentBody = showContactForm ? (
 		<div className="flex flex-col gap-4">
@@ -995,20 +1037,14 @@ export function CheckoutController({
 				value={contact}
 			/>
 		</div>
+	) : showPaymentLoading ? (
+		<div className="flex flex-col gap-4">
+			{payingAsHeader(false)}
+			<PaymentElementSkeleton />
+		</div>
 	) : payment?.kind === "payment_intent" ? (
 		<div className="flex flex-col gap-4">
-			<div className="flex flex-wrap items-center justify-between gap-2">
-				<p className="text-muted-foreground text-sm">
-					Paying as {contact.name || contact.email || "guest"}
-				</p>
-				<Button
-					className="p-0 text-sm underline"
-					onClick={() => setEditingContact(true)}
-					variant="link"
-				>
-					Edit contact details
-				</Button>
-			</div>
+			{payingAsHeader(true)}
 			<CheckoutPaymentElement />
 		</div>
 	) : (
