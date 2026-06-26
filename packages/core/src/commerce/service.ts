@@ -615,15 +615,16 @@ export class CommerceService {
 
 	/**
 	 * Records a verified `payment_intent.succeeded` against an order under the
-	 * reserve-first saga. The captured amount/currency are asserted against the
-	 * persisted total first: a mismatch returns `amount_mismatch` (the money was
-	 * taken, so the caller compensates with a refund). On a match the order is
-	 * moved to `pending` with `amountPaidMinor` recorded — it is NOT confirmed
-	 * here. Confirmation (and the single confirmation email) happen in
+	 * hold-before-confirm saga. The captured amount/currency are asserted against
+	 * the persisted total first: a mismatch returns `amount_mismatch` (the money
+	 * was taken, so the caller compensates with a refund). On a match the order is
+	 * moved to `pending` with `amountPaidMinor` recorded; it is NOT confirmed here.
+	 * Confirmation (and the single confirmation email) happen in
 	 * `confirmOrderReservations`, which flips the provider hold from pending to
-	 * accepted. The guarded UPDATE is the idempotency authority: a re-delivered
-	 * event finds a terminal order and returns `already_finalized`. There is no
-	 * owner check; the trust boundary is Stripe's webhook signature.
+	 * accepted or compensates when no hold can be confirmed. The guarded UPDATE is
+	 * the idempotency authority: a re-delivered event finds a terminal order and
+	 * returns `already_finalized`. There is no owner check; the trust boundary is
+	 * Stripe's webhook signature.
 	 */
 	async markOrderPaid(
 		orderId: string,
@@ -2218,10 +2219,11 @@ export class CommerceService {
 	// ---------------------------------------------------------------------------
 
 	/**
-	 * Places a provider hold for every item of an order at PaymentIntent creation.
+	 * Places a provider hold for every item of an order before PaymentIntent
+	 * confirmation.
 	 * Any item that comes back `unavailable` (or fails permanently) releases the
 	 * holds already placed in this pass and fails the order without taking money,
-	 * so the gate is: no hold -> no PaymentIntent -> no charge. A transient
+	 * so the gate is: no hold -> no confirmation -> no normal charge. A transient
 	 * provider failure leaves the order holdable for the next attempt; the cron
 	 * releases anything abandoned. On full success the order moves to `pending`.
 	 */

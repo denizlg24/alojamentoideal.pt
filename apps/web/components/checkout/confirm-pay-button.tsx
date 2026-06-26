@@ -10,6 +10,12 @@ import { usePendingMessages } from "./use-pending-messages";
  * several seconds (and SCA longer), so the copy reassures the guest rather than
  * leaving a static spinner. Module-level so the cycling timer stays stable.
  */
+const RESERVATION_CHECK_MESSAGES = [
+	"Checking final availability",
+	"Holding your dates",
+	"Preparing payment",
+] as const;
+
 const CONFIRMING_MESSAGES = [
 	"Confirming your payment",
 	"Securing your payment, this can take a few seconds",
@@ -21,7 +27,7 @@ type ConfirmPhase = "confirming" | "idle" | "validating";
 interface ConfirmPayButtonProps {
 	disabled: boolean;
 	onError: (message: string) => void;
-	/** Validate cart freshness before charging. Returns false to abort. */
+	/** Refresh payment facts and place the provider hold before charging. */
 	onValidate: () => Promise<boolean>;
 	returnUrl: string;
 	totalLabel: string;
@@ -43,7 +49,11 @@ export function ConfirmPayButton({
 	const stripe = useStripe();
 	const elements = useElements();
 	const [phase, setPhase] = useState<ConfirmPhase>("idle");
-	const cyclingMessage = usePendingMessages(
+	const reservationMessage = usePendingMessages(
+		phase === "validating",
+		RESERVATION_CHECK_MESSAGES,
+	);
+	const confirmationMessage = usePendingMessages(
 		phase === "confirming",
 		CONFIRMING_MESSAGES,
 	);
@@ -96,17 +106,31 @@ export function ConfirmPayButton({
 		phase === "idle"
 			? `Confirm and pay ${totalLabel}`
 			: phase === "validating"
-				? "Checking your reservation"
-				: cyclingMessage;
+				? reservationMessage
+				: confirmationMessage;
+
+	const status =
+		phase === "validating"
+			? "We are checking live availability and placing a temporary hold. You will not be charged unless this succeeds."
+			: phase === "confirming"
+				? "Your stay is held. We are now asking Stripe to confirm the payment."
+				: null;
 
 	return (
-		<Button
-			className="w-full sm:w-auto"
-			disabled={disabled || pending || !stripe}
-			onClick={handleClick}
-			size="lg"
-		>
-			{label}
-		</Button>
+		<div className="flex flex-col gap-2">
+			<Button
+				className="w-full sm:w-auto"
+				disabled={disabled || pending || !stripe}
+				onClick={handleClick}
+				size="lg"
+			>
+				{label}
+			</Button>
+			{status && (
+				<p aria-live="polite" className="text-muted-foreground text-sm">
+					{status}
+				</p>
+			)}
+		</div>
 	);
 }

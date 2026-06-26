@@ -62,6 +62,15 @@ export function emptyContactDraft(): ContactDraft {
 	};
 }
 
+/** Minimal contact data required before checkout can create a draft order. */
+export function isContactComplete(value: ContactDraft): boolean {
+	return (
+		value.name.trim().length > 0 &&
+		/.+@.+\..+/.test(value.email.trim()) &&
+		value.phone.trim().length >= 3
+	);
+}
+
 /** Maps a stored draft-order contact back into editable form state. */
 export function contactDraftFromOrderContact(
 	contact: DraftOrderContactInput,

@@ -59,6 +59,15 @@ export type PaymentIntentResponse =
 	| CreatePaymentIntentResponse
 	| ZeroTotalPaymentIntentResponse;
 
+/** Successful provider hold created immediately before confirming payment. */
+export interface HoldReservationResponse {
+	/** ISO instant the checkout window closes, so the client can self-expire. */
+	checkoutExpiresAt: string | null;
+	orderId: string;
+	publicReference: string;
+	status: "held";
+}
+
 /**
  * Authoritative draft-order facts needed to materialize a PaymentIntent.
  * Returned by `CommerceService.getPayableOrder`; `DraftOrderResponse` omits the
@@ -137,13 +146,13 @@ export interface PaymentAmount {
 
 /**
  * Outcome of marking an order paid from a verified `payment_intent.succeeded`
- * webhook under the reserve-first saga. `markOrderPaid` no longer jumps to
- * `confirmed`: it records the captured amount and moves a held order to
+ * webhook under the hold-before-confirm saga. `markOrderPaid` no longer jumps
+ * to `confirmed`: it records the captured amount and moves the order to
  * `pending`, then the caller drives `confirmOrderReservations` to confirm the
- * provider hold (which is where the confirmation email originates). `marked`
- * means the paid amount was recorded (the order is `pending`, awaiting hold
- * confirmation); `already_finalized` means the order already reached a terminal
- * state; `not_found` means the metadata referenced an unknown order;
+ * provider hold or compensate when no hold can be confirmed. `marked` means the
+ * paid amount was recorded (the order is `pending`, awaiting hold confirmation);
+ * `already_finalized` means the order already reached a terminal state;
+ * `not_found` means the metadata referenced an unknown order;
  * `amount_mismatch` means the captured amount/currency disagreed with the
  * persisted total, so the money was taken but must be refunded by compensation.
  */
@@ -158,12 +167,12 @@ export type MarkOrderPaidResult =
 	| { outcome: "not_found" };
 
 /**
- * Outcome of placing every provider hold for an order at PaymentIntent creation
- * (reserve-first). `held` moves the order `draft -> pending` and lets the route
- * return a PaymentIntent; `unavailable` means a hold was rejected (dates gone)
- * so no PaymentIntent is created and no money is taken; `transient_error` means
- * a provider call failed retryably (the route should ask the guest to retry);
- * `not_holdable` means the order was not in a holdable state.
+ * Outcome of placing every provider hold before payment confirmation. `held`
+ * moves the order `draft -> pending` and lets the client confirm the already
+ * created PaymentIntent; `unavailable` means a hold was rejected (dates gone)
+ * so no money is taken; `transient_error` means a provider call failed retryably
+ * (the route should ask the guest to retry); `not_holdable` means the order was
+ * not in a holdable state.
  */
 export type HoldOrderResult =
 	| { outcome: "held" }

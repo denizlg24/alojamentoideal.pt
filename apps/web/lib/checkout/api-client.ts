@@ -4,6 +4,7 @@ import type {
 	CartValidationResponse,
 	DraftOrderContactInput,
 	DraftOrderResponse,
+	HoldReservationResponse,
 	OrderStatusResponse,
 	PaymentIntentResponse,
 } from "@workspace/core/commerce";
@@ -198,6 +199,34 @@ export function createPaymentIntent(
 ): Promise<PaymentIntentResponse> {
 	return request<PaymentIntentResponse>(
 		"/api/checkout/payment-intent",
+		jsonBody(body),
+	);
+}
+
+/**
+ * Happy-path checkout: creates the draft order and returns the PaymentIntent
+ * (or a zero-total response) in one request, avoiding the extra draft-order /
+ * payment-intent round trip. The slow provider reservation hold happens later,
+ * immediately before the guest confirms payment.
+ */
+export function preparePayment(
+	body: CreateDraftOrderInput,
+): Promise<PaymentIntentResponse> {
+	return request<PaymentIntentResponse>(
+		"/api/checkout/prepare-payment",
+		jsonBody(body),
+	);
+}
+
+/**
+ * Places the provider reservation hold immediately before Stripe confirmation.
+ * If this fails, checkout aborts before the guest is charged.
+ */
+export function holdReservation(
+	body: CreatePaymentIntentInput,
+): Promise<HoldReservationResponse> {
+	return request<HoldReservationResponse>(
+		"/api/checkout/hold-reservation",
 		jsonBody(body),
 	);
 }

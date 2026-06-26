@@ -70,8 +70,17 @@ import {
 	type InitialStay,
 	profileInputFromContactDraft,
 } from "./types";
+import { usePendingMessages } from "./use-pending-messages";
 
 const CART_STORAGE_KEY = CHECKOUT_CART_STORAGE_KEY;
+
+/**
+ * Reserved height for the payment area, shared by the loading skeleton and the
+ * mounted Stripe Payment Element. Reserving the space keeps the review step and
+ * Confirm button from jumping as the Element's iframe grows to its final height.
+ * Tuned to the tabs layout (method tabs + card + expiry/CVC + country/postal).
+ */
+const PAYMENT_AREA_MIN_HEIGHT = "min-h-[20rem]";
 
 /**
  * Order/payment failures that mean the in-progress draft order can no longer be
@@ -85,6 +94,23 @@ const ORDER_RESTART_CODES = new Set([
 	"order_not_found",
 	"order_not_payable",
 ]);
+
+const CHECKOUT_BOOTSTRAP_MESSAGES = [
+	"Checking your stay details.",
+	"Refreshing live price and availability.",
+	"Loading your booking summary.",
+] as const;
+
+const PAYMENT_PREPARATION_MESSAGES = [
+	"Creating your booking order.",
+	"Preparing your secure payment form.",
+	"Connecting to the payment provider.",
+] as const;
+
+const PAYMENT_ELEMENT_MESSAGES = [
+	"Loading the secure payment form.",
+	"Connecting to Stripe.",
+] as const;
 
 type DialogKind = "currency" | "dates" | "guests" | "price" | null;
 
@@ -153,6 +179,51 @@ function PaymentElementSkeleton() {
 				<Skeleton className="h-12 w-full rounded-lg" />
 				<Skeleton className="h-12 w-full rounded-lg" />
 			</div>
+			<Skeleton className="h-12 w-full rounded-lg" />
+		</div>
+	);
+}
+
+interface PaymentLoadingStatusProps {
+	detail?: string;
+	message: string;
+}
+
+function PaymentLoadingStatus({ detail, message }: PaymentLoadingStatusProps) {
+	return (
+		<div
+			aria-live="polite"
+			className="rounded-xl border bg-muted/60 px-4 py-3"
+			role="status"
+		>
+			<div className="flex items-start gap-3">
+				<span
+					aria-hidden
+					className="mt-1.5 size-2.5 shrink-0 rounded-full bg-foreground/70"
+				/>
+				<div className="flex flex-col gap-1">
+					<p className="font-medium text-sm">{message}</p>
+					<p className="text-muted-foreground text-sm">
+						{detail ??
+							'You will not be charged until you review the details and press "Confirm and pay".'}
+					</p>
+				</div>
+			</div>
+		</div>
+	);
+}
+
+function CheckoutBootstrapLoading() {
+	const message = usePendingMessages(true, CHECKOUT_BOOTSTRAP_MESSAGES, 3500);
+
+	return (
+		<div className="flex flex-col gap-4">
+			<PaymentLoadingStatus
+				detail="This usually takes a few seconds while we refresh availability."
+				message={message}
+			/>
+			<Skeleton className="h-40 w-full rounded-2xl" />
+			<Skeleton className="h-64 w-full rounded-2xl" />
 		</div>
 	);
 }
@@ -182,6 +253,13 @@ export function CheckoutController({
 	const [draftOrder, setDraftOrder] = useState<DraftOrderRef | null>(null);
 	const [payment, setPayment] = useState<PaymentIntentResponse | null>(null);
 	const [preparing, setPreparing] = useState(false);
+	// Client secret the mounted Payment Element has reported ready for. Keying
+	// readiness to the secret (rather than a bare boolean) means a refreshed
+	// PaymentIntent re-shows the skeleton, and keeps confirm disabled, until the
+	// new Element fires `onReady`.
+	const [readyClientSecret, setReadyClientSecret] = useState<string | null>(
+		null,
+	);
 	const [contactError, setContactError] = useState<string | null>(null);
 	const [discountPending, setDiscountPending] = useState(false);
 	const [discountError, setDiscountError] = useState<string | null>(null);
@@ -506,6 +584,33 @@ export function CheckoutController({
 		};
 	}, [sessionUserId]);
 
+	const clientSecret =
+		payment?.kind === "payment_intent" ? payment.clientSecret : null;
+	// Ready only once the Element has reported `onReady` for the *current*
+	// secret; a refreshed PaymentIntent remounts Elements, so readiness (and the
+	// skeleton overlay) tracks the live secret rather than lingering from a
+	// previous one.
+	const paymentElementReady =
+		clientSecret !== null && readyClientSecret === clientSecret;
+	// Drop a stale readiness marker once payment is cleared, so a later resume
+	// that happens to reuse the same secret still shows the skeleton first.
+	useEffect(() => {
+		if (clientSecret === null) {
+			setReadyClientSecret(null);
+		}
+	}, [clientSecret]);
+
+	const preparationMessage = usePendingMessages(
+		preparing && !payment,
+		PAYMENT_PREPARATION_MESSAGES,
+		4500,
+	);
+	const paymentElementMessage = usePendingMessages(
+		payment?.kind === "payment_intent" && !paymentElementReady,
+		PAYMENT_ELEMENT_MESSAGES,
+		4500,
+	);
+
 	const handleValidationFailure = useCallback(
 		(result: CartValidationResponse) => {
 			const failure = result.failures[0];
@@ -741,47 +846,43 @@ export function CheckoutController({
 		setPreparing(true);
 		setContactError(null);
 		try {
-			// First pass: validate the still-mutable cart, then freeze it into a
-			// draft order and persist resume metadata immediately. On retry (the
+			// Happy path: a single round trip freezes the cart into a draft order,
+			// holds the reservation and returns the PaymentIntent. On retry (the
 			// order already exists but the PaymentIntent call failed) reuse the
-			// order and skip cart validation, which would now reject the converted
-			// cart with `cart_converted`.
-			let order = draftOrder;
-			if (!order) {
-				const validated = await api.validateCart(cart.id);
-				setCart(validated.cart);
-				if (!validated.valid) {
-					handleValidationFailure(validated);
-					trackCheckoutEvent("checkout_validation_failed", {
-						listingId: initialListing.id,
-					});
-					return;
-				}
-
-				const draft = await api.createDraftOrder({
+			// order via the granular endpoint, which skips the now-converted cart.
+			let intent: PaymentIntentResponse;
+			if (draftOrder) {
+				// The order already exists (e.g. the guest reopened the payment step
+				// to edit details): persist any contact changes before recreating the
+				// intent so the order never diverges from the submitted form.
+				const { contact: saved } = await api.updateOrderContact(
+					draftOrder.publicReference,
+					buildContactInput(),
+				);
+				setContact(contactDraftFromOrderContact(saved));
+				intent = await api.createPaymentIntent({
+					cartId: cart.id,
+					orderId: draftOrder.orderId,
+				});
+			} else {
+				intent = await api.preparePayment({
 					cartId: cart.id,
 					contact: buildContactInput(),
 					idempotencyKey: `draft:${cart.id}`,
 				});
-				order = {
-					checkoutExpiresAt: draft.checkoutExpiresAt,
-					orderId: draft.orderId,
-					publicReference: draft.publicReference,
-				};
-				setDraftOrder(order);
+				setDraftOrder({
+					checkoutExpiresAt: intent.checkoutExpiresAt,
+					orderId: intent.orderId,
+					publicReference: intent.publicReference,
+				});
 				writeResumeState({
 					cartId: cart.id,
-					checkoutExpiresAt: draft.checkoutExpiresAt,
-					orderId: draft.orderId,
-					publicReference: draft.publicReference,
+					checkoutExpiresAt: intent.checkoutExpiresAt,
+					orderId: intent.orderId,
+					publicReference: intent.publicReference,
 					stayKey,
 				});
 			}
-
-			const intent = await api.createPaymentIntent({
-				cartId: cart.id,
-				orderId: order.orderId,
-			});
 
 			setPayment(intent);
 			trackCheckoutEvent("payment_started", {
@@ -797,6 +898,20 @@ export function CheckoutController({
 			// the same stay and prompt new dates instead of stranding the guest.
 			if (err.code === "reservation_unavailable" && item) {
 				await rebuildCart(stayKeyFromItem(initialListing.id, item));
+				setDialog("dates");
+				setNotice(err.message);
+				return;
+			}
+			// The cached quote no longer holds: revalidation at draft-order creation
+			// found the dates/price changed, so the guest must adjust before paying.
+			if (
+				(err.code === "quote_revalidation_failed" ||
+					err.code === "dates_unavailable") &&
+				item
+			) {
+				trackCheckoutEvent("checkout_validation_failed", {
+					listingId: initialListing.id,
+				});
 				setDialog("dates");
 				setNotice(err.message);
 				return;
@@ -819,7 +934,6 @@ export function CheckoutController({
 		buildContactInput,
 		cart,
 		draftOrder,
-		handleValidationFailure,
 		initialListing.id,
 		saveContactToAccount,
 		stayKey,
@@ -858,7 +972,9 @@ export function CheckoutController({
 			// The cart is frozen into the draft order, so re-read the payable order
 			// and PaymentIntent server-side rather than validating the converted
 			// cart. The order amount is snapshotted at draft creation; a mismatch
-			// here means the intent was rebuilt, so remount and ask for review.
+			// here means the intent was rebuilt, so remount and ask for review. Once
+			// the intent still matches, place the provider hold before Stripe is
+			// allowed to confirm payment.
 			const refreshed = await api.createPaymentIntent({
 				cartId: cart.id,
 				orderId: draftOrder.orderId,
@@ -880,6 +996,22 @@ export function CheckoutController({
 				);
 				return false;
 			}
+			const hold = await api.holdReservation({
+				cartId: cart.id,
+				orderId: draftOrder.orderId,
+			});
+			setDraftOrder({
+				checkoutExpiresAt: hold.checkoutExpiresAt,
+				orderId: hold.orderId,
+				publicReference: hold.publicReference,
+			});
+			writeResumeState({
+				cartId: cart.id,
+				checkoutExpiresAt: hold.checkoutExpiresAt,
+				orderId: hold.orderId,
+				publicReference: hold.publicReference,
+				stayKey,
+			});
 			return true;
 		} catch (error) {
 			const err = toCheckoutError(error);
@@ -908,7 +1040,15 @@ export function CheckoutController({
 			setReviewError(err.message);
 			return false;
 		}
-	}, [cart, draftOrder, initialListing.id, item, payment, rebuildCart]);
+	}, [
+		cart,
+		draftOrder,
+		initialListing.id,
+		item,
+		payment,
+		rebuildCart,
+		stayKey,
+	]);
 
 	const navigateToCompletion = useCallback(() => {
 		if (!payment) {
@@ -1040,12 +1180,35 @@ export function CheckoutController({
 	) : showPaymentLoading ? (
 		<div className="flex flex-col gap-4">
 			{payingAsHeader(false)}
-			<PaymentElementSkeleton />
+			<PaymentLoadingStatus message={preparationMessage} />
+			<div className={PAYMENT_AREA_MIN_HEIGHT}>
+				<PaymentElementSkeleton />
+			</div>
 		</div>
 	) : payment?.kind === "payment_intent" ? (
 		<div className="flex flex-col gap-4">
 			{payingAsHeader(true)}
-			<CheckoutPaymentElement />
+			<div className={`relative ${PAYMENT_AREA_MIN_HEIGHT}`}>
+				<div
+					className={
+						paymentElementReady ? undefined : "pointer-events-none opacity-0"
+					}
+				>
+					<CheckoutPaymentElement
+						onReady={() => {
+							if (clientSecret) {
+								setReadyClientSecret(clientSecret);
+							}
+						}}
+					/>
+				</div>
+				{!paymentElementReady && (
+					<div className="absolute inset-0 flex flex-col gap-4">
+						<PaymentLoadingStatus message={paymentElementMessage} />
+						<PaymentElementSkeleton />
+					</div>
+				)}
+			</div>
 		</div>
 	) : (
 		<CheckoutAlert variant="info" title="No payment needed">
@@ -1056,7 +1219,7 @@ export function CheckoutController({
 	const confirmSlot =
 		payment?.kind === "payment_intent" ? (
 			<ConfirmPayButton
-				disabled={!termsAccepted}
+				disabled={!termsAccepted || !paymentElementReady}
 				onError={(message) => {
 					setReviewError(message);
 					trackCheckoutEvent("payment_failed", {
@@ -1186,16 +1349,7 @@ export function CheckoutController({
 	return (
 		<>
 			<CheckoutLayout
-				steps={
-					phase === "loading" ? (
-						<div className="flex flex-col gap-4">
-							<Skeleton className="h-40 w-full rounded-2xl" />
-							<Skeleton className="h-64 w-full rounded-2xl" />
-						</div>
-					) : (
-						steps
-					)
-				}
+				steps={phase === "loading" ? <CheckoutBootstrapLoading /> : steps}
 				summary={summary}
 			/>
 
