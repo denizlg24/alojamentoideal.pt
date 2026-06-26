@@ -22,8 +22,10 @@ export async function buildPaymentIntentResponse(
 	cartId: string,
 	order: PayableOrder,
 ): Promise<PaymentIntentResponse> {
-	// Defense in depth: the order must belong to the cart the client claims.
-	if (order.cartId && order.cartId !== cartId) {
+	// Defense in depth: the order must belong to the cart the client claims. A
+	// missing link is rejected too, so a payable order can never be paired with
+	// an arbitrary cart id.
+	if (order.cartId !== cartId) {
 		throw new CommerceError("order_not_found", "Order not found.", 404);
 	}
 

@@ -191,9 +191,13 @@ export function CheckoutController({
 	const [draftOrder, setDraftOrder] = useState<DraftOrderRef | null>(null);
 	const [payment, setPayment] = useState<PaymentIntentResponse | null>(null);
 	const [preparing, setPreparing] = useState(false);
-	// Gates the skeleton overlay on the mounted Payment Element: false until
-	// Stripe's `onReady` fires, then the Element is revealed in place.
-	const [paymentElementReady, setPaymentElementReady] = useState(false);
+	// Client secret the mounted Payment Element has reported ready for. Keying
+	// readiness to the secret (rather than a bare boolean) means a refreshed
+	// PaymentIntent re-shows the skeleton, and keeps confirm disabled, until the
+	// new Element fires `onReady`.
+	const [readyClientSecret, setReadyClientSecret] = useState<string | null>(
+		null,
+	);
 	const [contactError, setContactError] = useState<string | null>(null);
 	const [discountPending, setDiscountPending] = useState(false);
 	const [discountError, setDiscountError] = useState<string | null>(null);
@@ -518,14 +522,20 @@ export function CheckoutController({
 		};
 	}, [sessionUserId]);
 
-	// Re-arm the skeleton whenever the bound client secret changes: a refreshed
-	// PaymentIntent remounts Elements, so the new Element must render before the
-	// skeleton is lifted again.
 	const clientSecret =
 		payment?.kind === "payment_intent" ? payment.clientSecret : null;
-	// biome-ignore lint/correctness/useExhaustiveDependencies: clientSecret is the intended trigger even though the body only resets a stable setter.
+	// Ready only once the Element has reported `onReady` for the *current*
+	// secret; a refreshed PaymentIntent remounts Elements, so readiness (and the
+	// skeleton overlay) tracks the live secret rather than lingering from a
+	// previous one.
+	const paymentElementReady =
+		clientSecret !== null && readyClientSecret === clientSecret;
+	// Drop a stale readiness marker once payment is cleared, so a later resume
+	// that happens to reuse the same secret still shows the skeleton first.
 	useEffect(() => {
-		setPaymentElementReady(false);
+		if (clientSecret === null) {
+			setReadyClientSecret(null);
+		}
 	}, [clientSecret]);
 
 	const handleValidationFailure = useCallback(
@@ -769,6 +779,14 @@ export function CheckoutController({
 			// order via the granular endpoint, which skips the now-converted cart.
 			let intent: PaymentIntentResponse;
 			if (draftOrder) {
+				// The order already exists (e.g. the guest reopened the payment step
+				// to edit details): persist any contact changes before recreating the
+				// intent so the order never diverges from the submitted form.
+				const { contact: saved } = await api.updateOrderContact(
+					draftOrder.publicReference,
+					buildContactInput(),
+				);
+				setContact(contactDraftFromOrderContact(saved));
 				intent = await api.createPaymentIntent({
 					cartId: cart.id,
 					orderId: draftOrder.orderId,
@@ -1077,7 +1095,11 @@ export function CheckoutController({
 					}
 				>
 					<CheckoutPaymentElement
-						onReady={() => setPaymentElementReady(true)}
+						onReady={() => {
+							if (clientSecret) {
+								setReadyClientSecret(clientSecret);
+							}
+						}}
 					/>
 				</div>
 				{!paymentElementReady && (
@@ -1096,7 +1118,7 @@ export function CheckoutController({
 	const confirmSlot =
 		payment?.kind === "payment_intent" ? (
 			<ConfirmPayButton
-				disabled={!termsAccepted}
+				disabled={!termsAccepted || !paymentElementReady}
 				onError={(message) => {
 					setReviewError(message);
 					trackCheckoutEvent("payment_failed", {
