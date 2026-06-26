@@ -6,6 +6,7 @@ import {
 } from "@workspace/ui/components/avatar";
 import { Button } from "@workspace/ui/components/button";
 import { AccountSection, ReadField } from "./account-ui";
+import { DateOfBirthField } from "./date-of-birth-field";
 import { IdentityVerification } from "./identity-verification";
 import { ProfileForm } from "./profile-form";
 
@@ -24,28 +25,6 @@ function initials(name: string): string {
 	const first = parts[0]?.[0] ?? "";
 	const last = parts.length > 1 ? (parts[parts.length - 1]?.[0] ?? "") : "";
 	return (first + last).toUpperCase();
-}
-
-function formatDate(value: string | null): string {
-	if (!value) {
-		return "Not set";
-	}
-	const dateOnly = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
-	const date = dateOnly
-		? new Date(
-				Number(dateOnly[1]),
-				Number(dateOnly[2]) - 1,
-				Number(dateOnly[3]),
-			)
-		: new Date(value);
-	if (Number.isNaN(date.getTime())) {
-		return value;
-	}
-	return date.toLocaleDateString("en", {
-		day: "numeric",
-		month: "long",
-		year: "numeric",
-	});
 }
 
 export function AccountView({
@@ -88,10 +67,7 @@ export function AccountView({
 				<dl className="grid grid-cols-1 gap-x-4 gap-y-1 sm:grid-cols-[max-content_1fr]">
 					<ReadField label="Name" value={user.name || "Not set"} />
 					<ReadField label="Email" value={user.email} />
-					<ReadField
-						label="Date of birth"
-						value={formatDate(user.dateOfBirth)}
-					/>
+					<DateOfBirthField initialDateOfBirth={user.dateOfBirth} />
 				</dl>
 			</AccountSection>
 
