@@ -1,13 +1,5 @@
-import {
-	CommerceError,
-	type PaymentIntentResponse,
-	parseCreatePaymentIntentBody,
-} from "@workspace/core/commerce";
-import {
-	createOrUpdatePaymentIntent,
-	createStripeClientFromEnv,
-	StripeConfigurationError,
-} from "@workspace/core/integrations/stripe";
+import { parseCreatePaymentIntentBody } from "@workspace/core/commerce";
+import { buildPaymentIntentResponse } from "@/lib/api/checkout-payment";
 import {
 	commerceErrorResponse,
 	commerceService,
@@ -18,10 +10,11 @@ import {
 import { withApiRoute } from "@/lib/api/route";
 
 /**
- * Creates (or reuses) the Stripe PaymentIntent backing a draft order so the
- * client can mount Elements. The payable amount is re-read from the persisted
- * order server-side; the client never supplies it. Zero-total orders short
- * circuit with a typed response so checkout can skip Stripe entirely.
+ * Creates (or reuses) the Stripe PaymentIntent backing an existing draft order
+ * so the client can mount Elements. Used by the resume path, where the order
+ * already exists; the happy path goes through prepare-payment, which creates
+ * the draft order and the intent in one round trip. The payable amount is
+ * re-read from the persisted order server-side; the client never supplies it.
  */
 export const POST = withApiRoute(
 	{ name: "checkout.payment_intent", rateLimit: { bucket: "checkout.write" } },
@@ -41,86 +34,9 @@ export const POST = withApiRoute(
 				? await service.getPayableOrder(parsed.data.orderId, owner)
 				: await service.getPayableOrderForCart(parsed.data.cartId, owner);
 
-			// Defense in depth: the order must belong to the cart the client claims.
-			if (order.cartId && order.cartId !== parsed.data.cartId) {
-				throw new CommerceError("order_not_found", "Order not found.", 404);
-			}
-
-			if (order.totalMinor <= 0) {
-				const zeroTotal: PaymentIntentResponse = {
-					amountMinor: 0,
-					checkoutExpiresAt: order.checkoutExpiresAt,
-					currency: order.currency,
-					kind: "zero_total",
-					orderId: order.orderId,
-					publicReference: order.publicReference,
-				};
-				return Response.json(zeroTotal);
-			}
-
-			let stripe: ReturnType<typeof createStripeClientFromEnv>;
-			try {
-				stripe = createStripeClientFromEnv();
-			} catch (error) {
-				if (error instanceof StripeConfigurationError) {
-					throw new CommerceError(
-						"payment_unavailable",
-						"Payments are not available right now.",
-						503,
-					);
-				}
-				throw error;
-			}
-
-			// Reserve-first gate: place the Hostify hold before charging. No hold ->
-			// no PaymentIntent -> no charge. Availability is re-checked against the
-			// provider here, so a quote->book race fails before money is taken.
-			const hold = await service.holdOrderReservations(order.orderId);
-			if (hold.outcome === "unavailable") {
-				throw new CommerceError("reservation_unavailable", hold.message, 409);
-			}
-			if (hold.outcome === "transient_error") {
-				throw new CommerceError(
-					"payment_unavailable",
-					"We could not hold this stay just now. Please try again.",
-					503,
-				);
-			}
-			if (hold.outcome === "not_holdable") {
-				throw new CommerceError(
-					"order_not_payable",
-					"This order can no longer be paid.",
-					409,
-				);
-			}
-
-			const snapshot = await createOrUpdatePaymentIntent(stripe, {
-				amountMinor: order.totalMinor,
-				cartId: parsed.data.cartId,
-				currency: order.currency,
-				environment: process.env.NODE_ENV ?? "development",
-				existingPaymentIntentId: order.stripePaymentIntentId,
-				// Deterministic per order: one intent per draft order, retry-safe.
-				idempotencyKey: `pi:${order.orderId}`,
-				orderId: order.orderId,
-				publicReference: order.publicReference,
-			});
-
-			if (!order.stripePaymentIntentId) {
-				await service.attachPaymentIntentId(order.orderId, snapshot.id);
-			}
-
-			const body: PaymentIntentResponse = {
-				amountMinor: snapshot.amountMinor,
-				checkoutExpiresAt: order.checkoutExpiresAt,
-				clientSecret: snapshot.clientSecret,
-				currency: snapshot.currency,
-				kind: "payment_intent",
-				orderId: order.orderId,
-				paymentIntentId: snapshot.id,
-				publicReference: order.publicReference,
-			};
-			return Response.json(body);
+			return Response.json(
+				await buildPaymentIntentResponse(service, parsed.data.cartId, order),
+			);
 		} catch (error) {
 			const response = commerceErrorResponse(error);
 			if (response) {

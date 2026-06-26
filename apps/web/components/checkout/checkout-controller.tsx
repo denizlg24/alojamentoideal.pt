@@ -74,6 +74,14 @@ import {
 const CART_STORAGE_KEY = CHECKOUT_CART_STORAGE_KEY;
 
 /**
+ * Reserved height for the payment area, shared by the loading skeleton and the
+ * mounted Stripe Payment Element. Reserving the space keeps the review step and
+ * Confirm button from jumping as the Element's iframe grows to its final height.
+ * Tuned to the tabs layout (method tabs + card + expiry/CVC + country/postal).
+ */
+const PAYMENT_AREA_MIN_HEIGHT = "min-h-[20rem]";
+
+/**
  * Order/payment failures that mean the in-progress draft order can no longer be
  * paid. When the resume or final-refresh path hits one of these, the stored
  * resume metadata is dropped so checkout cleanly restarts from a fresh cart.
@@ -153,6 +161,7 @@ function PaymentElementSkeleton() {
 				<Skeleton className="h-12 w-full rounded-lg" />
 				<Skeleton className="h-12 w-full rounded-lg" />
 			</div>
+			<Skeleton className="h-12 w-full rounded-lg" />
 		</div>
 	);
 }
@@ -182,6 +191,9 @@ export function CheckoutController({
 	const [draftOrder, setDraftOrder] = useState<DraftOrderRef | null>(null);
 	const [payment, setPayment] = useState<PaymentIntentResponse | null>(null);
 	const [preparing, setPreparing] = useState(false);
+	// Gates the skeleton overlay on the mounted Payment Element: false until
+	// Stripe's `onReady` fires, then the Element is revealed in place.
+	const [paymentElementReady, setPaymentElementReady] = useState(false);
 	const [contactError, setContactError] = useState<string | null>(null);
 	const [discountPending, setDiscountPending] = useState(false);
 	const [discountError, setDiscountError] = useState<string | null>(null);
@@ -506,6 +518,16 @@ export function CheckoutController({
 		};
 	}, [sessionUserId]);
 
+	// Re-arm the skeleton whenever the bound client secret changes: a refreshed
+	// PaymentIntent remounts Elements, so the new Element must render before the
+	// skeleton is lifted again.
+	const clientSecret =
+		payment?.kind === "payment_intent" ? payment.clientSecret : null;
+	// biome-ignore lint/correctness/useExhaustiveDependencies: clientSecret is the intended trigger even though the body only resets a stable setter.
+	useEffect(() => {
+		setPaymentElementReady(false);
+	}, [clientSecret]);
+
 	const handleValidationFailure = useCallback(
 		(result: CartValidationResponse) => {
 			const failure = result.failures[0];
@@ -741,47 +763,35 @@ export function CheckoutController({
 		setPreparing(true);
 		setContactError(null);
 		try {
-			// First pass: validate the still-mutable cart, then freeze it into a
-			// draft order and persist resume metadata immediately. On retry (the
+			// Happy path: a single round trip freezes the cart into a draft order,
+			// holds the reservation and returns the PaymentIntent. On retry (the
 			// order already exists but the PaymentIntent call failed) reuse the
-			// order and skip cart validation, which would now reject the converted
-			// cart with `cart_converted`.
-			let order = draftOrder;
-			if (!order) {
-				const validated = await api.validateCart(cart.id);
-				setCart(validated.cart);
-				if (!validated.valid) {
-					handleValidationFailure(validated);
-					trackCheckoutEvent("checkout_validation_failed", {
-						listingId: initialListing.id,
-					});
-					return;
-				}
-
-				const draft = await api.createDraftOrder({
+			// order via the granular endpoint, which skips the now-converted cart.
+			let intent: PaymentIntentResponse;
+			if (draftOrder) {
+				intent = await api.createPaymentIntent({
+					cartId: cart.id,
+					orderId: draftOrder.orderId,
+				});
+			} else {
+				intent = await api.preparePayment({
 					cartId: cart.id,
 					contact: buildContactInput(),
 					idempotencyKey: `draft:${cart.id}`,
 				});
-				order = {
-					checkoutExpiresAt: draft.checkoutExpiresAt,
-					orderId: draft.orderId,
-					publicReference: draft.publicReference,
-				};
-				setDraftOrder(order);
+				setDraftOrder({
+					checkoutExpiresAt: intent.checkoutExpiresAt,
+					orderId: intent.orderId,
+					publicReference: intent.publicReference,
+				});
 				writeResumeState({
 					cartId: cart.id,
-					checkoutExpiresAt: draft.checkoutExpiresAt,
-					orderId: draft.orderId,
-					publicReference: draft.publicReference,
+					checkoutExpiresAt: intent.checkoutExpiresAt,
+					orderId: intent.orderId,
+					publicReference: intent.publicReference,
 					stayKey,
 				});
 			}
-
-			const intent = await api.createPaymentIntent({
-				cartId: cart.id,
-				orderId: order.orderId,
-			});
 
 			setPayment(intent);
 			trackCheckoutEvent("payment_started", {
@@ -797,6 +807,20 @@ export function CheckoutController({
 			// the same stay and prompt new dates instead of stranding the guest.
 			if (err.code === "reservation_unavailable" && item) {
 				await rebuildCart(stayKeyFromItem(initialListing.id, item));
+				setDialog("dates");
+				setNotice(err.message);
+				return;
+			}
+			// The cached quote no longer holds: revalidation at draft-order creation
+			// found the dates/price changed, so the guest must adjust before paying.
+			if (
+				(err.code === "quote_revalidation_failed" ||
+					err.code === "dates_unavailable") &&
+				item
+			) {
+				trackCheckoutEvent("checkout_validation_failed", {
+					listingId: initialListing.id,
+				});
 				setDialog("dates");
 				setNotice(err.message);
 				return;
@@ -819,7 +843,6 @@ export function CheckoutController({
 		buildContactInput,
 		cart,
 		draftOrder,
-		handleValidationFailure,
 		initialListing.id,
 		saveContactToAccount,
 		stayKey,
@@ -1040,12 +1063,29 @@ export function CheckoutController({
 	) : showPaymentLoading ? (
 		<div className="flex flex-col gap-4">
 			{payingAsHeader(false)}
-			<PaymentElementSkeleton />
+			<div className={PAYMENT_AREA_MIN_HEIGHT}>
+				<PaymentElementSkeleton />
+			</div>
 		</div>
 	) : payment?.kind === "payment_intent" ? (
 		<div className="flex flex-col gap-4">
 			{payingAsHeader(true)}
-			<CheckoutPaymentElement />
+			<div className={`relative ${PAYMENT_AREA_MIN_HEIGHT}`}>
+				<div
+					className={
+						paymentElementReady ? undefined : "pointer-events-none opacity-0"
+					}
+				>
+					<CheckoutPaymentElement
+						onReady={() => setPaymentElementReady(true)}
+					/>
+				</div>
+				{!paymentElementReady && (
+					<div className="absolute inset-0">
+						<PaymentElementSkeleton />
+					</div>
+				)}
+			</div>
 		</div>
 	) : (
 		<CheckoutAlert variant="info" title="No payment needed">

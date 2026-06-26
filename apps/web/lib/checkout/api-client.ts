@@ -202,6 +202,21 @@ export function createPaymentIntent(
 	);
 }
 
+/**
+ * Happy-path checkout: creates the draft order, holds the reservation and
+ * returns the PaymentIntent (or a zero-total response) in a single request,
+ * avoiding the extra draft-order/payment-intent round trips. Falls back to the
+ * granular endpoints for the resume path.
+ */
+export function preparePayment(
+	body: CreateDraftOrderInput,
+): Promise<PaymentIntentResponse> {
+	return request<PaymentIntentResponse>(
+		"/api/checkout/prepare-payment",
+		jsonBody(body),
+	);
+}
+
 export function getOrderStatus(
 	publicReference: string,
 ): Promise<OrderStatusResponse> {
