@@ -145,9 +145,9 @@ pay -> /booking/complete?ref=AI-...        (transient, polls status; existing)
 >   `isMemberTokenExpired`), and the `OrderAccessContext` / `ResolvedOrder` /
 >   `ResolvedOrderAccess` types.
 > - `CommerceService.resolveOrderAccess(reference, ctx)` (token path → owner
->   cart/user grant → `order_not_found`), `issueMemberToken(orderId, role,
->   email, opts)` (owner created `active`; accepts a caller `tx` for B1 owner
->   provisioning), and `redeemMemberToken(reference, rawToken, opts)`
+>   cart/user grant → `order_not_found`), a token-minting primitive (since
+>   superseded in B1 by `issueOwnerAccessToken` and the inline send-first invite
+>   path, and removed), and `redeemMemberToken(reference, rawToken, opts)`
 >   (idempotent `invited → active`, binds `user_id`, stamps `last_seen_at`).
 > - Web wiring in `apps/web/lib/api/commerce.ts`: `readMemberToken`,
 >   `resolveOrderAccessContext`, `memberCookie` (httpOnly `ai_order_member`,

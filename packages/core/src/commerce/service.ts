@@ -45,7 +45,6 @@ import {
 	memberInviteExpiresAt,
 	type OrderAccessContext,
 	type OrderPermission,
-	type OrderRole,
 	orderMemberCapacity,
 	orderRoleCan,
 	type ResolvedOrder,
@@ -217,13 +216,6 @@ interface CreateCartInput {
 interface ActiveItemInput {
 	itemId: string;
 	quoteInput: CommerceQuoteInput;
-}
-
-interface IssueMemberTokenOptions {
-	expiresAt?: Date | null;
-	invitedByMemberId?: string | null;
-	/** Run the insert inside a caller transaction (e.g. owner provisioning). */
-	tx?: Transaction;
 }
 
 interface IssueMemberTokenResult {
@@ -931,37 +923,6 @@ export class CommerceService {
 		}
 
 		throw new CommerceError("order_not_found", "Order not found.", 404);
-	}
-
-	/**
-	 * Mints a booking-access token for a member, persisting only its sha-256 hash.
-	 * The raw token is returned exactly once (delivered by email). An `owner` is
-	 * created already `active`; an invited `member` starts `invited` until it is
-	 * redeemed. Accepts a caller transaction so owner provisioning can ride the
-	 * saga's confirm transaction (B1).
-	 */
-	async issueMemberToken(
-		orderId: string,
-		role: OrderRole,
-		email: string,
-		options: IssueMemberTokenOptions = {},
-	): Promise<IssueMemberTokenResult> {
-		const token = generateMemberToken();
-		const now = new Date();
-		const memberId = crypto.randomUUID();
-		await (options.tx ?? this.#db).insert(orderMemberTable).values({
-			acceptedAt: role === "owner" ? now : null,
-			accessTokenHash: hashMemberToken(token),
-			createdAt: now,
-			email: email.toLowerCase(),
-			expiresAt: options.expiresAt ?? null,
-			id: memberId,
-			invitedByMemberId: options.invitedByMemberId ?? null,
-			orderId,
-			role,
-			status: role === "owner" ? "active" : "invited",
-		});
-		return { memberId, token };
 	}
 
 	/**
