@@ -19,7 +19,18 @@ import {
 	order as orderTable,
 	providerBooking as providerBookingTable,
 } from "@workspace/db";
-import { and, asc, eq, gt, inArray, isNull, lte, or, sql } from "drizzle-orm";
+import {
+	and,
+	asc,
+	count,
+	eq,
+	gt,
+	inArray,
+	isNull,
+	lte,
+	or,
+	sql,
+} from "drizzle-orm";
 import { parseQuoteBody } from "../accommodations";
 import type { RefundRequest, RefundResult } from "../integrations/stripe";
 import { trackEvent } from "../observability";
@@ -27,11 +38,16 @@ import { CommerceError, invalidRequest } from "./errors";
 import { hashIdempotencyRequest, idempotencyExpiresAt } from "./idempotency";
 import { housingFeeMinor, normalizeAccommodationQuoteSnapshot } from "./money";
 import {
+	canAcceptMember,
 	generateMemberToken,
 	hashMemberToken,
 	isMemberTokenExpired,
+	memberInviteExpiresAt,
 	type OrderAccessContext,
+	type OrderPermission,
 	type OrderRole,
+	orderMemberCapacity,
+	orderRoleCan,
 	type ResolvedOrder,
 	type ResolvedOrderAccess,
 } from "./order-access";
@@ -219,6 +235,21 @@ interface RedeemMemberTokenOptions {
 	/** Bind the redeeming visitor's account to the member when signed in. */
 	userId?: string | null;
 }
+
+/**
+ * Outcome of issuing or rotating an invite for a `member`. Carries the raw token
+ * (delivered once, by email) plus the persisted row's identity and lifetime so
+ * the caller can both send the magic-link and echo the new member back to the UI.
+ */
+interface InviteMemberResult {
+	email: string;
+	expiresAt: Date;
+	memberId: string;
+	token: string;
+}
+
+/** Lightweight address shape check for invite recipients (defence, not parsing). */
+const EMAIL_ADDRESS_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 interface RevalidatedSnapshot {
 	itemId: string;
@@ -960,6 +991,36 @@ export class CommerceService {
 				throw new CommerceError("order_not_found", "Order not found.", 404);
 			}
 
+			// Acceptance, not invitation, is what capacity caps (invites are unbounded
+			// and just expire). Only gate the invited -> active transition; a re-redeem
+			// of an already-active token is idempotent and must not be blocked by its
+			// own slot. Lock the order row first so concurrent redemptions of the last
+			// free slot serialize instead of both winning.
+			if (member.status !== "active") {
+				await tx
+					.select({ id: orderTable.id })
+					.from(orderTable)
+					.where(eq(orderTable.id, order.id))
+					.for("update");
+				const capacity = await this.#orderCapacity(tx, order.id);
+				const [activeRow] = await tx
+					.select({ value: count() })
+					.from(orderMemberTable)
+					.where(
+						and(
+							eq(orderMemberTable.orderId, order.id),
+							eq(orderMemberTable.status, "active"),
+						),
+					);
+				if (!canAcceptMember(Number(activeRow?.value ?? 0), capacity)) {
+					throw new CommerceError(
+						"order_full",
+						"This booking is already full.",
+						409,
+					);
+				}
+			}
+
 			const [updated] = await tx
 				.update(orderMemberTable)
 				.set({
@@ -974,6 +1035,254 @@ export class CommerceService {
 
 			return { member: updated ?? member, order, role: member.role };
 		});
+	}
+
+	/**
+	 * Provisions (or rotates) the order's `owner` member and returns a fresh raw
+	 * access token. Idempotent: the partial-unique owner index caps an order at one
+	 * owner, so a re-run rotates the existing row's token rather than inserting a
+	 * second. Bound to the confirmation-email send (the one guarded, once-per-order
+	 * action), which both the webhook and the reconciler cron funnel through — so
+	 * the raw token reaches whichever path actually mails the link, while only its
+	 * hash is ever persisted. Binds the booker's account when the order has one.
+	 */
+	async issueOwnerAccessToken(
+		orderId: string,
+		email: string,
+	): Promise<IssueMemberTokenResult> {
+		return this.#db.transaction(async (tx) => {
+			const [orderRow] = await tx
+				.select({ userId: orderTable.userId })
+				.from(orderTable)
+				.where(eq(orderTable.id, orderId))
+				.limit(1);
+			const userId = orderRow?.userId ?? null;
+			const [existing] = await tx
+				.select()
+				.from(orderMemberTable)
+				.where(
+					and(
+						eq(orderMemberTable.orderId, orderId),
+						eq(orderMemberTable.role, "owner"),
+					),
+				)
+				.limit(1)
+				.for("update");
+
+			const token = generateMemberToken();
+			const now = new Date();
+			if (existing) {
+				await tx
+					.update(orderMemberTable)
+					.set({
+						accessTokenHash: hashMemberToken(token),
+						acceptedAt: existing.acceptedAt ?? now,
+						status: "active",
+						userId: existing.userId ?? userId,
+					})
+					.where(eq(orderMemberTable.id, existing.id));
+				return { memberId: existing.id, token };
+			}
+
+			const memberId = crypto.randomUUID();
+			await tx.insert(orderMemberTable).values({
+				acceptedAt: now,
+				accessTokenHash: hashMemberToken(token),
+				createdAt: now,
+				email: email.toLowerCase(),
+				id: memberId,
+				orderId,
+				role: "owner",
+				status: "active",
+				userId,
+			});
+			return { memberId, token };
+		});
+	}
+
+	/**
+	 * Invites a guest to an order (owner only). Mints an `invited` member with a
+	 * 24h token returned once for the magic-link email. Invitations are unbounded
+	 * and short-lived; capacity is enforced at acceptance, not here. Rejects a
+	 * recipient who already holds active access so a duplicate invite cannot shadow
+	 * a real member.
+	 */
+	async inviteMember(
+		access: ResolvedOrderAccess,
+		input: { email: string },
+	): Promise<InviteMemberResult> {
+		this.#assertOrderPermission(access, "invite_members");
+		const email = input.email.trim().toLowerCase();
+		if (!EMAIL_ADDRESS_PATTERN.test(email)) {
+			throw invalidRequest("A valid email address is required.", [
+				{ message: "Enter a valid email address.", path: "email" },
+			]);
+		}
+
+		const [existingActive] = await this.#db
+			.select({ id: orderMemberTable.id })
+			.from(orderMemberTable)
+			.where(
+				and(
+					eq(orderMemberTable.orderId, access.order.id),
+					eq(orderMemberTable.email, email),
+					eq(orderMemberTable.status, "active"),
+				),
+			)
+			.limit(1);
+		if (existingActive) {
+			throw new CommerceError(
+				"order_member_exists",
+				"That guest already has access to this booking.",
+				409,
+			);
+		}
+
+		const expiresAt = memberInviteExpiresAt();
+		const { memberId, token } = await this.issueMemberToken(
+			access.order.id,
+			"member",
+			email,
+			{ expiresAt, invitedByMemberId: access.member?.id ?? null },
+		);
+		trackEvent({
+			metadata: { memberId, orderId: access.order.id },
+			name: "order_member_invited",
+			provider: this.#provider,
+			type: "integration",
+		});
+		return { email, expiresAt, memberId, token };
+	}
+
+	/**
+	 * Revokes a member's access (owner only). The token dies with the row, so a
+	 * revoked member loses access on their next request. The owner cannot be
+	 * revoked. Idempotent: re-revoking an already-revoked member is a no-op.
+	 */
+	async revokeMember(
+		access: ResolvedOrderAccess,
+		memberId: string,
+	): Promise<void> {
+		this.#assertOrderPermission(access, "manage_members");
+		const member = await this.#loadOrderMember(access.order.id, memberId);
+		if (member.role === "owner") {
+			throw new CommerceError(
+				"order_member_immutable",
+				"The booker cannot be removed from the order.",
+				409,
+			);
+		}
+		if (member.status === "revoked") {
+			return;
+		}
+		await this.#db
+			.update(orderMemberTable)
+			.set({ status: "revoked" })
+			.where(eq(orderMemberTable.id, member.id));
+		trackEvent({
+			metadata: { memberId, orderId: access.order.id },
+			name: "order_member_revoked",
+			provider: this.#provider,
+			type: "integration",
+		});
+	}
+
+	/**
+	 * Re-arms an invite (owner only): rotates the token, resets the 24h window, and
+	 * returns `invited`. Re-invites a previously revoked member too. An already
+	 * accepted member has nothing to resend; the owner's link lives in the
+	 * confirmation email, so neither can be resent here.
+	 */
+	async resendMemberInvite(
+		access: ResolvedOrderAccess,
+		memberId: string,
+	): Promise<InviteMemberResult> {
+		this.#assertOrderPermission(access, "manage_members");
+		const member = await this.#loadOrderMember(access.order.id, memberId);
+		if (member.role === "owner") {
+			throw new CommerceError(
+				"order_member_immutable",
+				"The booker's access link is sent with the confirmation email.",
+				409,
+			);
+		}
+		if (member.status === "active") {
+			throw new CommerceError(
+				"order_member_exists",
+				"That guest has already accepted the invitation.",
+				409,
+			);
+		}
+
+		const token = generateMemberToken();
+		const expiresAt = memberInviteExpiresAt();
+		await this.#db
+			.update(orderMemberTable)
+			.set({
+				accessTokenHash: hashMemberToken(token),
+				expiresAt,
+				status: "invited",
+			})
+			.where(eq(orderMemberTable.id, member.id));
+		trackEvent({
+			metadata: { memberId, orderId: access.order.id },
+			name: "order_member_invite_resent",
+			provider: this.#provider,
+			type: "integration",
+		});
+		return { email: member.email, expiresAt, memberId: member.id, token };
+	}
+
+	/** Loads a member row scoped to an order, throwing 404 when it is not present. */
+	async #loadOrderMember(orderId: string, memberId: string) {
+		const [member] = await this.#db
+			.select()
+			.from(orderMemberTable)
+			.where(
+				and(
+					eq(orderMemberTable.id, memberId),
+					eq(orderMemberTable.orderId, orderId),
+				),
+			)
+			.limit(1);
+		if (!member) {
+			throw new CommerceError(
+				"order_member_not_found",
+				"That guest is not on this booking.",
+				404,
+			);
+		}
+		return member;
+	}
+
+	/** Sums the order's registrable headcount (guests minus infants) for capacity. */
+	async #orderCapacity(tx: DbExecutor, orderId: string): Promise<number> {
+		const rows = await tx
+			.select({
+				guests: accommodationItemDetailTable.guests,
+				infants: accommodationItemDetailTable.infants,
+			})
+			.from(accommodationItemDetailTable)
+			.innerJoin(
+				orderItemTable,
+				eq(orderItemTable.id, accommodationItemDetailTable.orderItemId),
+			)
+			.where(eq(orderItemTable.orderId, orderId));
+		return orderMemberCapacity(rows);
+	}
+
+	/** Throws 403 when a resolved role lacks the permission an operation requires. */
+	#assertOrderPermission(
+		access: ResolvedOrderAccess,
+		permission: OrderPermission,
+	): void {
+		if (!orderRoleCan(access.role, permission)) {
+			throw new CommerceError(
+				"order_access_denied",
+				"You do not have access to do that.",
+				403,
+			);
+		}
 	}
 
 	/**

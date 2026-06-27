@@ -108,3 +108,45 @@ export function isMemberTokenExpired(
 		member.expiresAt !== null && member.expiresAt.getTime() <= now.getTime()
 	);
 }
+
+/**
+ * Invite lifetime. An invited member's token is deliberately short-lived: a
+ * magic-link forwarded in an email is a bearer credential, so an unaccepted
+ * invite lapses in 24 hours and a fresh link must be re-issued (rotate-on-resend).
+ * The owner token, by contrast, carries no expiry — the booker needs durable
+ * cross-device access to their own order.
+ */
+export const INVITE_TOKEN_TTL_MS = 24 * 60 * 60 * 1000;
+
+/** The `expires_at` an invited member token should carry from `now`. */
+export function memberInviteExpiresAt(now: Date = new Date()): Date {
+	return new Date(now.getTime() + INVITE_TOKEN_TTL_MS);
+}
+
+/**
+ * Registrable headcount for an order: total guests minus infants across its
+ * accommodation items. Infants do not occupy a registration/access slot, so they
+ * are excluded. This is the ceiling on how many members (the booker plus accepted
+ * invitees) may hold access — invitations themselves are unbounded and just
+ * expire, but acceptance is capped to this number.
+ */
+export function orderMemberCapacity(
+	items: ReadonlyArray<{ guests: number; infants: number }>,
+): number {
+	return items.reduce(
+		(total, item) => total + Math.max(item.guests - item.infants, 0),
+		0,
+	);
+}
+
+/**
+ * Whether one more member may be accepted onto an order. The owner counts as an
+ * active member (the booker occupies a slot), so a solo booking admits only the
+ * booker and a full house rejects further redemptions.
+ */
+export function canAcceptMember(
+	activeMemberCount: number,
+	capacity: number,
+): boolean {
+	return activeMemberCount < capacity;
+}

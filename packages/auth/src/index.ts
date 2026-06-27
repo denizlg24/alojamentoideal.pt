@@ -9,11 +9,13 @@ export {
 	buildOrderAmountMismatchRefundEmail,
 	buildOrderConfirmationEmail,
 	buildOrderCouldNotConfirmEmail,
+	buildOrderInviteEmail,
 	type EmailMessage,
 	type EmailSender,
 	escapeHtml,
 	getEmailSender,
 	type OrderCompensationEmailInput,
 	type OrderConfirmationEmailInput,
+	type OrderInviteEmailInput,
 	type OutboundEmail,
 } from "./email";

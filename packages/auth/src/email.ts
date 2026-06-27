@@ -116,6 +116,8 @@ interface EmailTemplates {
 	orderCouldNotConfirmText?: string;
 	orderAmountMismatchRefundHtml?: string;
 	orderAmountMismatchRefundText?: string;
+	orderInviteHtml?: string;
+	orderInviteText?: string;
 }
 
 async function loadTemplates(): Promise<EmailTemplates> {
@@ -405,6 +407,68 @@ function plainCompensationHtml(text: string): string {
 		.map((line) => (line === "" ? "<br/>" : `<p>${escapeHtml(line)}</p>`))
 		.join("");
 	return `<div style="font-family:system-ui,sans-serif;line-height:1.5">${paragraphs}</div>`;
+}
+
+export interface OrderInviteEmailInput {
+	/** Property name for the subject and body, e.g. "Sunny Loft in Porto". */
+	accommodationTitle: string;
+	/** Public order reference, e.g. "AI-XK4P". */
+	orderNumber: string;
+	/** Magic-link into the order hub carrying the single-use invite token. */
+	inviteUrl: string;
+	/** Whole hours until the invite lapses (24 today). */
+	expiresInHours: number;
+}
+
+/**
+ * Builds the "you've been invited to a booking" email carrying the order-hub
+ * magic-link. Uses the branded template when the emails package ships one,
+ * falling back to a plain body otherwise (same degrade path as the other order
+ * emails). The link is a bearer credential, so the body states the short expiry.
+ */
+export function buildOrderInviteEmail(
+	input: OrderInviteEmailInput,
+): EmailMessage {
+	const safeTitle = safeSubjectPart(input.accommodationTitle);
+	const subject = `You're invited to booking ${safeSubjectPart(input.orderNumber)} at ${safeTitle}`;
+
+	if (TEMPLATES.orderInviteHtml) {
+		const html = applyPlaceholders(TEMPLATES.orderInviteHtml, {
+			ACCOMMODATION_TITLE: escapeHtml(input.accommodationTitle),
+			APP_NAME,
+			CURRENT_YEAR,
+			EXPIRES_IN_HOURS: input.expiresInHours.toString(),
+			INVITE_URL: escapeHtml(input.inviteUrl),
+			ORDER_NUMBER: escapeHtml(input.orderNumber),
+		});
+		const text = TEMPLATES.orderInviteText
+			? applyPlaceholders(TEMPLATES.orderInviteText, {
+					ACCOMMODATION_TITLE: input.accommodationTitle,
+					APP_NAME,
+					CURRENT_YEAR,
+					EXPIRES_IN_HOURS: input.expiresInHours.toString(),
+					INVITE_URL: input.inviteUrl,
+					ORDER_NUMBER: input.orderNumber,
+				})
+			: orderInviteFallbackText(input);
+		return { html, subject, text };
+	}
+
+	const text = orderInviteFallbackText(input);
+	return { html: plainCompensationHtml(text), subject, text };
+}
+
+function orderInviteFallbackText(input: OrderInviteEmailInput): string {
+	return [
+		"Hi,",
+		"",
+		`You've been invited to join booking ${input.orderNumber} for ${input.accommodationTitle} with ${APP_NAME}.`,
+		`Open your booking to message us and add your guest details: ${input.inviteUrl}`,
+		"",
+		`This invitation link expires in ${input.expiresInHours} hours. If it lapses, ask whoever booked to resend it.`,
+		"",
+		`The ${APP_NAME} team`,
+	].join("\n");
 }
 
 export interface VerificationEmail {

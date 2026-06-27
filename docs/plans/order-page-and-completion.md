@@ -217,6 +217,40 @@ auto-resolves from cart/user without a token; sensitive fields hidden from
 
 ### B1 — Membership & invitations  *(depends B0; pairs with F4)*
 
+> **Status: backend done; live-DB verification + frontend (F4) remain.** No
+> migration was needed (B0's `order_members` already carries `expires_at`,
+> `invited_by_member_id`, and the status/role checks). Deviations from the bullets
+> below, all deliberate:
+>
+> - **Owner provisioning is bound to the confirmation-email send, not the status
+>   UPDATE.** `CommerceService.issueOwnerAccessToken(orderId, email)` (idempotent
+>   ensure-or-rotate, persists only the hash) is called from
+>   `sendOrderConfirmationEmail` — the one guarded, once-per-order action both the
+>   webhook and the reconciler cron funnel through. That is the only place the raw
+>   token can reach the email in *either* send path. The confirmation email's
+>   "Manage reservation" CTA now points at `/order/[ref]?token=` (folded in, per
+>   the A3 decision) via the shared `apps/web/lib/email/order-url.ts` helper.
+> - **The member cap moved from invitation to acceptance.** Invites are unbounded
+>   but short-lived (`INVITE_TOKEN_TTL_MS` = 24h); `redeemMemberToken` gates the
+>   `invited -> active` flip on `canAcceptMember(activeCount, capacity)` where
+>   `capacity = Σ(guests − infants)` over the order's accommodation items and the
+>   owner counts as an active slot. The check runs under a `SELECT … FOR UPDATE`
+>   on the order row so concurrent redemptions of the last slot serialize. New
+>   error code `order_full` (409).
+> - **"audit_log" is `trackEvent`** (Postgres analytics; no such table exists):
+>   `order_member_invited`, `order_member_revoked`, `order_member_invite_resent`.
+>   Raw tokens are never logged.
+> - Routes: `POST /api/orders/[reference]/members` (invite),
+>   `DELETE …/members/[id]` (revoke), `POST …/members/[id]/resend` (rotate+resend),
+>   all `mutation`-bucket rate-limited and authorized through `resolveOrderAccess`
+>   + the `ORDER_PERMISSIONS` matrix (`#assertOrderPermission`). Invite/resend send
+>   `order-invite` emails (new `buildOrderInviteEmail` builder in `@workspace/auth`,
+>   plain fallback, template-ready). Pure helpers unit-tested in
+>   `order-access.test.ts`; core/auth/web typecheck + `bun test` clean.
+>
+> **Left**: live-DB verification of capacity races, revoke-kills-access mid-session,
+> resend rotation, and owner auto-resolve; the F4 invites UI.
+
 - **Owner provisioning**: on the `pending -> confirmed` transition (in the saga
   success path / webhook), create the `owner` member from `order_contacts.email`
   and issue its token; add the `/order/[ref]?token=` link to the existing

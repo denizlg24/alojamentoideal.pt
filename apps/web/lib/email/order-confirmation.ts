@@ -5,11 +5,12 @@ import {
 } from "@workspace/auth";
 import type { OrderConfirmationFacts } from "@workspace/core/commerce";
 import type { OrderBillingAddressSnapshot } from "@workspace/db";
+import { commerceService } from "@/lib/api/commerce";
 import { countryName } from "@/lib/site/countries";
+import { orderHubUrl } from "./order-url";
 
 const FALLBACK_IMAGE_URL =
 	"https://alojamentoideal.pt/alojamento-ideal-logo.png";
-const SITE_URL_FALLBACK = "https://alojamentoideal.pt";
 
 /**
  * Formats a minor-unit amount for display in the confirmation email. The ISO
@@ -23,26 +24,6 @@ function formatAmount(amountMinor: number, currency: string): string {
 	});
 	const fractionDigits = formatter.resolvedOptions().maximumFractionDigits ?? 2;
 	return formatter.format(amountMinor / 10 ** fractionDigits);
-}
-
-function siteBaseUrl(): string {
-	const configured =
-		process.env.BETTER_AUTH_URL ?? process.env.NEXT_PUBLIC_AUTH_URL;
-	if (!configured) {
-		return SITE_URL_FALLBACK;
-	}
-
-	try {
-		return new URL(configured).origin;
-	} catch {
-		return SITE_URL_FALLBACK;
-	}
-}
-
-function manageUrl(publicReference: string): string {
-	const url = new URL("/booking/complete", siteBaseUrl());
-	url.searchParams.set("order", publicReference);
-	return url.toString();
 }
 
 function formatDate(value: string): string {
@@ -93,6 +74,7 @@ function formatBillingAddress(address: OrderBillingAddressSnapshot): string {
 
 export function buildOrderConfirmationEmail(
 	facts: OrderConfirmationFacts,
+	manageUrl: string,
 ): EmailMessage {
 	const amount = formatAmount(facts.amountPaidMinor, facts.currency);
 
@@ -106,7 +88,7 @@ export function buildOrderConfirmationEmail(
 		contactPhone: facts.contactPhone || "Not provided",
 		email: facts.email,
 		guests: formatGuests(facts.guests),
-		manageUrl: manageUrl(facts.publicReference),
+		manageUrl,
 		orderNumber: facts.publicReference,
 		paymentMethod: "Online payment",
 		totalPrice: amount,
@@ -115,14 +97,23 @@ export function buildOrderConfirmationEmail(
 
 /**
  * Sends the single order-confirmation email for a freshly confirmed order.
- * Callers must only invoke this on the first draft -> confirmed transition so a
- * re-delivered webhook never produces a duplicate email.
+ * Callers must only invoke this on the first pending -> confirmed transition so a
+ * re-delivered webhook never produces a duplicate email. Provisioning the booker
+ * as the order's `owner` member is bound here, the one guarded once-per-order
+ * action both the webhook and the reconciler cron funnel through: it mints the
+ * raw access token (persisted only as a hash) that the "Manage reservation" CTA
+ * carries into the durable order hub.
  */
 export async function sendOrderConfirmationEmail(
 	facts: OrderConfirmationFacts,
 ): Promise<void> {
+	const { token } = await commerceService().issueOwnerAccessToken(
+		facts.orderId,
+		facts.email,
+	);
+	const manageUrl = orderHubUrl(facts.publicReference, token);
 	await getEmailSender().send({
 		to: facts.email,
-		...buildOrderConfirmationEmail(facts),
+		...buildOrderConfirmationEmail(facts, manageUrl),
 	});
 }
