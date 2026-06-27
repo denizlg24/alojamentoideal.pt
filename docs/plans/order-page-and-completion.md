@@ -129,6 +129,60 @@ pay -> /booking/complete?ref=AI-...        (transient, polls status; existing)
 
 ### B0 — Order access spine + detail read model  *(blocks B1, B2, B3, F1)*
 
+> **Status: backend done; live-DB verification + frontend (F1) remain.** The full
+> access spine (schema, tokens, resolve/redeem, the detail aggregate, and both
+> routes) is landed and typechecks; only integration-level verification against a
+> live DB and the F1 UI are outstanding.
+>
+> **Done**
+> - `order_members` table + migration `0020_married_prism.sql` (partial-unique
+>   owner index, unique `access_token_hash`, role/status checks, self-FK for
+>   `invited_by_member_id`). Exported from `@workspace/db`
+>   (`orderMember`, `OrderMember`, `OrderMemberRole`, `OrderMemberStatus`).
+> - `packages/core/src/commerce/order-access.ts`: `OrderRole`, the
+>   `ORDER_PERMISSIONS` matrix + `orderRoleCan()`, token primitives
+>   (`generateMemberToken` 256-bit base64url, `hashMemberToken` sha-256,
+>   `isMemberTokenExpired`), and the `OrderAccessContext` / `ResolvedOrder` /
+>   `ResolvedOrderAccess` types.
+> - `CommerceService.resolveOrderAccess(reference, ctx)` (token path → owner
+>   cart/user grant → `order_not_found`), `issueMemberToken(orderId, role,
+>   email, opts)` (owner created `active`; accepts a caller `tx` for B1 owner
+>   provisioning), and `redeemMemberToken(reference, rawToken, opts)`
+>   (idempotent `invited → active`, binds `user_id`, stamps `last_seen_at`).
+> - Web wiring in `apps/web/lib/api/commerce.ts`: `readMemberToken`,
+>   `resolveOrderAccessContext`, `memberCookie` (httpOnly `ai_order_member`,
+>   holds the raw token, re-hashed per request).
+> - `POST /api/orders/[reference]/access` redeems `?token=`/body token, sets the
+>   scoped cookie, returns `{ reference, role }`; invalid/revoked/expired → 404.
+> - `packages/core/src/commerce/order-detail.ts`: the `OrderDetail` read-model
+>   types (items + `accommodation_item_details` + provider-booking status +
+>   per-item charges + order pricing + contact + members + guest progress) and
+>   the pure `summarizeGuestProgress` rollup (counts only, no PII).
+> - `CommerceService.readOrderDetail(access)` builds the aggregate from a
+>   `ResolvedOrderAccess` and role-filters sensitive sections: an `owner` sees
+>   pricing, the tax/billing contact, the member roster, and per-item
+>   money/charges; a `member` sees only the non-sensitive booking shape. (Note:
+>   filtering is by `role` directly here; the `orderRoleCan` matrix is the reuse
+>   point for the per-mutation routes in B1/B2/B3.)
+> - `GET /api/orders/[reference]` → `resolveOrderAccess` + `readOrderDetail`,
+>   authorized via `resolveOrderAccessContext`; unknown/unauthorized → 404.
+> - Unit tests for the permission matrix, token helpers, and guest-progress
+>   rollup (`order-access.test.ts`, `order-detail.test.ts`); db/core/web
+>   typecheck clean.
+>
+> **Left**
+> - Integration-level verification of the access matrix against a live DB (the
+>   resolve/redeem/detail paths are exercised only by typecheck + pure unit tests
+>   so far): token redeem idempotency, revoked/expired → 404, owner auto-resolve,
+>   member field hiding.
+> - Conversation refs in `readOrderDetail` are deferred to B2 (the
+>   `conversations` table does not exist yet); the provisioning sub-state is B4.
+> - **Known limitation**: a single `ai_order_member` cookie binds one member at a
+>   time; visiting a second order overwrites it. `resolveOrderAccess` filters the
+>   token by `order_id`, so a mismatched cookie is ignored (falls through to the
+>   owner grant), but a member of two orders re-redeems on switch. Revisit if
+>   multi-order membership becomes common.
+
 Schema (`packages/db/src/schema.ts` + next migration after `0019`):
 
 - New `order_members`: `id`, `order_id` (FK), `role` (`owner|member` check),
@@ -308,8 +362,9 @@ set per retention policy.
 
 ## Cross-cutting
 
-- **Migrations** (sequential after `0019`): `order_members`; `conversations` +
-  `messages`. Do **not** create `guest_submission_jobs` yet (A1 — unused table).
+- **Migrations** (sequential after `0019`): `order_members` (**done** —
+  `0020_married_prism.sql`); `conversations` + `messages` (B2). Do **not** create
+  `guest_submission_jobs` yet (A1 — unused table).
 - **Security/privacy**: access tokens are high-entropy and stored hashed; the
   `publicReference` is never sufficient for access on its own. Token expiry +
   rotation on resend. Guest PII stays encrypted and is never logged. Realtime

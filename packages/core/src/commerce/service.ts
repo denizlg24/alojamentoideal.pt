@@ -15,6 +15,7 @@ import {
 	orderContact as orderContactTable,
 	orderItemCharge as orderItemChargeTable,
 	orderItem as orderItemTable,
+	orderMember as orderMemberTable,
 	order as orderTable,
 	providerBooking as providerBookingTable,
 } from "@workspace/db";
@@ -25,6 +26,23 @@ import { trackEvent } from "../observability";
 import { CommerceError, invalidRequest } from "./errors";
 import { hashIdempotencyRequest, idempotencyExpiresAt } from "./idempotency";
 import { housingFeeMinor, normalizeAccommodationQuoteSnapshot } from "./money";
+import {
+	generateMemberToken,
+	hashMemberToken,
+	isMemberTokenExpired,
+	type OrderAccessContext,
+	type OrderRole,
+	type ResolvedOrder,
+	type ResolvedOrderAccess,
+} from "./order-access";
+import {
+	type OrderContactSummary,
+	type OrderDetail,
+	type OrderDetailCharge,
+	type OrderDetailItem,
+	type OrderDetailMember,
+	summarizeGuestProgress,
+} from "./order-detail";
 import {
 	allocateDiscountByHousingBase,
 	buildDiscountChargeRow,
@@ -183,6 +201,23 @@ interface CreateCartInput {
 interface ActiveItemInput {
 	itemId: string;
 	quoteInput: CommerceQuoteInput;
+}
+
+interface IssueMemberTokenOptions {
+	expiresAt?: Date | null;
+	invitedByMemberId?: string | null;
+	/** Run the insert inside a caller transaction (e.g. owner provisioning). */
+	tx?: Transaction;
+}
+
+interface IssueMemberTokenResult {
+	memberId: string;
+	token: string;
+}
+
+interface RedeemMemberTokenOptions {
+	/** Bind the redeeming visitor's account to the member when signed in. */
+	userId?: string | null;
 }
 
 interface RevalidatedSnapshot {
@@ -791,6 +826,417 @@ export class CommerceService {
 			stripePaymentIntentId: row.stripePaymentIntentId,
 			totalMinor: row.totalMinor,
 		};
+	}
+
+	/**
+	 * Resolves who is acting on an order and what they may do — the spine every
+	 * `/order/[reference]` route authorizes through. A member is authorized by the
+	 * hashed booking-access token from their redeemed cookie (or a raw `?token=`),
+	 * while the original cart-cookie / signed-in-user grants still resolve the
+	 * `owner` without a token. A revoked, expired, or unknown token falls through
+	 * to the owner grant; if neither path authorizes, the order reports as not
+	 * found so its existence stays unenumerable.
+	 */
+	async resolveOrderAccess(
+		reference: string,
+		ctx: OrderAccessContext,
+	): Promise<ResolvedOrderAccess> {
+		const order = await this.#readResolvedOrder(this.#db, reference);
+		if (!order) {
+			throw new CommerceError("order_not_found", "Order not found.", 404);
+		}
+
+		if (ctx.memberToken) {
+			const [member] = await this.#db
+				.select()
+				.from(orderMemberTable)
+				.where(
+					and(
+						eq(orderMemberTable.orderId, order.id),
+						eq(
+							orderMemberTable.accessTokenHash,
+							hashMemberToken(ctx.memberToken),
+						),
+					),
+				)
+				.limit(1);
+			if (
+				member &&
+				member.status === "active" &&
+				!isMemberTokenExpired(member, new Date())
+			) {
+				return { member, order, role: member.role };
+			}
+		}
+
+		if (
+			isOrderAccessGranted(
+				{ cartToken: order.cartToken, userId: order.userId },
+				{ cartToken: ctx.cartToken, userId: ctx.userId },
+			)
+		) {
+			const [owner] = await this.#db
+				.select()
+				.from(orderMemberTable)
+				.where(
+					and(
+						eq(orderMemberTable.orderId, order.id),
+						eq(orderMemberTable.role, "owner"),
+					),
+				)
+				.limit(1);
+			return { member: owner ?? null, order, role: "owner" };
+		}
+
+		throw new CommerceError("order_not_found", "Order not found.", 404);
+	}
+
+	/**
+	 * Mints a booking-access token for a member, persisting only its sha-256 hash.
+	 * The raw token is returned exactly once (delivered by email). An `owner` is
+	 * created already `active`; an invited `member` starts `invited` until it is
+	 * redeemed. Accepts a caller transaction so owner provisioning can ride the
+	 * saga's confirm transaction (B1).
+	 */
+	async issueMemberToken(
+		orderId: string,
+		role: OrderRole,
+		email: string,
+		options: IssueMemberTokenOptions = {},
+	): Promise<IssueMemberTokenResult> {
+		const token = generateMemberToken();
+		const now = new Date();
+		const memberId = crypto.randomUUID();
+		await (options.tx ?? this.#db).insert(orderMemberTable).values({
+			acceptedAt: role === "owner" ? now : null,
+			accessTokenHash: hashMemberToken(token),
+			createdAt: now,
+			email: email.toLowerCase(),
+			expiresAt: options.expiresAt ?? null,
+			id: memberId,
+			invitedByMemberId: options.invitedByMemberId ?? null,
+			orderId,
+			role,
+			status: role === "owner" ? "active" : "invited",
+		});
+		return { memberId, token };
+	}
+
+	/**
+	 * Redeems a raw booking-access token against an order: validates its hash,
+	 * flips `invited -> active`, binds `user_id` when the visitor is signed in, and
+	 * stamps `last_seen_at`. Idempotent — re-redeeming an already-active token
+	 * returns the same member. Revoked/expired/unknown tokens report not found.
+	 */
+	async redeemMemberToken(
+		reference: string,
+		rawToken: string,
+		options: RedeemMemberTokenOptions = {},
+	): Promise<ResolvedOrderAccess> {
+		return this.#db.transaction(async (tx) => {
+			const order = await this.#readResolvedOrder(tx, reference);
+			if (!order) {
+				throw new CommerceError("order_not_found", "Order not found.", 404);
+			}
+
+			const [member] = await tx
+				.select()
+				.from(orderMemberTable)
+				.where(
+					and(
+						eq(orderMemberTable.orderId, order.id),
+						eq(orderMemberTable.accessTokenHash, hashMemberToken(rawToken)),
+					),
+				)
+				.limit(1)
+				.for("update");
+
+			const now = new Date();
+			if (
+				!member ||
+				member.status === "revoked" ||
+				isMemberTokenExpired(member, now)
+			) {
+				throw new CommerceError("order_not_found", "Order not found.", 404);
+			}
+
+			const [updated] = await tx
+				.update(orderMemberTable)
+				.set({
+					acceptedAt: member.acceptedAt ?? now,
+					lastSeenAt: now,
+					status: "active",
+					userId:
+						options.userId && !member.userId ? options.userId : member.userId,
+				})
+				.where(eq(orderMemberTable.id, member.id))
+				.returning();
+
+			return { member: updated ?? member, order, role: member.role };
+		});
+	}
+
+	/**
+	 * Aggregates the durable order-hub read model from a resolved access context.
+	 * Role drives visibility: the `owner` sees pricing, the tax/billing contact,
+	 * the member roster, and per-item money/charges; a `member` sees only the
+	 * non-sensitive booking shape (dates, property, statuses, guest-progress
+	 * counts). Authorization is the caller's responsibility — pass the result of
+	 * {@link resolveOrderAccess}; this never re-checks the token.
+	 */
+	async readOrderDetail(access: ResolvedOrderAccess): Promise<OrderDetail> {
+		const isOwner = access.role === "owner";
+		const orderId = access.order.id;
+
+		const [orderRow] = await this.#db
+			.select({
+				amountPaidMinor: orderTable.amountPaidMinor,
+				amountRefundedMinor: orderTable.amountRefundedMinor,
+				createdAt: orderTable.createdAt,
+				currency: orderTable.currency,
+				discountMinor: orderTable.discountMinor,
+				publicReference: orderTable.publicReference,
+				status: orderTable.status,
+				subtotalMinor: orderTable.subtotalMinor,
+				taxMinor: orderTable.taxMinor,
+				totalMinor: orderTable.totalMinor,
+			})
+			.from(orderTable)
+			.where(eq(orderTable.id, orderId))
+			.limit(1);
+
+		if (!orderRow) {
+			throw new CommerceError("order_not_found", "Order not found.", 404);
+		}
+
+		const itemRows = await this.#db
+			.select({
+				adults: accommodationItemDetailTable.adults,
+				bookingId: providerBookingTable.id,
+				bookingNeedsRecovery: providerBookingTable.needsRecovery,
+				bookingStatus: providerBookingTable.normalizedStatus,
+				checkIn: accommodationItemDetailTable.checkIn,
+				checkOut: accommodationItemDetailTable.checkOut,
+				children: accommodationItemDetailTable.children,
+				currency: orderItemTable.currency,
+				discountMinor: orderItemTable.discountMinor,
+				guests: accommodationItemDetailTable.guests,
+				id: orderItemTable.id,
+				imageUrl: orderItemTable.imageUrlSnapshot,
+				infants: accommodationItemDetailTable.infants,
+				nights: accommodationItemDetailTable.nights,
+				pets: accommodationItemDetailTable.pets,
+				propertyTimezone: accommodationItemDetailTable.propertyTimezone,
+				subtotalMinor: orderItemTable.subtotalMinor,
+				taxMinor: orderItemTable.taxMinor,
+				title: orderItemTable.titleSnapshot,
+				totalMinor: orderItemTable.totalMinor,
+				type: orderItemTable.type,
+			})
+			.from(orderItemTable)
+			.leftJoin(
+				accommodationItemDetailTable,
+				eq(accommodationItemDetailTable.orderItemId, orderItemTable.id),
+			)
+			.leftJoin(
+				providerBookingTable,
+				eq(providerBookingTable.orderItemId, orderItemTable.id),
+			)
+			.where(eq(orderItemTable.orderId, orderId))
+			.orderBy(asc(orderItemTable.position));
+
+		const bookingIds = itemRows
+			.map((row) => row.bookingId)
+			.filter((id): id is string => id !== null);
+
+		const guestRows = bookingIds.length
+			? await this.#db
+					.select({
+						identityStatus: bookingGuestTable.identityStatus,
+						providerBookingId: bookingGuestTable.providerBookingId,
+					})
+					.from(bookingGuestTable)
+					.where(inArray(bookingGuestTable.providerBookingId, bookingIds))
+			: [];
+
+		const statusesByBooking = new Map<
+			string,
+			(typeof guestRows)[number]["identityStatus"][]
+		>();
+		for (const guest of guestRows) {
+			const bucket = statusesByBooking.get(guest.providerBookingId) ?? [];
+			bucket.push(guest.identityStatus);
+			statusesByBooking.set(guest.providerBookingId, bucket);
+		}
+
+		const chargesByItem = new Map<string, OrderDetailCharge[]>();
+		if (isOwner && itemRows.length > 0) {
+			const chargeRows = await this.#db
+				.select({
+					grossMinor: orderItemChargeTable.grossMinor,
+					kind: orderItemChargeTable.kind,
+					name: orderItemChargeTable.name,
+					orderItemId: orderItemChargeTable.orderItemId,
+					position: orderItemChargeTable.position,
+					quantity: orderItemChargeTable.quantity,
+					taxMinor: orderItemChargeTable.taxMinor,
+				})
+				.from(orderItemChargeTable)
+				.where(
+					inArray(
+						orderItemChargeTable.orderItemId,
+						itemRows.map((row) => row.id),
+					),
+				)
+				.orderBy(asc(orderItemChargeTable.position));
+			for (const charge of chargeRows) {
+				const bucket = chargesByItem.get(charge.orderItemId) ?? [];
+				bucket.push({
+					grossMinor: charge.grossMinor,
+					kind: charge.kind,
+					name: charge.name,
+					position: charge.position,
+					quantity: charge.quantity,
+					taxMinor: charge.taxMinor,
+				});
+				chargesByItem.set(charge.orderItemId, bucket);
+			}
+		}
+
+		const items: OrderDetailItem[] = itemRows.map((row) => ({
+			adults: row.adults,
+			charges: isOwner ? (chargesByItem.get(row.id) ?? []) : null,
+			checkIn: row.checkIn,
+			checkOut: row.checkOut,
+			children: row.children,
+			guestProgress: summarizeGuestProgress(
+				row.bookingId ? (statusesByBooking.get(row.bookingId) ?? []) : [],
+			),
+			guests: row.guests,
+			id: row.id,
+			imageUrl: row.imageUrl,
+			infants: row.infants,
+			nights: row.nights,
+			pets: row.pets,
+			pricing: isOwner
+				? {
+						currency: row.currency,
+						discountMinor: row.discountMinor,
+						subtotalMinor: row.subtotalMinor,
+						taxMinor: row.taxMinor,
+						totalMinor: row.totalMinor,
+					}
+				: null,
+			propertyTimezone: row.propertyTimezone,
+			providerBooking:
+				row.bookingId && row.bookingStatus
+					? {
+							needsRecovery: row.bookingNeedsRecovery ?? false,
+							status: row.bookingStatus,
+						}
+					: null,
+			title: row.title,
+			type: row.type,
+		}));
+
+		const orderGuestProgress = summarizeGuestProgress(
+			guestRows.map((guest) => guest.identityStatus),
+		);
+
+		let contact: OrderContactSummary | null = null;
+		let members: OrderDetailMember[] | null = null;
+		if (isOwner) {
+			const [contactRow] = await this.#db
+				.select({
+					billingAddress: orderContactTable.billingAddress,
+					companyName: orderContactTable.companyName,
+					email: orderContactTable.email,
+					isCompany: orderContactTable.isCompany,
+					name: orderContactTable.name,
+					notes: orderContactTable.notes,
+					phoneE164: orderContactTable.phoneE164,
+					taxNumber: orderContactTable.taxNumber,
+				})
+				.from(orderContactTable)
+				.where(eq(orderContactTable.orderId, orderId))
+				.limit(1);
+			contact = contactRow
+				? {
+						billingAddress: contactRow.billingAddress,
+						companyName: contactRow.companyName,
+						email: contactRow.email,
+						isCompany: contactRow.isCompany,
+						name: contactRow.name,
+						notes: contactRow.notes,
+						phoneE164: contactRow.phoneE164,
+						taxNumber: contactRow.taxNumber,
+					}
+				: null;
+
+			const memberRows = await this.#db
+				.select({
+					acceptedAt: orderMemberTable.acceptedAt,
+					createdAt: orderMemberTable.createdAt,
+					email: orderMemberTable.email,
+					id: orderMemberTable.id,
+					role: orderMemberTable.role,
+					status: orderMemberTable.status,
+				})
+				.from(orderMemberTable)
+				.where(eq(orderMemberTable.orderId, orderId))
+				.orderBy(asc(orderMemberTable.createdAt));
+			members = memberRows.map((member) => ({
+				acceptedAt: member.acceptedAt ? member.acceptedAt.toISOString() : null,
+				email: member.email,
+				id: member.id,
+				invitedAt: member.createdAt.toISOString(),
+				isYou: access.member?.id === member.id,
+				role: member.role,
+				status: member.status,
+			}));
+		}
+
+		return {
+			bookingStatus: toOrderBookingStatus(orderRow.status),
+			contact,
+			createdAt: orderRow.createdAt.toISOString(),
+			currency: orderRow.currency,
+			guestProgress: orderGuestProgress,
+			items,
+			members,
+			pricing: isOwner
+				? {
+						amountPaidMinor: orderRow.amountPaidMinor,
+						amountRefundedMinor: orderRow.amountRefundedMinor,
+						currency: orderRow.currency,
+						discountMinor: orderRow.discountMinor,
+						subtotalMinor: orderRow.subtotalMinor,
+						taxMinor: orderRow.taxMinor,
+						totalMinor: orderRow.totalMinor,
+					}
+				: null,
+			reference: orderRow.publicReference,
+			role: access.role,
+		};
+	}
+
+	async #readResolvedOrder(
+		db: DbExecutor,
+		reference: string,
+	): Promise<ResolvedOrder | null> {
+		const [row] = await db
+			.select({
+				cartToken: cartTable.cartToken,
+				id: orderTable.id,
+				publicReference: orderTable.publicReference,
+				status: orderTable.status,
+				userId: orderTable.userId,
+			})
+			.from(orderTable)
+			.leftJoin(cartTable, eq(cartTable.id, orderTable.cartId))
+			.where(eq(orderTable.publicReference, reference))
+			.limit(1);
+		return row ?? null;
 	}
 
 	/**

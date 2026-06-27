@@ -972,6 +972,66 @@ export const orderContact = pgTable(
 	],
 );
 
+export type OrderMemberRole = "owner" | "member";
+export type OrderMemberStatus = "invited" | "active" | "revoked";
+
+/**
+ * People who can reach an order's hub (`/order/[reference]`). The `owner` is the
+ * booker (full access); `member` rows are invited guests. Access is proven by a
+ * high-entropy token whose sha-256 hash is stored here — the low-entropy
+ * `public_reference` is never sufficient on its own. The partial unique index
+ * caps an order at one owner.
+ */
+export const orderMember = pgTable(
+	"order_members",
+	{
+		id: text("id").primaryKey(),
+		orderId: text("order_id")
+			.notNull()
+			.references(() => order.id, { onDelete: "cascade" }),
+		role: text("role").$type<OrderMemberRole>().notNull(),
+		email: text("email").notNull(),
+		userId: text("user_id").references(() => user.id, {
+			onDelete: "set null",
+		}),
+		accessTokenHash: text("access_token_hash").notNull(),
+		status: text("status")
+			.$type<OrderMemberStatus>()
+			.notNull()
+			.default("invited"),
+		invitedByMemberId: text("invited_by_member_id").references(
+			(): AnyPgColumn => orderMember.id,
+			{ onDelete: "set null" },
+		),
+		expiresAt: timestampWithTimezone("expires_at"),
+		createdAt: timestampWithTimezone("created_at").notNull().defaultNow(),
+		acceptedAt: timestampWithTimezone("accepted_at"),
+		lastSeenAt: timestampWithTimezone("last_seen_at"),
+	},
+	(table) => [
+		uniqueIndex("order_members_access_token_hash_uidx").on(
+			table.accessTokenHash,
+		),
+		index("order_members_order_id_idx").on(table.orderId),
+		index("order_members_user_id_idx")
+			.on(table.userId)
+			.where(sql`${table.userId} is not null`),
+		uniqueIndex("order_members_owner_uidx")
+			.on(table.orderId)
+			.where(sql`${table.role} = 'owner'`),
+		check(
+			"order_members_role_check",
+			sql`${table.role} in ('owner', 'member')`,
+		),
+		check(
+			"order_members_status_check",
+			sql`${table.status} in ('invited', 'active', 'revoked')`,
+		),
+	],
+);
+
+export type OrderMember = typeof orderMember.$inferSelect;
+
 export const orderItem = pgTable(
 	"order_items",
 	{

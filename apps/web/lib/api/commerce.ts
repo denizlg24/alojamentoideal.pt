@@ -12,6 +12,7 @@ import {
 	CommerceService,
 	HostifyReservationGateway,
 	mapStripePaymentStatus,
+	type OrderAccessContext,
 	type ProviderReservationGateway,
 	StubReservationGateway,
 } from "@workspace/core/commerce";
@@ -32,6 +33,14 @@ import { quoteFailure } from "./hostify-errors";
 
 // Matches CART_TTL_MS in the commerce service (~14 days).
 const CART_COOKIE_MAX_AGE_SECONDS = 14 * 24 * 60 * 60;
+
+/**
+ * Cookie binding a browser to a redeemed `order_members` row. Holds the raw
+ * booking-access token (re-hashed per request by `resolveOrderAccess`), so it is
+ * httpOnly and never exposed to client JS.
+ */
+const ORDER_MEMBER_COOKIE_NAME = "ai_order_member";
+const ORDER_MEMBER_COOKIE_MAX_AGE_SECONDS = 30 * 24 * 60 * 60;
 
 /**
  * Dev/prod safety switch. Real Hostify reservations are created only when this is
@@ -67,8 +76,8 @@ export async function readJson(request: Request): Promise<unknown> {
 	}
 }
 
-/** Reads the secret cart token from the `ai_cart` cookie, if present. */
-export function readCartToken(request: Request): string | null {
+/** Reads a single cookie value from the request `Cookie` header, if present. */
+function readCookie(request: Request, cookieName: string): string | null {
 	const header = request.headers.get("cookie");
 	if (!header) {
 		return null;
@@ -80,7 +89,7 @@ export function readCartToken(request: Request): string | null {
 			continue;
 		}
 		const name = part.slice(0, separator).trim();
-		if (name === CART_COOKIE_NAME) {
+		if (name === cookieName) {
 			try {
 				return decodeURIComponent(part.slice(separator + 1).trim());
 			} catch {
@@ -91,6 +100,16 @@ export function readCartToken(request: Request): string | null {
 	}
 
 	return null;
+}
+
+/** Reads the secret cart token from the `ai_cart` cookie, if present. */
+export function readCartToken(request: Request): string | null {
+	return readCookie(request, CART_COOKIE_NAME);
+}
+
+/** Reads the redeemed booking-access token from the member cookie, if present. */
+export function readMemberToken(request: Request): string | null {
+	return readCookie(request, ORDER_MEMBER_COOKIE_NAME);
 }
 
 /**
@@ -108,6 +127,37 @@ export function cartCookie(token: string): string {
 		`${CART_COOKIE_NAME}=${encodeURIComponent(token)}`,
 		"Path=/",
 		`Max-Age=${CART_COOKIE_MAX_AGE_SECONDS}`,
+		"HttpOnly",
+		"SameSite=Lax",
+	];
+	if (process.env.NODE_ENV === "production") {
+		attributes.push("Secure");
+	}
+	return attributes.join("; ");
+}
+
+/**
+ * Builds the order-access context: the cart/user grants that resolve the owner
+ * plus the redeemed member token. The service (`resolveOrderAccess`) decides
+ * which, if any, authorizes the order and at what role.
+ */
+export async function resolveOrderAccessContext(
+	request: Request,
+): Promise<OrderAccessContext> {
+	const user = await getServerUser(request);
+	return {
+		cartToken: readCartToken(request),
+		memberToken: readMemberToken(request),
+		userId: user?.id ?? null,
+	};
+}
+
+/** Serializes the `Set-Cookie` value binding the browser to a member. */
+export function memberCookie(token: string): string {
+	const attributes = [
+		`${ORDER_MEMBER_COOKIE_NAME}=${encodeURIComponent(token)}`,
+		"Path=/",
+		`Max-Age=${ORDER_MEMBER_COOKIE_MAX_AGE_SECONDS}`,
 		"HttpOnly",
 		"SameSite=Lax",
 	];
