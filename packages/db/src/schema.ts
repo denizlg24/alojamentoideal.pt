@@ -1016,6 +1016,13 @@ export const orderMember = pgTable(
 		index("order_members_user_id_idx")
 			.on(table.userId)
 			.where(sql`${table.userId} is not null`),
+		// At most one live membership per account per order: a signed-in user cannot
+		// redeem two invites for the same booking (which would split access
+		// resolution and double-count them against capacity). Revoked rows keep their
+		// user_id for audit, so they are excluded from the uniqueness rule.
+		uniqueIndex("order_members_order_user_uidx")
+			.on(table.orderId, table.userId)
+			.where(sql`${table.userId} is not null and ${table.status} <> 'revoked'`),
 		uniqueIndex("order_members_owner_uidx")
 			.on(table.orderId)
 			.where(sql`${table.role} = 'owner'`),

@@ -44,14 +44,19 @@ export const POST = withApiRoute<OrderMembersRouteContext>(
 		try {
 			const service = commerceService();
 			const access = await service.resolveOrderAccess(reference, accessContext);
-			const invite = await service.inviteMember(access, { email });
 			const detail = await service.readOrderDetail(access);
-			await sendOrderInviteEmail({
-				accommodationTitle: detail.items[0]?.title ?? "your stay",
-				publicReference: access.order.publicReference,
-				to: invite.email,
-				token: invite.token,
-			});
+			const accommodationTitle = detail.items[0]?.title ?? "your stay";
+			const invite = await service.inviteMember(
+				access,
+				{ email },
+				({ email: to, token }) =>
+					sendOrderInviteEmail({
+						accommodationTitle,
+						publicReference: access.order.publicReference,
+						to,
+						token,
+					}),
+			);
 			return Response.json(
 				{
 					member: {

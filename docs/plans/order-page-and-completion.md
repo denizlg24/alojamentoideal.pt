@@ -247,9 +247,21 @@ auto-resolves from cart/user without a token; sensitive fields hidden from
 >   `order-invite` emails (new `buildOrderInviteEmail` builder in `@workspace/auth`,
 >   plain fallback, template-ready). Pure helpers unit-tested in
 >   `order-access.test.ts`; core/auth/web typecheck + `bun test` clean.
+> - **Review hardening (CodeRabbit pass):** owner provisioning locks the order
+>   row and 404s a missing order (no first-insert race); redemption rejects a
+>   duplicate active member by email *or* account under the lock, backed by a new
+>   partial-unique `(order_id, user_id)` index (migration `0021_wandering_the_call`,
+>   excluding revoked rows); resend re-arms from scratch (clears
+>   `accepted_at`/`last_seen_at`/`user_id`); `order-url` fails closed when the
+>   public origin is unset/invalid; invite + resend **deliver the email before
+>   persisting** (a send failure leaves no dangling/rotated token — clean retry),
+>   and invite reuses a still-pending row per recipient instead of piling up. A
+>   durable invite-email **outbox is deliberately out of B1 scope** (the send-first
+>   ordering is the proportionate guarantee until B2's delivery-status pattern).
 >
-> **Left**: live-DB verification of capacity races, revoke-kills-access mid-session,
-> resend rotation, and owner auto-resolve; the F4 invites UI.
+> **Left**: live-DB verification of capacity races, the new unique index, revoke-
+> kills-access mid-session, resend rotation, and owner auto-resolve; the F4 invites
+> UI.
 
 - **Owner provisioning**: on the `pending -> confirmed` transition (in the saga
   success path / webhook), create the `owner` member from `order_contacts.email`
@@ -397,8 +409,9 @@ set per retention policy.
 ## Cross-cutting
 
 - **Migrations** (sequential after `0019`): `order_members` (**done** —
-  `0020_married_prism.sql`); `conversations` + `messages` (B2). Do **not** create
-  `guest_submission_jobs` yet (A1 — unused table).
+  `0020_married_prism.sql`); `order_members` partial-unique `(order_id, user_id)`
+  (**done** — `0021_wandering_the_call.sql`, B1 review hardening); `conversations` +
+  `messages` (B2). Do **not** create `guest_submission_jobs` yet (A1 — unused table).
 - **Security/privacy**: access tokens are high-entropy and stored hashed; the
   `publicReference` is never sufficient for access on its own. Token expiry +
   rotation on resend. Guest PII stays encrypted and is never logged. Realtime

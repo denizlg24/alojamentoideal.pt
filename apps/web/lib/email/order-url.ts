@@ -1,17 +1,22 @@
-const SITE_URL_FALLBACK = "https://alojamentoideal.pt";
-
-/** Resolves the public site origin from auth config, falling back to production. */
-export function siteBaseUrl(): string {
+/**
+ * Resolves the public site origin for order emails. Bearer magic-links must point
+ * at the environment that issued them, so this fails closed: a missing or
+ * malformed origin throws (surfacing the misconfig) rather than silently emailing
+ * a production link from a preview/staging deploy.
+ */
+function siteBaseUrl(): string {
 	const configured =
 		process.env.BETTER_AUTH_URL ?? process.env.NEXT_PUBLIC_AUTH_URL;
 	if (!configured) {
-		return SITE_URL_FALLBACK;
+		throw new Error(
+			"Public site URL is not configured (set BETTER_AUTH_URL); refusing to email a fallback magic-link.",
+		);
 	}
 
 	try {
 		return new URL(configured).origin;
 	} catch {
-		return SITE_URL_FALLBACK;
+		throw new Error(`Public site URL is invalid: ${configured}`);
 	}
 }
 

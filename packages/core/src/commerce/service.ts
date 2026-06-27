@@ -248,6 +248,17 @@ interface InviteMemberResult {
 	token: string;
 }
 
+/**
+ * Delivers a freshly issued invite token (the web email transport). Invoked
+ * before the token is persisted so a delivery failure leaves no dangling or
+ * prematurely rotated row — the proportionate guarantee until a durable outbox
+ * exists.
+ */
+type InviteDelivery = (delivery: {
+	email: string;
+	token: string;
+}) => Promise<void>;
+
 /** Lightweight address shape check for invite recipients (defence, not parsing). */
 const EMAIL_ADDRESS_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -1002,6 +1013,36 @@ export class CommerceService {
 					.from(orderTable)
 					.where(eq(orderTable.id, order.id))
 					.for("update");
+
+				// Pending invites are unbounded, so two tokens can reach the same
+				// person. Reject activation when another active member already
+				// represents this recipient — by email, or by the redeeming account —
+				// so one person never holds two slots or double-counts against
+				// capacity. The order-row lock above serializes these checks.
+				const duplicateMatchers = [eq(orderMemberTable.email, member.email)];
+				if (options.userId) {
+					duplicateMatchers.push(eq(orderMemberTable.userId, options.userId));
+				}
+				const [duplicate] = await tx
+					.select({ id: orderMemberTable.id })
+					.from(orderMemberTable)
+					.where(
+						and(
+							eq(orderMemberTable.orderId, order.id),
+							eq(orderMemberTable.status, "active"),
+							sql`${orderMemberTable.id} <> ${member.id}`,
+							or(...duplicateMatchers),
+						),
+					)
+					.limit(1);
+				if (duplicate) {
+					throw new CommerceError(
+						"order_member_exists",
+						"That guest already has access to this booking.",
+						409,
+					);
+				}
+
 				const capacity = await this.#orderCapacity(tx, order.id);
 				const [activeRow] = await tx
 					.select({ value: count() })
@@ -1051,12 +1092,19 @@ export class CommerceService {
 		email: string,
 	): Promise<IssueMemberTokenResult> {
 		return this.#db.transaction(async (tx) => {
+			// Lock the order row first so concurrent first-time provisioners serialize:
+			// the loser waits, then observes the owner the winner inserted and rotates
+			// it, rather than racing into the partial-unique owner violation.
 			const [orderRow] = await tx
 				.select({ userId: orderTable.userId })
 				.from(orderTable)
 				.where(eq(orderTable.id, orderId))
-				.limit(1);
-			const userId = orderRow?.userId ?? null;
+				.limit(1)
+				.for("update");
+			if (!orderRow) {
+				throw new CommerceError("order_not_found", "Order not found.", 404);
+			}
+			const userId = orderRow.userId ?? null;
 			const [existing] = await tx
 				.select()
 				.from(orderMemberTable)
@@ -1066,8 +1114,7 @@ export class CommerceService {
 						eq(orderMemberTable.role, "owner"),
 					),
 				)
-				.limit(1)
-				.for("update");
+				.limit(1);
 
 			const token = generateMemberToken();
 			const now = new Date();
@@ -1110,6 +1157,7 @@ export class CommerceService {
 	async inviteMember(
 		access: ResolvedOrderAccess,
 		input: { email: string },
+		deliver: InviteDelivery,
 	): Promise<InviteMemberResult> {
 		this.#assertOrderPermission(access, "invite_members");
 		const email = input.email.trim().toLowerCase();
@@ -1119,18 +1167,20 @@ export class CommerceService {
 			]);
 		}
 
-		const [existingActive] = await this.#db
-			.select({ id: orderMemberTable.id })
+		// Reuse a still-pending invite for the same recipient instead of piling up
+		// rows on a retry; reject one who already holds active access.
+		const [existing] = await this.#db
+			.select({ id: orderMemberTable.id, status: orderMemberTable.status })
 			.from(orderMemberTable)
 			.where(
 				and(
 					eq(orderMemberTable.orderId, access.order.id),
 					eq(orderMemberTable.email, email),
-					eq(orderMemberTable.status, "active"),
+					inArray(orderMemberTable.status, ["active", "invited"]),
 				),
 			)
 			.limit(1);
-		if (existingActive) {
+		if (existing?.status === "active") {
 			throw new CommerceError(
 				"order_member_exists",
 				"That guest already has access to this booking.",
@@ -1138,13 +1188,34 @@ export class CommerceService {
 			);
 		}
 
+		const token = generateMemberToken();
 		const expiresAt = memberInviteExpiresAt();
-		const { memberId, token } = await this.issueMemberToken(
-			access.order.id,
-			"member",
-			email,
-			{ expiresAt, invitedByMemberId: access.member?.id ?? null },
-		);
+		const memberId = existing?.id ?? crypto.randomUUID();
+
+		// Deliver before persisting: a mail-provider failure then leaves no dangling
+		// new invite and does not rotate a reused row's live token, so the caller
+		// gets a clean error and a safe retry. B1 ships no durable outbox; this
+		// ordering is the proportionate guarantee until one exists.
+		await deliver({ email, token });
+
+		if (existing) {
+			await this.#db
+				.update(orderMemberTable)
+				.set({ accessTokenHash: hashMemberToken(token), expiresAt })
+				.where(eq(orderMemberTable.id, existing.id));
+		} else {
+			await this.#db.insert(orderMemberTable).values({
+				accessTokenHash: hashMemberToken(token),
+				createdAt: new Date(),
+				email,
+				expiresAt,
+				id: memberId,
+				invitedByMemberId: access.member?.id ?? null,
+				orderId: access.order.id,
+				role: "member",
+				status: "invited",
+			});
+		}
 		trackEvent({
 			metadata: { memberId, orderId: access.order.id },
 			name: "order_member_invited",
@@ -1196,6 +1267,7 @@ export class CommerceService {
 	async resendMemberInvite(
 		access: ResolvedOrderAccess,
 		memberId: string,
+		deliver: InviteDelivery,
 	): Promise<InviteMemberResult> {
 		this.#assertOrderPermission(access, "manage_members");
 		const member = await this.#loadOrderMember(access.order.id, memberId);
@@ -1216,12 +1288,23 @@ export class CommerceService {
 
 		const token = generateMemberToken();
 		const expiresAt = memberInviteExpiresAt();
+
+		// Deliver first: if the mail provider fails, the member's current token is
+		// left untouched (the old link keeps working) and the caller can retry,
+		// rather than being stranded with a rotated-but-unsent link.
+		await deliver({ email: member.email, token });
+
+		// Re-arm from scratch: clear any acceptance/binding a previously revoked or
+		// expired member carried, so the next redemption records a fresh acceptance.
 		await this.#db
 			.update(orderMemberTable)
 			.set({
+				acceptedAt: null,
 				accessTokenHash: hashMemberToken(token),
 				expiresAt,
+				lastSeenAt: null,
 				status: "invited",
+				userId: null,
 			})
 			.where(eq(orderMemberTable.id, member.id));
 		trackEvent({
