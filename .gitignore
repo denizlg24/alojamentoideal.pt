@@ -49,3 +49,14 @@ next-env.d.ts
 
 # Hostify shape-dump diagnostic output
 packages/core/scripts/.hostify-dump/
+
+# Envoy - Local state
+.envoy/cache/
+.envoy/latest
+.envoy/HEAD
+.envoy/refs/
+
+# Envoy - Config
+!.envoy/config.toml
+
+
