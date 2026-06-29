@@ -10,6 +10,7 @@ import {
 	type CommerceParseResult,
 	type CommerceQuoteInput,
 	CommerceService,
+	HostifyConversationGateway,
 	HostifyReservationGateway,
 	mapStripePaymentStatus,
 	type OrderAccessContext,
@@ -30,6 +31,7 @@ import { CART_COOKIE_NAME, getDb } from "@workspace/db";
 import { getServerUser } from "@/lib/auth/session";
 import { HOSTIFY_PROVIDER } from "@/lib/catalog/constants";
 import { quoteFailure } from "./hostify-errors";
+import { createPusherRealtimePublisher } from "./realtime";
 
 // Matches CART_TTL_MS in the commerce service (~14 days).
 const CART_COOKIE_MAX_AGE_SECONDS = 14 * 24 * 60 * 60;
@@ -216,6 +218,11 @@ export function commerceService(): CommerceService {
 			provider === HOSTIFY_PROVIDER
 				? resolveHostifyGateway(hostifyClient)
 				: undefined,
+		resolveConversationGateway: (provider) =>
+			provider === HOSTIFY_PROVIDER
+				? new HostifyConversationGateway({ client: hostifyClient })
+				: undefined,
+		realtimePublisher: createPusherRealtimePublisher(),
 		// The reconciler reads live PaymentIntent state when a webhook never arrived.
 		retrievePaymentIntent: stripe
 			? async (paymentIntentId) => {

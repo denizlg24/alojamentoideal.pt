@@ -1467,11 +1467,16 @@ export class CommerceService {
 		}
 
 		const pending = this.#toMessageDto(inserted);
-		await this.#publishMessageCreatedSafe(conversationId, pending);
+		await this.#publishMessageCreatedSafe(
+			access.order.id,
+			conversationId,
+			pending,
+		);
 
 		const gateway = this.#conversationGatewayFor(conversation.provider);
 		if (!gateway) {
 			return this.#markConversationMessageFailed(
+				access.order.id,
 				conversationId,
 				pending.id,
 				"Conversation gateway is not configured.",
@@ -1484,6 +1489,7 @@ export class CommerceService {
 				body,
 			);
 			const delivered = await this.#markConversationMessageDelivered(
+				access.order.id,
 				conversationId,
 				pending.id,
 				externalMessageId,
@@ -1515,6 +1521,7 @@ export class CommerceService {
 				type: "integration",
 			});
 			return this.#markConversationMessageFailed(
+				access.order.id,
 				conversationId,
 				pending.id,
 				message,
@@ -1576,6 +1583,7 @@ export class CommerceService {
 			.returning(conversationMessageSelection);
 		if (pending) {
 			await this.#publishMessageCreatedSafe(
+				access.order.id,
 				conversationId,
 				this.#toMessageDto(pending),
 			);
@@ -1584,6 +1592,7 @@ export class CommerceService {
 		const gateway = this.#conversationGatewayFor(conversation.provider);
 		if (!gateway) {
 			return this.#markConversationMessageFailed(
+				access.order.id,
 				conversationId,
 				messageId,
 				"Conversation gateway is not configured.",
@@ -1596,6 +1605,7 @@ export class CommerceService {
 				messageRow.body,
 			);
 			return this.#markConversationMessageDelivered(
+				access.order.id,
 				conversationId,
 				messageId,
 				externalMessageId,
@@ -1603,6 +1613,7 @@ export class CommerceService {
 			);
 		} catch (error) {
 			return this.#markConversationMessageFailed(
+				access.order.id,
 				conversationId,
 				messageId,
 				error instanceof Error ? error.message : String(error),
@@ -1699,6 +1710,7 @@ export class CommerceService {
 					continue;
 				}
 				const imported = await this.#syncConversationMessages(
+					ready.orderId,
 					ready.id,
 					ready.provider,
 					ready.externalThreadId,
@@ -2055,6 +2067,7 @@ export class CommerceService {
 	}
 
 	async #touchConversationPreview(
+		orderId: string,
 		conversationId: string,
 		body: string,
 		sentAt: Date,
@@ -2070,6 +2083,7 @@ export class CommerceService {
 			.returning(conversationSummarySelection);
 		if (summary) {
 			await this.#publishConversationUpdatedSafe(
+				orderId,
 				conversationId,
 				this.#toConversationSummary(summary),
 			);
@@ -2077,6 +2091,7 @@ export class CommerceService {
 	}
 
 	async #markConversationMessageDelivered(
+		orderId: string,
 		conversationId: string,
 		messageId: string,
 		externalMessageId: string | null,
@@ -2101,15 +2116,17 @@ export class CommerceService {
 		}
 		const dto = this.#toMessageDto(updated);
 		await this.#touchConversationPreview(
+			orderId,
 			conversationId,
 			dto.body,
 			updated.sentAt,
 		);
-		await this.#publishMessageCreatedSafe(conversationId, dto);
+		await this.#publishMessageCreatedSafe(orderId, conversationId, dto);
 		return dto;
 	}
 
 	async #markConversationMessageFailed(
+		orderId: string,
 		conversationId: string,
 		messageId: string,
 		errorMessage: string,
@@ -2132,20 +2149,23 @@ export class CommerceService {
 		}
 		const dto = this.#toMessageDto(updated);
 		await this.#touchConversationPreview(
+			orderId,
 			conversationId,
 			dto.body,
 			updated.sentAt,
 		);
-		await this.#publishMessageCreatedSafe(conversationId, dto);
+		await this.#publishMessageCreatedSafe(orderId, conversationId, dto);
 		return dto;
 	}
 
 	async #publishMessageCreatedSafe(
+		orderId: string,
 		conversationId: string,
 		message: ConversationMessageDto,
 	): Promise<void> {
 		try {
 			await this.#realtimePublisher.publishMessageCreated(
+				orderId,
 				conversationId,
 				message,
 			);
@@ -2155,11 +2175,13 @@ export class CommerceService {
 	}
 
 	async #publishConversationUpdatedSafe(
+		orderId: string,
 		conversationId: string,
 		conversation: ConversationSummary,
 	): Promise<void> {
 		try {
 			await this.#realtimePublisher.publishConversationUpdated(
+				orderId,
 				conversationId,
 				conversation,
 			);
@@ -2274,6 +2296,7 @@ export class CommerceService {
 	}
 
 	async #syncConversationMessages(
+		orderId: string,
 		conversationId: string,
 		provider: string,
 		externalThreadId: string,
@@ -2308,7 +2331,11 @@ export class CommerceService {
 					provider,
 					type: "integration",
 				});
-				await this.#publishMessageCreatedSafe(conversationId, result.message);
+				await this.#publishMessageCreatedSafe(
+					orderId,
+					conversationId,
+					result.message,
+				);
 			}
 		}
 
@@ -2329,6 +2356,7 @@ export class CommerceService {
 			.returning(conversationSummarySelection);
 		if (summary) {
 			await this.#publishConversationUpdatedSafe(
+				orderId,
 				conversationId,
 				this.#toConversationSummary(summary),
 			);

@@ -281,6 +281,41 @@ re-invite rotates the token; member cap enforced.
 
 ### B2 — Conversations + messages + realtime  *(depends B0; pairs with F2)*
 
+> **Status: backend done; live-DB/provider verification + frontend (F2) remain.**
+> The durable conversation projection, outbound message route, reconciliation cron
+> and Pusher auth/publisher seam are landed. Hostify webhook ingestion is still
+> intentionally deferred until Hostify confirms the signature and payload contract.
+>
+> **Done**
+> - `conversations` + `messages` tables and migration
+>   `0022_faulty_power_man.sql` with provider-booking/thread uniqueness,
+>   idempotent external-message uniqueness, sender/delivery/status checks, and
+>   exports from `@workspace/db`.
+> - `packages/core/src/commerce/conversations.ts`: provider conversation gateway
+>   contract, Hostify inbox implementation (`inbox.list`, `inbox.get`,
+>   `inbox.reply`), DTOs, realtime publisher seam, channel-name helper, and
+>   normalization tests.
+> - `CommerceService` conversation methods: list conversations, read messages,
+>   send optimistic guest messages (`pending -> sent|failed`), retry failed
+>   messages, provision confirmed-booking conversations, and reconcile Hostify
+>   threads/messages idempotently. `readOrderDetail` now surfaces conversation
+>   refs.
+> - Web wiring: Hostify conversation gateway + Pusher publisher in
+>   `apps/web/lib/api/commerce.ts`, Pusher server helper in
+>   `apps/web/lib/api/realtime.ts`, routes for conversation list/read/send/retry,
+>   `GET /api/cron/commerce/conversations`, and `POST /api/realtime/auth`.
+> - Env/docs: `pusher` dependency, Pusher vars in `.env.example` and `turbo.json`,
+>   and the conversation cron registered in `docs/sync-routes.md`.
+>
+> **Left**
+> - Live Hostify verification of reservation-to-thread lookup, message sender
+>   classification, and duplicate import behavior.
+> - Realtime integration verification with real Pusher app credentials and browser
+>   subscription flow.
+> - Hostify `message_new` webhook route once the signature, event id, and payload
+>   shape are confirmed.
+> - F2 chat UI.
+
 Schema:
 
 - `conversations`: `id`, `order_id`, `provider_booking_id?`, `provider`,

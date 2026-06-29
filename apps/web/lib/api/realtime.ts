@@ -1,0 +1,96 @@
+import {
+	conversationChannelName,
+	noopRealtimePublisher,
+	type RealtimePublisher,
+} from "@workspace/core/commerce";
+import Pusher from "pusher";
+
+interface PusherServerConfig {
+	appId: string;
+	cluster: string;
+	key: string;
+	secret: string;
+}
+
+let pusherClient: Pusher | null | undefined;
+
+function readPusherServerConfig(): PusherServerConfig | null {
+	const appId = process.env.PUSHER_APP_ID;
+	const key = process.env.PUSHER_KEY;
+	const secret = process.env.PUSHER_SECRET;
+	const cluster = process.env.PUSHER_CLUSTER;
+	if (!appId || !key || !secret || !cluster) {
+		return null;
+	}
+	return { appId, cluster, key, secret };
+}
+
+export function getPusherServerClient(): Pusher | null {
+	if (pusherClient !== undefined) {
+		return pusherClient;
+	}
+
+	const config = readPusherServerConfig();
+	pusherClient = config
+		? new Pusher({
+				appId: config.appId,
+				cluster: config.cluster,
+				key: config.key,
+				secret: config.secret,
+				useTLS: true,
+			})
+		: null;
+	return pusherClient;
+}
+
+export function requirePusherServerClient(): Pusher {
+	const client = getPusherServerClient();
+	if (!client) {
+		throw new Error("Pusher is not configured.");
+	}
+	return client;
+}
+
+export function createPusherRealtimePublisher(): RealtimePublisher {
+	const client = getPusherServerClient();
+	if (!client) {
+		return noopRealtimePublisher;
+	}
+
+	return {
+		async publishConversationUpdated(orderId, conversationId, conversation) {
+			await client.trigger(
+				conversationChannelName(orderId, conversationId),
+				"conversation.updated",
+				{ conversation },
+			);
+		},
+		async publishMessageCreated(orderId, conversationId, message) {
+			await client.trigger(
+				conversationChannelName(orderId, conversationId),
+				"message.created",
+				{ message },
+			);
+		},
+	};
+}
+
+export interface ParsedConversationChannel {
+	conversationId: string;
+	orderId: string;
+}
+
+export function parseConversationChannelName(
+	channelName: string,
+): ParsedConversationChannel | null {
+	const match =
+		/^private-order-(?<orderId>.+)-conv-(?<conversationId>.+)$/.exec(
+			channelName,
+		);
+	const orderId = match?.groups?.orderId;
+	const conversationId = match?.groups?.conversationId;
+	if (!orderId || !conversationId) {
+		return null;
+	}
+	return { conversationId, orderId };
+}

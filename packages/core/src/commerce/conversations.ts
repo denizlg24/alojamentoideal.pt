@@ -81,10 +81,12 @@ export interface ReconcileConversationsSummary {
 
 export interface RealtimePublisher {
 	publishMessageCreated(
+		orderId: string,
 		conversationId: string,
 		message: ConversationMessageDto,
 	): Promise<void>;
 	publishConversationUpdated(
+		orderId: string,
 		conversationId: string,
 		conversation: ConversationSummary,
 	): Promise<void>;
