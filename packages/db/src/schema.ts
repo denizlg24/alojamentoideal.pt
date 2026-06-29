@@ -7,6 +7,7 @@ import {
 	customType,
 	date,
 	doublePrecision,
+	foreignKey,
 	index,
 	integer,
 	jsonb,
@@ -1019,6 +1020,10 @@ export const orderMember = pgTable(
 		index("order_members_user_id_idx")
 			.on(table.userId)
 			.where(sql`${table.userId} is not null`),
+		uniqueIndex("order_members_id_order_id_uidx").on(table.id, table.orderId),
+		uniqueIndex("order_members_order_email_uidx")
+			.on(table.orderId, sql`lower(${table.email})`)
+			.where(sql`${table.status} <> 'revoked'`),
 		// At most one live membership per account per order: a signed-in user cannot
 		// redeem two invites for the same booking (which would split access
 		// resolution and double-count them against capacity). Revoked rows keep their
@@ -1076,6 +1081,7 @@ export const orderItem = pgTable(
 	},
 	(table) => [
 		index("order_items_order_id_idx").on(table.orderId),
+		uniqueIndex("order_items_id_order_id_uidx").on(table.id, table.orderId),
 		uniqueIndex("order_items_order_position_uidx").on(
 			table.orderId,
 			table.position,
@@ -1107,6 +1113,9 @@ export const providerBooking = pgTable(
 	"provider_bookings",
 	{
 		id: text("id").primaryKey(),
+		orderId: text("order_id")
+			.notNull()
+			.references(() => order.id, { onDelete: "cascade" }),
 		orderItemId: text("order_item_id")
 			.notNull()
 			.references(() => orderItem.id, { onDelete: "cascade" }),
@@ -1145,6 +1154,10 @@ export const providerBooking = pgTable(
 	},
 	(table) => [
 		uniqueIndex("provider_bookings_order_item_uidx").on(table.orderItemId),
+		uniqueIndex("provider_bookings_id_order_id_uidx").on(
+			table.id,
+			table.orderId,
+		),
 		uniqueIndex("provider_bookings_provider_reservation_uidx")
 			.on(table.provider, table.externalAccountId, table.providerReservationId)
 			.where(
@@ -1183,6 +1196,11 @@ export const providerBooking = pgTable(
 			"provider_bookings_attempt_count_nonneg",
 			sql`${table.attemptCount} >= 0`,
 		),
+		foreignKey({
+			columns: [table.orderItemId, table.orderId],
+			foreignColumns: [orderItem.id, orderItem.orderId],
+			name: "provider_bookings_order_item_order_fk",
+		}).onDelete("cascade"),
 	],
 );
 
@@ -1214,6 +1232,7 @@ export const conversation = pgTable(
 	},
 	(table) => [
 		index("conversations_order_id_idx").on(table.orderId),
+		uniqueIndex("conversations_id_order_id_uidx").on(table.id, table.orderId),
 		uniqueIndex("conversations_provider_booking_uidx")
 			.on(table.providerBookingId)
 			.where(sql`${table.providerBookingId} is not null`),
@@ -1230,6 +1249,11 @@ export const conversation = pgTable(
 			sql`${table.status} in ('pending', 'active', 'archived')`,
 		),
 		check("conversations_unread_count_nonneg", sql`${table.unreadCount} >= 0`),
+		foreignKey({
+			columns: [table.providerBookingId, table.orderId],
+			foreignColumns: [providerBooking.id, providerBooking.orderId],
+			name: "conversations_provider_booking_order_fk",
+		}),
 	],
 );
 
@@ -1239,6 +1263,9 @@ export const conversationMessage = pgTable(
 	"messages",
 	{
 		id: text("id").primaryKey(),
+		orderId: text("order_id")
+			.notNull()
+			.references(() => order.id, { onDelete: "cascade" }),
 		conversationId: text("conversation_id")
 			.notNull()
 			.references(() => conversation.id, { onDelete: "cascade" }),
@@ -1266,6 +1293,7 @@ export const conversationMessage = pgTable(
 			table.conversationId,
 			table.sentAt,
 		),
+		index("messages_order_id_idx").on(table.orderId),
 		index("messages_sender_member_idx")
 			.on(table.senderMemberId)
 			.where(sql`${table.senderMemberId} is not null`),
@@ -1281,6 +1309,16 @@ export const conversationMessage = pgTable(
 			sql`${table.deliveryStatus} in ('pending', 'sent', 'failed')`,
 		),
 		check("messages_body_not_empty", sql`length(trim(${table.body})) > 0`),
+		foreignKey({
+			columns: [table.conversationId, table.orderId],
+			foreignColumns: [conversation.id, conversation.orderId],
+			name: "messages_conversation_order_fk",
+		}).onDelete("cascade"),
+		foreignKey({
+			columns: [table.senderMemberId, table.orderId],
+			foreignColumns: [orderMember.id, orderMember.orderId],
+			name: "messages_sender_member_order_fk",
+		}),
 	],
 );
 

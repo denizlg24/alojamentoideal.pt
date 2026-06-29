@@ -6,7 +6,7 @@ import {
 	INVITE_TOKEN_TTL_MS,
 	isMemberTokenExpired,
 	memberInviteExpiresAt,
-	type OrderPermission,
+	ORDER_PERMISSION_LIST,
 	orderMemberCapacity,
 	orderRoleCan,
 } from "./order-access";
@@ -52,17 +52,7 @@ describe("isOrderAccessGranted", () => {
 
 describe("orderRoleCan", () => {
 	test("the owner holds every permission", () => {
-		const permissions: OrderPermission[] = [
-			"view_booking",
-			"view_price",
-			"view_contact",
-			"chat",
-			"invite_members",
-			"manage_members",
-			"manage_all_guests",
-			"manage_own_guest",
-		];
-		for (const permission of permissions) {
+		for (const permission of ORDER_PERMISSION_LIST) {
 			expect(orderRoleCan("owner", permission)).toBe(true);
 		}
 	});

@@ -15,7 +15,7 @@ function readEmail(body: unknown): string | null {
 	if (body && typeof body === "object" && "email" in body) {
 		const value = (body as { email?: unknown }).email;
 		if (typeof value === "string" && value.trim().length > 0) {
-			return value;
+			return value.trim();
 		}
 	}
 	return null;

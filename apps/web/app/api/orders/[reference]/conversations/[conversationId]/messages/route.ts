@@ -10,23 +10,28 @@ interface ConversationMessagesRouteContext {
 	params: Promise<{ conversationId: string; reference: string }>;
 }
 
+const MAX_MESSAGE_LIMIT = 200;
+const LIMIT_PATTERN = /^[1-9]\d*$/;
+
 function readMessageBody(body: unknown): string | null {
 	if (body && typeof body === "object" && "body" in body) {
 		const value = (body as { body?: unknown }).body;
-		if (typeof value === "string") {
-			return value;
+		if (typeof value === "string" && value.trim().length > 0) {
+			return value.trim();
 		}
 	}
 	return null;
 }
 
-function readLimit(request: Request): number | undefined {
+function readLimit(request: Request): number | null | undefined {
 	const raw = new URL(request.url).searchParams.get("limit");
 	if (!raw) {
 		return undefined;
 	}
-	const value = Number.parseInt(raw, 10);
-	return Number.isInteger(value) ? value : undefined;
+	if (!LIMIT_PATTERN.test(raw)) {
+		return null;
+	}
+	return Math.min(Number.parseInt(raw, 10), MAX_MESSAGE_LIMIT);
 }
 
 export const GET = withApiRoute<ConversationMessagesRouteContext>(
@@ -41,10 +46,20 @@ export const GET = withApiRoute<ConversationMessagesRouteContext>(
 		try {
 			const service = commerceService();
 			const access = await service.resolveOrderAccess(reference, accessContext);
+			const limit = readLimit(request);
+			if (limit === null) {
+				return Response.json(
+					{
+						code: "invalid_request",
+						error: "Limit must be a positive integer.",
+					},
+					{ status: 400 },
+				);
+			}
 			const messages = await service.readConversationMessages(
 				access,
 				conversationId,
-				{ limit: readLimit(request) },
+				{ limit },
 			);
 			return Response.json({ messages });
 		} catch (error) {

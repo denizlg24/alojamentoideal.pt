@@ -1,10 +1,10 @@
 import type {
 	BookingGuestIdentityStatus,
+	ConversationStatus,
 	OrderBillingAddressSnapshot,
 	OrderMemberStatus,
 	ProviderBookingStatus,
 } from "@workspace/db";
-import type { ConversationSummary } from "./conversations";
 import type { OrderRole } from "./order-access";
 import type { OrderBookingStatus } from "./payments";
 
@@ -98,16 +98,26 @@ export interface OrderDetailMember {
 	status: OrderMemberStatus;
 }
 
+export interface OrderConversationSummary {
+	externalThreadId: string | null;
+	id: string;
+	lastMessageAt: string | null;
+	lastMessagePreview: string | null;
+	providerBookingId: string | null;
+	status: ConversationStatus;
+	unreadCount: number;
+}
+
 /**
  * The durable order hub read model behind `GET /api/orders/[reference]`. Built
  * from a {@link ResolvedOrderAccess}, so sensitive sections (`pricing`,
  * `contact`, `members`, per-item money/charges) are `null` for a `member` and
- * populated only for the `owner`. Conversation refs are deferred to B2.
+ * populated only for the `owner`.
  */
 export interface OrderDetail {
 	bookingStatus: OrderBookingStatus;
 	contact: OrderContactSummary | null;
-	conversations: ConversationSummary[];
+	conversations: OrderConversationSummary[];
 	createdAt: string;
 	currency: string;
 	guestProgress: OrderGuestProgress;

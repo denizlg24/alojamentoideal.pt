@@ -162,6 +162,13 @@
       "when": 1782751760753,
       "tag": "0022_faulty_power_man",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1782763760784,
+      "tag": "0023_adorable_wendell_rand",
+      "breakpoints": true
     }
   ]
 }

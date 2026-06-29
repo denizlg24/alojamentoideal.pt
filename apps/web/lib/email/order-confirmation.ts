@@ -3,7 +3,10 @@ import {
 	type EmailMessage,
 	getEmailSender,
 } from "@workspace/auth";
-import type { OrderConfirmationFacts } from "@workspace/core/commerce";
+import {
+	generateMemberToken,
+	type OrderConfirmationFacts,
+} from "@workspace/core/commerce";
 import type { OrderBillingAddressSnapshot } from "@workspace/db";
 import { commerceService } from "@/lib/api/commerce";
 import { countryName } from "@/lib/site/countries";
@@ -100,20 +103,23 @@ export function buildOrderConfirmationEmail(
  * Callers must only invoke this on the first pending -> confirmed transition so a
  * re-delivered webhook never produces a duplicate email. Provisioning the booker
  * as the order's `owner` member is bound here, the one guarded once-per-order
- * action both the webhook and the reconciler cron funnel through: it mints the
- * raw access token (persisted only as a hash) that the "Manage reservation" CTA
- * carries into the durable order hub.
+ * action both the webhook and the reconciler cron funnel through. The raw access
+ * token is minted before sending so the "Manage reservation" CTA can carry it,
+ * then activated only after the mail provider accepts the message; only its hash
+ * is persisted.
  */
 export async function sendOrderConfirmationEmail(
 	facts: OrderConfirmationFacts,
 ): Promise<void> {
-	const { token } = await commerceService().issueOwnerAccessToken(
-		facts.orderId,
-		facts.email,
-	);
+	const token = generateMemberToken();
 	const manageUrl = orderHubUrl(facts.publicReference, token);
 	await getEmailSender().send({
 		to: facts.email,
 		...buildOrderConfirmationEmail(facts, manageUrl),
 	});
+	await commerceService().activateOwnerAccessToken(
+		facts.orderId,
+		facts.email,
+		token,
+	);
 }

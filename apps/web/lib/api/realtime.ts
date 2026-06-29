@@ -1,6 +1,7 @@
 import {
 	conversationChannelName,
 	noopRealtimePublisher,
+	parseConversationChannelName,
 	type RealtimePublisher,
 } from "@workspace/core/commerce";
 import Pusher from "pusher";
@@ -75,22 +76,4 @@ export function createPusherRealtimePublisher(): RealtimePublisher {
 	};
 }
 
-export interface ParsedConversationChannel {
-	conversationId: string;
-	orderId: string;
-}
-
-export function parseConversationChannelName(
-	channelName: string,
-): ParsedConversationChannel | null {
-	const match =
-		/^private-order-(?<orderId>.+)-conv-(?<conversationId>.+)$/.exec(
-			channelName,
-		);
-	const orderId = match?.groups?.orderId;
-	const conversationId = match?.groups?.conversationId;
-	if (!orderId || !conversationId) {
-		return null;
-	}
-	return { conversationId, orderId };
-}
+export { parseConversationChannelName };

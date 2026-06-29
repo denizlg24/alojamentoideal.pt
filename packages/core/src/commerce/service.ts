@@ -1089,18 +1089,41 @@ export class CommerceService {
 		});
 	}
 
-	/**
-	 * Provisions (or rotates) the order's `owner` member and returns a fresh raw
-	 * access token. Idempotent: the partial-unique owner index caps an order at one
-	 * owner, so a re-run rotates the existing row's token rather than inserting a
-	 * second. Bound to the confirmation-email send (the one guarded, once-per-order
-	 * action), which both the webhook and the reconciler cron funnel through — so
-	 * the raw token reaches whichever path actually mails the link, while only its
-	 * hash is ever persisted. Binds the booker's account when the order has one.
-	 */
 	async issueOwnerAccessToken(
 		orderId: string,
 		email: string,
+	): Promise<IssueMemberTokenResult> {
+		return this.#persistOwnerAccessToken(orderId, email, generateMemberToken());
+	}
+
+	/**
+	 * Activates a caller-generated owner token after its email was accepted by the
+	 * transport. This keeps confirmation-email retries resend-safe: a failed send
+	 * leaves no rotated-but-undelivered owner link in the database.
+	 */
+	async activateOwnerAccessToken(
+		orderId: string,
+		email: string,
+		token: string,
+	): Promise<IssueMemberTokenResult> {
+		if (token.trim().length === 0) {
+			throw invalidRequest("Owner access token is required.", [
+				{ message: "Owner access token is required.", path: "token" },
+			]);
+		}
+		return this.#persistOwnerAccessToken(orderId, email, token);
+	}
+
+	/**
+	 * Provisions (or rotates) the order's `owner` member and persists the supplied
+	 * token hash. Idempotent: the partial-unique owner index caps an order at one
+	 * owner, so a re-run rotates the existing row's token rather than inserting a
+	 * second. Binds the booker's account when the order has one.
+	 */
+	async #persistOwnerAccessToken(
+		orderId: string,
+		email: string,
+		token: string,
 	): Promise<IssueMemberTokenResult> {
 		return this.#db.transaction(async (tx) => {
 			// Lock the order row first so concurrent first-time provisioners serialize:
@@ -1127,7 +1150,6 @@ export class CommerceService {
 				)
 				.limit(1);
 
-			const token = generateMemberToken();
 			const now = new Date();
 			if (existing) {
 				await tx
@@ -1135,6 +1157,7 @@ export class CommerceService {
 					.set({
 						accessTokenHash: hashMemberToken(token),
 						acceptedAt: existing.acceptedAt ?? now,
+						email: email.trim().toLowerCase(),
 						status: "active",
 						userId: existing.userId ?? userId,
 					})
@@ -1147,7 +1170,7 @@ export class CommerceService {
 				acceptedAt: now,
 				accessTokenHash: hashMemberToken(token),
 				createdAt: now,
-				email: email.toLowerCase(),
+				email: email.trim().toLowerCase(),
 				id: memberId,
 				orderId,
 				role: "owner",
@@ -1452,6 +1475,7 @@ export class CommerceService {
 				deliveryStatus: "pending",
 				id: crypto.randomUUID(),
 				isAutomatic: false,
+				orderId: access.order.id,
 				senderMemberId: access.member?.id ?? null,
 				senderType: "guest",
 				sentAt: now,
@@ -2319,7 +2343,11 @@ export class CommerceService {
 			) {
 				latestMessage = message;
 			}
-			const result = await this.#upsertProviderMessage(conversationId, message);
+			const result = await this.#upsertProviderMessage(
+				orderId,
+				conversationId,
+				message,
+			);
 			if (result.inserted) {
 				imported += 1;
 				trackEvent({
@@ -2365,6 +2393,7 @@ export class CommerceService {
 	}
 
 	async #upsertProviderMessage(
+		orderId: string,
 		conversationId: string,
 		message: ProviderConversationMessage,
 	): Promise<{ inserted: boolean; message: ConversationMessageDto }> {
@@ -2416,6 +2445,7 @@ export class CommerceService {
 				externalMessageId: message.externalMessageId,
 				id: crypto.randomUUID(),
 				isAutomatic: message.isAutomatic,
+				orderId,
 				rawPayload: message.raw,
 				senderType: message.senderType,
 				sentAt: message.sentAt,
@@ -3126,6 +3156,7 @@ export class CommerceService {
 				externalAccountId: rows.detail.externalAccountId,
 				id: providerBookingId,
 				normalizedStatus: "pending",
+				orderId,
 				orderItemId,
 				provider: rows.detail.provider,
 				stayEndsAt: stayDateToTimestamp(rows.detail.checkOut),

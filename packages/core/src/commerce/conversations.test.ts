@@ -4,6 +4,7 @@ import {
 	conversationChannelName,
 	HostifyConversationGateway,
 	normalizeConversationPreview,
+	parseConversationChannelName,
 	trimMessageBody,
 } from "./conversations";
 
@@ -21,9 +22,26 @@ describe("conversation helpers", () => {
 	});
 
 	test("builds private realtime channel names", () => {
-		expect(conversationChannelName("order-1", "conv-2")).toBe(
-			"private-order-order-1-conv-conv-2",
-		);
+		const channelName = conversationChannelName("order-1", "conv-2");
+		expect(channelName).toBe("private-order.b3JkZXItMQ.conv.Y29udi0y");
+		expect(parseConversationChannelName(channelName)).toEqual({
+			conversationId: "conv-2",
+			orderId: "order-1",
+		});
+	});
+
+	test("channel names preserve ambiguous raw delimiters", () => {
+		const first = conversationChannelName("a", "b-conv-c");
+		const second = conversationChannelName("a-conv-b", "c");
+		expect(first).not.toBe(second);
+		expect(parseConversationChannelName(first)).toEqual({
+			conversationId: "b-conv-c",
+			orderId: "a",
+		});
+		expect(parseConversationChannelName(second)).toEqual({
+			conversationId: "c",
+			orderId: "a-conv-b",
+		});
 	});
 });
 
@@ -61,6 +79,30 @@ describe("HostifyConversationGateway", () => {
 			status: "active",
 			unreadCount: 0,
 		});
+	});
+
+	test("does not link an unrelated first thread", async () => {
+		const client = {
+			inbox: {
+				list: async () => ({
+					success: true,
+					threads: [
+						{
+							id: 123,
+							is_archived: 0,
+							last_message: "Wrong reservation",
+							reservation_id: 999,
+						},
+					],
+				}),
+			},
+		} as unknown as HostifyClient;
+
+		const thread = await new HostifyConversationGateway({
+			client,
+		}).findThreadForReservation("456");
+
+		expect(thread).toBeNull();
 	});
 
 	test("maps thread messages and filters empty provider rows", async () => {

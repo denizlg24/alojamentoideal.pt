@@ -82,7 +82,8 @@ stages, each sub-chunked so multiple agents can work in parallel. Read the
   (`data-architecture.md` §3.1); exact signature/payload is **unconfirmed** with
   Hostify.
 - **`conversations` / `messages` tables now exist.** B2 landed them in
-  migration `0022_faulty_power_man.sql`, following `data-architecture.md` §6.7.
+  migration `0022_faulty_power_man.sql`, with order-scoping hardening in
+  `0023_adorable_wendell_rand.sql`, following `data-architecture.md` §6.7.
 - **Email**: `apps/web/lib/email/{order-confirmation,order-could-not-confirm}.ts`
   send via Resend (`@workspace/emails`, `RESEND_API_KEY`/`EMAIL_FROM`). Invite and
   owner-link emails are net-new templates here.
@@ -293,6 +294,10 @@ re-invite rotates the token; member cap enforced.
 >   `0022_faulty_power_man.sql` with provider-booking/thread uniqueness,
 >   idempotent external-message uniqueness, sender/delivery/status checks, and
 >   exports from `@workspace/db`.
+> - Review hardening in `0023_adorable_wendell_rand.sql`: denormalized
+>   `provider_bookings.order_id` / `messages.order_id`, composite order-scoped
+>   FKs across bookings, conversations, messages and sender members, plus one
+>   live `order_members` row per normalized email.
 > - `packages/core/src/commerce/conversations.ts`: provider conversation gateway
 >   contract, Hostify inbox implementation (`inbox.list`, `inbox.get`,
 >   `inbox.reply`), DTOs, realtime publisher seam, channel-name helper, and
@@ -334,9 +339,9 @@ Schema:
 - `conversations`: `id`, `order_id`, `provider_booking_id?`, `provider`,
   `external_thread_id?`, `status`, `last_message_at?`, `last_message_preview?`,
   `unread_count`, `last_synced_at?`, timestamps.
-- `messages`: `id`, `conversation_id`, `external_message_id?`, `sender_type`
-  (`guest|host|system`), `sender_member_id?` (app-origin author), `body`,
-  `sent_at`, `read_at?`, `is_automatic`, `delivery_status`
+- `messages`: `id`, `order_id`, `conversation_id`, `external_message_id?`,
+  `sender_type` (`guest|host|system`), `sender_member_id?` (app-origin author),
+  `body`, `sent_at`, `read_at?`, `is_automatic`, `delivery_status`
   (`pending|sent|failed`), `raw_payload?`, timestamps. Unique
   `(conversation_id, external_message_id)` where not null.
 - Thread linkage: on `pending -> confirmed`, resolve the reservation's Hostify
@@ -364,9 +369,11 @@ Schema:
 
 - `RealtimePublisher` seam in core (`publishConversationUpdated(orderId,
   conversation)`, `publishMessageCreated(orderId, conversationId, msg)`);
-  Pusher implementation in the web app. Private channel per conversation
-  (`private-order-<orderId>-conv-<convId>`). Cron and outbound publish now;
-  webhook publishing is deferred with the webhook route.
+  Pusher implementation in the web app. Private channel per conversation uses
+  encoded parts:
+  `private-order.<base64url(orderId)>.conv.<base64url(conversationId)>`. Cron
+  and outbound publish now; webhook publishing is deferred with the webhook
+  route.
 - `POST /api/realtime/auth` — Pusher channel-auth endpoint that **gates on
   `resolveOrderAccess`** before authorizing the subscription.
 - Env (add to `turbo.json` passthrough + `.env.example`): `PUSHER_APP_ID`,
@@ -460,8 +467,10 @@ set per retention policy.
 - **Migrations** (sequential after `0019`): `order_members` (**done** —
   `0020_married_prism.sql`); `order_members` partial-unique `(order_id, user_id)`
   (**done** — `0021_wandering_the_call.sql`, B1 review hardening); `conversations` +
-  `messages` (**done** — `0022_faulty_power_man.sql`, B2). Do **not** create
-  `guest_submission_jobs` yet (A1 — unused table).
+  `messages` (**done** — `0022_faulty_power_man.sql`, B2); order-scoped
+  conversation/member integrity hardening (**done** —
+  `0023_adorable_wendell_rand.sql`). Do **not** create `guest_submission_jobs` yet
+  (A1 — unused table).
 - **Security/privacy**: access tokens are high-entropy and stored hashed; the
   `publicReference` is never sufficient for access on its own. Token expiry +
   rotation on resend. Guest PII stays encrypted and is never logged. Realtime

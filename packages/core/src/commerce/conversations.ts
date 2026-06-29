@@ -98,6 +98,9 @@ export const noopRealtimePublisher: RealtimePublisher = {
 };
 
 const MAX_PREVIEW_LENGTH = 160;
+const CONVERSATION_CHANNEL_PREFIX = "private-order.";
+const CONVERSATION_CHANNEL_SEPARATOR = ".conv.";
+const BASE64URL_PATTERN = /^[A-Za-z0-9_-]+$/;
 
 export function trimMessageBody(body: string): string {
 	return body.trim().replace(/\s+/g, " ");
@@ -115,7 +118,50 @@ export function conversationChannelName(
 	orderId: string,
 	conversationId: string,
 ): string {
-	return `private-order-${orderId}-conv-${conversationId}`;
+	if (orderId.length === 0 || conversationId.length === 0) {
+		throw new Error("Conversation channel ids must be non-empty.");
+	}
+	return `${CONVERSATION_CHANNEL_PREFIX}${encodeChannelPart(orderId)}${CONVERSATION_CHANNEL_SEPARATOR}${encodeChannelPart(conversationId)}`;
+}
+
+export interface ParsedConversationChannelName {
+	conversationId: string;
+	orderId: string;
+}
+
+export function parseConversationChannelName(
+	channelName: string,
+): ParsedConversationChannelName | null {
+	if (!channelName.startsWith(CONVERSATION_CHANNEL_PREFIX)) {
+		return null;
+	}
+	const body = channelName.slice(CONVERSATION_CHANNEL_PREFIX.length);
+	const parts = body.split(CONVERSATION_CHANNEL_SEPARATOR);
+	if (parts.length !== 2) {
+		return null;
+	}
+	const [encodedOrderId, encodedConversationId] = parts;
+	if (!encodedOrderId || !encodedConversationId) {
+		return null;
+	}
+	const orderId = decodeChannelPart(encodedOrderId);
+	const conversationId = decodeChannelPart(encodedConversationId);
+	if (!orderId || !conversationId) {
+		return null;
+	}
+	return { conversationId, orderId };
+}
+
+function encodeChannelPart(value: string): string {
+	return Buffer.from(value, "utf8").toString("base64url");
+}
+
+function decodeChannelPart(value: string): string | null {
+	if (!BASE64URL_PATTERN.test(value)) {
+		return null;
+	}
+	const decoded = Buffer.from(value, "base64url").toString("utf8");
+	return encodeChannelPart(decoded) === value ? decoded : null;
 }
 
 function toRecord(value: unknown): Record<string, unknown> {
@@ -217,10 +263,9 @@ export class HostifyConversationGateway implements ProviderConversationGateway {
 			},
 			this.#context,
 		);
-		const match =
-			response.threads.find(
-				(thread) => idToString(thread.reservation_id) === reservationId,
-			) ?? response.threads[0];
+		const match = response.threads.find(
+			(thread) => idToString(thread.reservation_id) === reservationId,
+		);
 		return match ? mapThread(match) : null;
 	}
 

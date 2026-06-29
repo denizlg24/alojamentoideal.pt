@@ -15,15 +15,18 @@ export type OrderRole = OrderMemberRole;
  * auditable: a single matrix decides who can see prices, invite people, or edit
  * another guest's identity.
  */
-export type OrderPermission =
-	| "view_booking"
-	| "view_price"
-	| "view_contact"
-	| "chat"
-	| "invite_members"
-	| "manage_members"
-	| "manage_all_guests"
-	| "manage_own_guest";
+export const ORDER_PERMISSION_LIST = [
+	"view_booking",
+	"view_price",
+	"view_contact",
+	"chat",
+	"invite_members",
+	"manage_members",
+	"manage_all_guests",
+	"manage_own_guest",
+] as const;
+
+export type OrderPermission = (typeof ORDER_PERMISSION_LIST)[number];
 
 const ORDER_PERMISSIONS: Record<OrderRole, ReadonlySet<OrderPermission>> = {
 	owner: new Set<OrderPermission>([

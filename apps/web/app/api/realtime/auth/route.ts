@@ -16,6 +16,27 @@ interface RealtimeAuthBody {
 	socketId: string;
 }
 
+async function readRealtimeAuthRequest(
+	request: Request,
+): Promise<RealtimeAuthBody | null> {
+	const contentType = request.headers.get("content-type")?.toLowerCase() ?? "";
+	if (
+		contentType.includes("application/x-www-form-urlencoded") ||
+		contentType.includes("multipart/form-data")
+	) {
+		const formData = await request.formData();
+		return readRealtimeAuthBody({
+			channel_name: formData.get("channel_name"),
+			channelName: formData.get("channelName"),
+			reference: formData.get("reference"),
+			socket_id: formData.get("socket_id"),
+			socketId: formData.get("socketId"),
+		});
+	}
+
+	return readRealtimeAuthBody(await readJson(request));
+}
+
 function readRealtimeAuthBody(body: unknown): RealtimeAuthBody | null {
 	if (!body || typeof body !== "object") {
 		return null;
@@ -26,18 +47,25 @@ function readRealtimeAuthBody(body: unknown): RealtimeAuthBody | null {
 	const reference = record.reference;
 	if (
 		typeof socketId !== "string" ||
+		socketId.trim().length === 0 ||
 		typeof channelName !== "string" ||
-		typeof reference !== "string"
+		channelName.trim().length === 0 ||
+		typeof reference !== "string" ||
+		reference.trim().length === 0
 	) {
 		return null;
 	}
-	return { channelName, reference, socketId };
+	return {
+		channelName: channelName.trim(),
+		reference: reference.trim(),
+		socketId: socketId.trim(),
+	};
 }
 
 export const POST = withApiRoute(
 	{ name: "realtime.auth", rateLimit: { bucket: "mutation" } },
 	async (request: Request): Promise<Response> => {
-		const body = readRealtimeAuthBody(await readJson(request));
+		const body = await readRealtimeAuthRequest(request);
 		if (!body) {
 			return Response.json(
 				{ code: "invalid_request", error: "Invalid realtime auth request." },
