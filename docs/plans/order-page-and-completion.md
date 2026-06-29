@@ -81,8 +81,8 @@ stages, each sub-chunked so multiple agents can work in parallel. Read the
   established in the saga plan). Webhooks: doc references `message_new`
   (`data-architecture.md` §3.1); exact signature/payload is **unconfirmed** with
   Hostify.
-- **`conversations` / `messages` tables do NOT exist yet.** They are specified in
-  `data-architecture.md` §6.7 and are created in B2.
+- **`conversations` / `messages` tables now exist.** B2 landed them in
+  migration `0022_faulty_power_man.sql`, following `data-architecture.md` §6.7.
 - **Email**: `apps/web/lib/email/{order-confirmation,order-could-not-confirm}.ts`
   send via Resend (`@workspace/emails`, `RESEND_API_KEY`/`EMAIL_FROM`). Invite and
   owner-link emails are net-new templates here.
@@ -285,6 +285,8 @@ re-invite rotates the token; member cap enforced.
 > The durable conversation projection, outbound message route, reconciliation cron
 > and Pusher auth/publisher seam are landed. Hostify webhook ingestion is still
 > intentionally deferred until Hostify confirms the signature and payload contract.
+> Backend commits: `4565850 feat: add order conversation backend core` and
+> `5fbc89f feat: wire order conversation routes`.
 >
 > **Done**
 > - `conversations` + `messages` tables and migration
@@ -302,10 +304,21 @@ re-invite rotates the token; member cap enforced.
 >   refs.
 > - Web wiring: Hostify conversation gateway + Pusher publisher in
 >   `apps/web/lib/api/commerce.ts`, Pusher server helper in
->   `apps/web/lib/api/realtime.ts`, routes for conversation list/read/send/retry,
->   `GET /api/cron/commerce/conversations`, and `POST /api/realtime/auth`.
+>   `apps/web/lib/api/realtime.ts`, and API routes:
+>   - `GET /api/orders/[reference]/conversations`
+>   - `GET|POST /api/orders/[reference]/conversations/[conversationId]/messages`
+>   - `POST /api/orders/[reference]/conversations/[conversationId]/messages/[messageId]/retry`
+>   - `GET /api/cron/commerce/conversations`
+>   - `POST /api/realtime/auth`
 > - Env/docs: `pusher` dependency, Pusher vars in `.env.example` and `turbo.json`,
 >   and the conversation cron registered in `docs/sync-routes.md`.
+> - Verification passed:
+>   - `bun run --filter @workspace/db typecheck`
+>   - `bun run --filter @workspace/core typecheck`
+>   - `bun run --filter @workspace/core test`
+>   - `bun run --filter web typecheck`
+>   - `bun run --filter web test`
+>   Commit hooks also ran full `turbo typecheck` and `turbo test`.
 >
 > **Left**
 > - Live Hostify verification of reservation-to-thread lookup, message sender
@@ -349,10 +362,11 @@ Schema:
 
 **Layer B — realtime (DB -> browser):**
 
-- `RealtimePublisher` seam in core (`publishMessageCreated(conversationId, msg)`);
+- `RealtimePublisher` seam in core (`publishConversationUpdated(orderId,
+  conversation)`, `publishMessageCreated(orderId, conversationId, msg)`);
   Pusher implementation in the web app. Private channel per conversation
-  (`private-order-<orderId>-conv-<convId>`). Webhook, cron and outbound all
-  publish.
+  (`private-order-<orderId>-conv-<convId>`). Cron and outbound publish now;
+  webhook publishing is deferred with the webhook route.
 - `POST /api/realtime/auth` — Pusher channel-auth endpoint that **gates on
   `resolveOrderAccess`** before authorizing the subscription.
 - Env (add to `turbo.json` passthrough + `.env.example`): `PUSHER_APP_ID`,
@@ -446,7 +460,8 @@ set per retention policy.
 - **Migrations** (sequential after `0019`): `order_members` (**done** —
   `0020_married_prism.sql`); `order_members` partial-unique `(order_id, user_id)`
   (**done** — `0021_wandering_the_call.sql`, B1 review hardening); `conversations` +
-  `messages` (B2). Do **not** create `guest_submission_jobs` yet (A1 — unused table).
+  `messages` (**done** — `0022_faulty_power_man.sql`, B2). Do **not** create
+  `guest_submission_jobs` yet (A1 — unused table).
 - **Security/privacy**: access tokens are high-entropy and stored hashed; the
   `publicReference` is never sufficient for access on its own. Token expiry +
   rotation on resend. Guest PII stays encrypted and is never logged. Realtime
@@ -455,7 +470,7 @@ set per retention policy.
 - **Observability**: events `order_member_invited`, `order_member_joined`,
   `conversation_message_sent`/`_received`, `guest_identity_verified`. Sentry on
   webhook signature failures and on Pusher publish failures (degrade to poll).
-- **Env additions**: Pusher keys (B2). Both must land in `turbo.json`
+- **Env additions**: Pusher keys (B2) are landed in `turbo.json`
   `globalPassThroughEnv` (server) / `globalEnv` (the `NEXT_PUBLIC_*` pair) and
   `.env.example`.
 
