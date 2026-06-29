@@ -4,6 +4,7 @@ import type {
 	OrderMemberStatus,
 	ProviderBookingStatus,
 } from "@workspace/db";
+import type { ConversationSummary } from "./conversations";
 import type { OrderRole } from "./order-access";
 import type { OrderBookingStatus } from "./payments";
 
@@ -106,6 +107,7 @@ export interface OrderDetailMember {
 export interface OrderDetail {
 	bookingStatus: OrderBookingStatus;
 	contact: OrderContactSummary | null;
+	conversations: ConversationSummary[];
 	createdAt: string;
 	currency: string;
 	guestProgress: OrderGuestProgress;

@@ -974,6 +974,9 @@ export const orderContact = pgTable(
 
 export type OrderMemberRole = "owner" | "member";
 export type OrderMemberStatus = "invited" | "active" | "revoked";
+export type ConversationStatus = "pending" | "active" | "archived";
+export type ConversationMessageSenderType = "guest" | "host" | "system";
+export type ConversationMessageDeliveryStatus = "pending" | "sent" | "failed";
 
 /**
  * People who can reach an order's hub (`/order/[reference]`). The `owner` is the
@@ -1184,6 +1187,104 @@ export const providerBooking = pgTable(
 );
 
 export type ProviderBooking = typeof providerBooking.$inferSelect;
+
+export const conversation = pgTable(
+	"conversations",
+	{
+		id: text("id").primaryKey(),
+		orderId: text("order_id")
+			.notNull()
+			.references(() => order.id, { onDelete: "cascade" }),
+		providerBookingId: text("provider_booking_id").references(
+			() => providerBooking.id,
+			{ onDelete: "set null" },
+		),
+		provider: text("provider").notNull(),
+		externalThreadId: text("external_thread_id"),
+		status: text("status")
+			.$type<ConversationStatus>()
+			.notNull()
+			.default("pending"),
+		lastMessageAt: timestampWithTimezone("last_message_at"),
+		lastMessagePreview: text("last_message_preview"),
+		unreadCount: integer("unread_count").notNull().default(0),
+		lastSyncedAt: timestampWithTimezone("last_synced_at"),
+		createdAt: timestampWithTimezone("created_at").notNull().defaultNow(),
+		updatedAt: timestampWithTimezone("updated_at").notNull().defaultNow(),
+	},
+	(table) => [
+		index("conversations_order_id_idx").on(table.orderId),
+		uniqueIndex("conversations_provider_booking_uidx")
+			.on(table.providerBookingId)
+			.where(sql`${table.providerBookingId} is not null`),
+		uniqueIndex("conversations_provider_thread_uidx")
+			.on(table.provider, table.externalThreadId)
+			.where(sql`${table.externalThreadId} is not null`),
+		index("conversations_active_sync_idx")
+			.on(table.lastSyncedAt)
+			.where(
+				sql`${table.status} = 'active' and ${table.externalThreadId} is not null`,
+			),
+		check(
+			"conversations_status_check",
+			sql`${table.status} in ('pending', 'active', 'archived')`,
+		),
+		check("conversations_unread_count_nonneg", sql`${table.unreadCount} >= 0`),
+	],
+);
+
+export type Conversation = typeof conversation.$inferSelect;
+
+export const conversationMessage = pgTable(
+	"messages",
+	{
+		id: text("id").primaryKey(),
+		conversationId: text("conversation_id")
+			.notNull()
+			.references(() => conversation.id, { onDelete: "cascade" }),
+		externalMessageId: text("external_message_id"),
+		senderType: text("sender_type")
+			.$type<ConversationMessageSenderType>()
+			.notNull(),
+		senderMemberId: text("sender_member_id").references(() => orderMember.id, {
+			onDelete: "set null",
+		}),
+		body: text("body").notNull(),
+		sentAt: timestampWithTimezone("sent_at").notNull(),
+		readAt: timestampWithTimezone("read_at"),
+		isAutomatic: boolean("is_automatic").notNull().default(false),
+		deliveryStatus: text("delivery_status")
+			.$type<ConversationMessageDeliveryStatus>()
+			.notNull()
+			.default("sent"),
+		rawPayload: jsonb("raw_payload").$type<Record<string, unknown>>(),
+		createdAt: timestampWithTimezone("created_at").notNull().defaultNow(),
+		updatedAt: timestampWithTimezone("updated_at").notNull().defaultNow(),
+	},
+	(table) => [
+		index("messages_conversation_sent_idx").on(
+			table.conversationId,
+			table.sentAt,
+		),
+		index("messages_sender_member_idx")
+			.on(table.senderMemberId)
+			.where(sql`${table.senderMemberId} is not null`),
+		uniqueIndex("messages_conversation_external_uidx")
+			.on(table.conversationId, table.externalMessageId)
+			.where(sql`${table.externalMessageId} is not null`),
+		check(
+			"messages_sender_type_check",
+			sql`${table.senderType} in ('guest', 'host', 'system')`,
+		),
+		check(
+			"messages_delivery_status_check",
+			sql`${table.deliveryStatus} in ('pending', 'sent', 'failed')`,
+		),
+		check("messages_body_not_empty", sql`length(trim(${table.body})) > 0`),
+	],
+);
+
+export type ConversationMessage = typeof conversationMessage.$inferSelect;
 
 export const bookingGuest = pgTable(
 	"booking_guests",
@@ -1420,6 +1521,8 @@ export const schema = {
 	orderContact,
 	orderItem,
 	providerBooking,
+	conversation,
+	conversationMessage,
 	bookingGuest,
 	guestSubmissionJob,
 	accommodationItemDetail,

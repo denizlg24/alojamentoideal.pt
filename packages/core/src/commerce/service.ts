@@ -10,6 +10,8 @@ import {
 	bookingGuest as bookingGuestTable,
 	cartItem as cartItemTable,
 	cart as cartTable,
+	conversationMessage as conversationMessageTable,
+	conversation as conversationTable,
 	type Database,
 	type OrderBillingAddressSnapshot,
 	orderContact as orderContactTable,
@@ -23,6 +25,7 @@ import {
 	and,
 	asc,
 	count,
+	desc,
 	eq,
 	gt,
 	inArray,
@@ -34,6 +37,17 @@ import {
 import { parseQuoteBody } from "../accommodations";
 import type { RefundRequest, RefundResult } from "../integrations/stripe";
 import { trackEvent } from "../observability";
+import {
+	type ConversationMessageDto,
+	type ConversationSummary,
+	noopRealtimePublisher,
+	normalizeConversationPreview,
+	type ProviderConversationGateway,
+	type ProviderConversationMessage,
+	type RealtimePublisher,
+	type ReconcileConversationsSummary,
+	trimMessageBody,
+} from "./conversations";
 import { CommerceError, invalidRequest } from "./errors";
 import { hashIdempotencyRequest, idempotencyExpiresAt } from "./idempotency";
 import { housingFeeMinor, normalizeAccommodationQuoteSnapshot } from "./money";
@@ -135,6 +149,31 @@ const REFUND_STATE_UNKNOWN_FAILURE_DETAIL =
 const FINALIZATION_EMAIL_RETRY_BASE_MS = 5 * 60 * 1000;
 const FINALIZATION_EMAIL_RETRY_MAX_MS = 60 * 60 * 1000;
 const FINALIZATION_EMAIL_CLAIM_MS = 5 * 60 * 1000;
+const DEFAULT_CONVERSATION_MESSAGE_LIMIT = 100;
+const MAX_CONVERSATION_MESSAGE_LIMIT = 200;
+
+const conversationSummarySelection = {
+	externalThreadId: conversationTable.externalThreadId,
+	id: conversationTable.id,
+	lastMessageAt: conversationTable.lastMessageAt,
+	lastMessagePreview: conversationTable.lastMessagePreview,
+	providerBookingId: conversationTable.providerBookingId,
+	status: conversationTable.status,
+	unreadCount: conversationTable.unreadCount,
+};
+
+const conversationMessageSelection = {
+	body: conversationMessageTable.body,
+	conversationId: conversationMessageTable.conversationId,
+	deliveryStatus: conversationMessageTable.deliveryStatus,
+	externalMessageId: conversationMessageTable.externalMessageId,
+	id: conversationMessageTable.id,
+	isAutomatic: conversationMessageTable.isAutomatic,
+	readAt: conversationMessageTable.readAt,
+	senderMemberId: conversationMessageTable.senderMemberId,
+	senderType: conversationMessageTable.senderType,
+	sentAt: conversationMessageTable.sentAt,
+};
 
 type Transaction = Parameters<Parameters<Database["transaction"]>[0]>[0];
 type DbExecutor = Database | Transaction;
@@ -194,6 +233,12 @@ export interface CommerceServiceOptions {
 	resolveReservationGateway?: (
 		provider: string,
 	) => ProviderReservationGateway | undefined;
+	/** Resolves provider inbox/chat transport for order conversations. */
+	resolveConversationGateway?: (
+		provider: string,
+	) => ProviderConversationGateway | undefined;
+	/** Publishes conversation/message updates to browsers. Defaults to no-op. */
+	realtimePublisher?: RealtimePublisher;
 	/** Issues a Stripe refund during compensation; required for auto-refund (D4). */
 	refundPayment?: (request: RefundRequest) => Promise<RefundResult>;
 	/** Reads live PaymentIntent status for the reconciler (webhook-missed path). */
@@ -372,7 +417,9 @@ export class CommerceService {
 	readonly #quoteAccommodation: CommerceServiceOptions["quoteAccommodation"];
 	readonly #quoteTtlSeconds: number;
 	readonly #resolveDiscount: CommerceServiceOptions["resolveDiscount"];
+	readonly #resolveConversationGateway: CommerceServiceOptions["resolveConversationGateway"];
 	readonly #resolveReservationGateway: CommerceServiceOptions["resolveReservationGateway"];
+	readonly #realtimePublisher: RealtimePublisher;
 	readonly #refundPayment: CommerceServiceOptions["refundPayment"];
 	readonly #retrievePaymentIntent: CommerceServiceOptions["retrievePaymentIntent"];
 	readonly #autoRefundOnFailure: boolean;
@@ -387,7 +434,10 @@ export class CommerceService {
 		this.#quoteAccommodation = options.quoteAccommodation;
 		this.#quoteTtlSeconds = options.quoteTtlSeconds;
 		this.#resolveDiscount = options.resolveDiscount;
+		this.#resolveConversationGateway = options.resolveConversationGateway;
 		this.#resolveReservationGateway = options.resolveReservationGateway;
+		this.#realtimePublisher =
+			options.realtimePublisher ?? noopRealtimePublisher;
 		this.#refundPayment = options.refundPayment;
 		this.#retrievePaymentIntent = options.retrievePaymentIntent;
 		this.#autoRefundOnFailure = options.autoRefundOnFailure ?? true;
@@ -1329,6 +1379,346 @@ export class CommerceService {
 		}
 	}
 
+	async readOrderConversations(
+		access: ResolvedOrderAccess,
+	): Promise<ConversationSummary[]> {
+		this.#assertOrderPermission(access, "chat");
+		const rows = await this.#db
+			.select(conversationSummarySelection)
+			.from(conversationTable)
+			.where(eq(conversationTable.orderId, access.order.id))
+			.orderBy(
+				desc(conversationTable.lastMessageAt),
+				asc(conversationTable.id),
+			);
+		return rows.map((row) => this.#toConversationSummary(row));
+	}
+
+	async readConversationMessages(
+		access: ResolvedOrderAccess,
+		conversationId: string,
+		options: { limit?: number } = {},
+	): Promise<ConversationMessageDto[]> {
+		this.#assertOrderPermission(access, "chat");
+		await this.#loadConversationForAccess(access, conversationId);
+		const limit = Math.min(
+			Math.max(options.limit ?? DEFAULT_CONVERSATION_MESSAGE_LIMIT, 1),
+			MAX_CONVERSATION_MESSAGE_LIMIT,
+		);
+		const rows = await this.#db
+			.select(conversationMessageSelection)
+			.from(conversationMessageTable)
+			.where(eq(conversationMessageTable.conversationId, conversationId))
+			.orderBy(
+				asc(conversationMessageTable.sentAt),
+				asc(conversationMessageTable.id),
+			)
+			.limit(limit);
+		return rows.map((row) => this.#toMessageDto(row));
+	}
+
+	async sendConversationMessage(
+		access: ResolvedOrderAccess,
+		conversationId: string,
+		input: { body: string },
+	): Promise<ConversationMessageDto> {
+		this.#assertOrderPermission(access, "chat");
+		const body = trimMessageBody(input.body);
+		if (body.length === 0) {
+			throw invalidRequest("Message body is required.", [
+				{ message: "Message body is required.", path: "body" },
+			]);
+		}
+
+		const conversation = await this.#loadConversationForAccess(
+			access,
+			conversationId,
+		);
+		if (conversation.status === "archived" || !conversation.externalThreadId) {
+			throw new CommerceError(
+				"conversation_unavailable",
+				"This conversation is not ready yet.",
+				409,
+			);
+		}
+
+		const now = new Date();
+		const [inserted] = await this.#db
+			.insert(conversationMessageTable)
+			.values({
+				body,
+				conversationId,
+				createdAt: now,
+				deliveryStatus: "pending",
+				id: crypto.randomUUID(),
+				isAutomatic: false,
+				senderMemberId: access.member?.id ?? null,
+				senderType: "guest",
+				sentAt: now,
+				updatedAt: now,
+			})
+			.returning(conversationMessageSelection);
+		if (!inserted) {
+			throw new CommerceError(
+				"conversation_unavailable",
+				"Could not create the message.",
+				503,
+			);
+		}
+
+		const pending = this.#toMessageDto(inserted);
+		await this.#publishMessageCreatedSafe(conversationId, pending);
+
+		const gateway = this.#conversationGatewayFor(conversation.provider);
+		if (!gateway) {
+			return this.#markConversationMessageFailed(
+				conversationId,
+				pending.id,
+				"Conversation gateway is not configured.",
+			);
+		}
+
+		try {
+			const externalMessageId = await gateway.sendMessage(
+				conversation.externalThreadId,
+				body,
+			);
+			const delivered = await this.#markConversationMessageDelivered(
+				conversationId,
+				pending.id,
+				externalMessageId,
+				now,
+			);
+			trackEvent({
+				metadata: {
+					conversationId,
+					messageId: delivered.id,
+					orderId: access.order.id,
+				},
+				name: "conversation_message_sent",
+				provider: conversation.provider,
+				type: "integration",
+			});
+			return delivered;
+		} catch (error) {
+			const message = error instanceof Error ? error.message : String(error);
+			trackEvent({
+				metadata: {
+					conversationId,
+					error: message,
+					messageId: pending.id,
+					orderId: access.order.id,
+				},
+				name: "conversation_message_send_failed",
+				provider: conversation.provider,
+				severity: "warning",
+				type: "integration",
+			});
+			return this.#markConversationMessageFailed(
+				conversationId,
+				pending.id,
+				message,
+			);
+		}
+	}
+
+	async retryConversationMessage(
+		access: ResolvedOrderAccess,
+		conversationId: string,
+		messageId: string,
+	): Promise<ConversationMessageDto> {
+		this.#assertOrderPermission(access, "chat");
+		const conversation = await this.#loadConversationForAccess(
+			access,
+			conversationId,
+		);
+		if (conversation.status === "archived" || !conversation.externalThreadId) {
+			throw new CommerceError(
+				"conversation_unavailable",
+				"This conversation is not ready yet.",
+				409,
+			);
+		}
+
+		const [messageRow] = await this.#db
+			.select(conversationMessageSelection)
+			.from(conversationMessageTable)
+			.where(
+				and(
+					eq(conversationMessageTable.id, messageId),
+					eq(conversationMessageTable.conversationId, conversationId),
+					eq(conversationMessageTable.deliveryStatus, "failed"),
+				),
+			)
+			.limit(1);
+		if (!messageRow) {
+			throw new CommerceError(
+				"conversation_message_not_found",
+				"Message not found.",
+				404,
+			);
+		}
+		if (
+			access.role !== "owner" &&
+			messageRow.senderMemberId !== access.member?.id
+		) {
+			throw new CommerceError(
+				"order_access_denied",
+				"You do not have access to do that.",
+				403,
+			);
+		}
+
+		const [pending] = await this.#db
+			.update(conversationMessageTable)
+			.set({ deliveryStatus: "pending", updatedAt: new Date() })
+			.where(eq(conversationMessageTable.id, messageId))
+			.returning(conversationMessageSelection);
+		if (pending) {
+			await this.#publishMessageCreatedSafe(
+				conversationId,
+				this.#toMessageDto(pending),
+			);
+		}
+
+		const gateway = this.#conversationGatewayFor(conversation.provider);
+		if (!gateway) {
+			return this.#markConversationMessageFailed(
+				conversationId,
+				messageId,
+				"Conversation gateway is not configured.",
+			);
+		}
+
+		try {
+			const externalMessageId = await gateway.sendMessage(
+				conversation.externalThreadId,
+				messageRow.body,
+			);
+			return this.#markConversationMessageDelivered(
+				conversationId,
+				messageId,
+				externalMessageId,
+				new Date(),
+			);
+		} catch (error) {
+			return this.#markConversationMessageFailed(
+				conversationId,
+				messageId,
+				error instanceof Error ? error.message : String(error),
+			);
+		}
+	}
+
+	async reconcileConversations(
+		options: { limit?: number; now?: Date } = {},
+	): Promise<ReconcileConversationsSummary> {
+		const now = options.now ?? new Date();
+		const limit = options.limit ?? 50;
+		const summary: ReconcileConversationsSummary = {
+			failed: 0,
+			importedMessages: 0,
+			linked: 0,
+			provisioned: 0,
+			scanned: 0,
+			synced: 0,
+		};
+
+		const missingRows = await this.#db
+			.select({
+				orderId: orderItemTable.orderId,
+				provider: providerBookingTable.provider,
+				providerBookingId: providerBookingTable.id,
+				providerReservationId: providerBookingTable.providerReservationId,
+			})
+			.from(providerBookingTable)
+			.innerJoin(
+				orderItemTable,
+				eq(orderItemTable.id, providerBookingTable.orderItemId),
+			)
+			.innerJoin(orderTable, eq(orderTable.id, orderItemTable.orderId))
+			.leftJoin(
+				conversationTable,
+				eq(conversationTable.providerBookingId, providerBookingTable.id),
+			)
+			.where(
+				and(
+					eq(orderTable.status, "confirmed"),
+					eq(providerBookingTable.normalizedStatus, "confirmed"),
+					sql`${providerBookingTable.providerReservationId} is not null`,
+					isNull(conversationTable.id),
+				),
+			)
+			.limit(limit);
+
+		for (const row of missingRows) {
+			summary.scanned += 1;
+			try {
+				const provisioned = await this.#provisionConversation(row, now);
+				if (provisioned.created) {
+					summary.provisioned += 1;
+				}
+				if (provisioned.linked) {
+					summary.linked += 1;
+				}
+			} catch (error) {
+				summary.failed += 1;
+				this.#trackConversationReconciliationFailure(
+					row.provider,
+					row.providerBookingId,
+					error,
+				);
+			}
+		}
+
+		const conversationRows = await this.#db
+			.select({
+				externalThreadId: conversationTable.externalThreadId,
+				id: conversationTable.id,
+				orderId: conversationTable.orderId,
+				provider: conversationTable.provider,
+				providerBookingId: conversationTable.providerBookingId,
+				status: conversationTable.status,
+			})
+			.from(conversationTable)
+			.where(inArray(conversationTable.status, ["pending", "active"]))
+			.orderBy(sql`${conversationTable.lastSyncedAt} asc nulls first`)
+			.limit(limit);
+
+		for (const conversation of conversationRows) {
+			summary.scanned += 1;
+			try {
+				const ready =
+					conversation.externalThreadId !== null
+						? conversation
+						: await this.#tryLinkConversation(conversation, now);
+				if (ready && ready.externalThreadId !== conversation.externalThreadId) {
+					summary.linked += 1;
+				}
+				if (!ready?.externalThreadId) {
+					continue;
+				}
+				const imported = await this.#syncConversationMessages(
+					ready.id,
+					ready.provider,
+					ready.externalThreadId,
+					now,
+				);
+				summary.importedMessages += imported;
+				summary.synced += 1;
+			} catch (error) {
+				summary.failed += 1;
+				this.#trackConversationReconciliationFailure(
+					conversation.provider,
+					conversation.providerBookingId ?? conversation.id,
+					error,
+				);
+			}
+		}
+
+		return summary;
+	}
+
 	/**
 	 * Aggregates the durable order-hub read model from a resolved access context.
 	 * Role drives visibility: the `owner` sees pricing, the tax/billing contact,
@@ -1553,6 +1943,7 @@ export class CommerceService {
 			bookingStatus: toOrderBookingStatus(orderRow.status),
 			contact,
 			createdAt: orderRow.createdAt.toISOString(),
+			conversations: await this.readOrderConversations(access),
 			currency: orderRow.currency,
 			guestProgress: orderGuestProgress,
 			items,
@@ -1571,6 +1962,475 @@ export class CommerceService {
 			reference: orderRow.publicReference,
 			role: access.role,
 		};
+	}
+
+	#conversationGatewayFor(
+		provider: string,
+	): ProviderConversationGateway | null {
+		return this.#resolveConversationGateway?.(provider) ?? null;
+	}
+
+	#toConversationSummary(row: {
+		externalThreadId: string | null;
+		id: string;
+		lastMessageAt: Date | null;
+		lastMessagePreview: string | null;
+		providerBookingId: string | null;
+		status: ConversationSummary["status"];
+		unreadCount: number;
+	}): ConversationSummary {
+		return {
+			externalThreadId: row.externalThreadId,
+			id: row.id,
+			lastMessageAt: row.lastMessageAt?.toISOString() ?? null,
+			lastMessagePreview: row.lastMessagePreview,
+			providerBookingId: row.providerBookingId,
+			status: row.status,
+			unreadCount: row.unreadCount,
+		};
+	}
+
+	#toMessageDto(row: {
+		body: string;
+		conversationId: string;
+		deliveryStatus: ConversationMessageDto["deliveryStatus"];
+		externalMessageId: string | null;
+		id: string;
+		isAutomatic: boolean;
+		readAt: Date | null;
+		senderMemberId: string | null;
+		senderType: ConversationMessageDto["senderType"];
+		sentAt: Date;
+	}): ConversationMessageDto {
+		return {
+			body: row.body,
+			conversationId: row.conversationId,
+			deliveryStatus: row.deliveryStatus,
+			externalMessageId: row.externalMessageId,
+			id: row.id,
+			isAutomatic: row.isAutomatic,
+			readAt: row.readAt?.toISOString() ?? null,
+			senderMemberId: row.senderMemberId,
+			senderType: row.senderType,
+			sentAt: row.sentAt.toISOString(),
+		};
+	}
+
+	async #loadConversationForAccess(
+		access: ResolvedOrderAccess,
+		conversationId: string,
+	): Promise<{
+		externalThreadId: string | null;
+		id: string;
+		orderId: string;
+		provider: string;
+		providerBookingId: string | null;
+		status: ConversationSummary["status"];
+	}> {
+		const [conversation] = await this.#db
+			.select({
+				externalThreadId: conversationTable.externalThreadId,
+				id: conversationTable.id,
+				orderId: conversationTable.orderId,
+				provider: conversationTable.provider,
+				providerBookingId: conversationTable.providerBookingId,
+				status: conversationTable.status,
+			})
+			.from(conversationTable)
+			.where(
+				and(
+					eq(conversationTable.id, conversationId),
+					eq(conversationTable.orderId, access.order.id),
+				),
+			)
+			.limit(1);
+		if (!conversation) {
+			throw new CommerceError(
+				"conversation_not_found",
+				"Conversation not found.",
+				404,
+			);
+		}
+		return conversation;
+	}
+
+	async #touchConversationPreview(
+		conversationId: string,
+		body: string,
+		sentAt: Date,
+	): Promise<void> {
+		const [summary] = await this.#db
+			.update(conversationTable)
+			.set({
+				lastMessageAt: sentAt,
+				lastMessagePreview: normalizeConversationPreview(body),
+				updatedAt: new Date(),
+			})
+			.where(eq(conversationTable.id, conversationId))
+			.returning(conversationSummarySelection);
+		if (summary) {
+			await this.#publishConversationUpdatedSafe(
+				conversationId,
+				this.#toConversationSummary(summary),
+			);
+		}
+	}
+
+	async #markConversationMessageDelivered(
+		conversationId: string,
+		messageId: string,
+		externalMessageId: string | null,
+		fallbackSentAt: Date,
+	): Promise<ConversationMessageDto> {
+		const [updated] = await this.#db
+			.update(conversationMessageTable)
+			.set({
+				deliveryStatus: "sent",
+				externalMessageId,
+				sentAt: fallbackSentAt,
+				updatedAt: new Date(),
+			})
+			.where(eq(conversationMessageTable.id, messageId))
+			.returning(conversationMessageSelection);
+		if (!updated) {
+			throw new CommerceError(
+				"conversation_message_not_found",
+				"Message not found.",
+				404,
+			);
+		}
+		const dto = this.#toMessageDto(updated);
+		await this.#touchConversationPreview(
+			conversationId,
+			dto.body,
+			updated.sentAt,
+		);
+		await this.#publishMessageCreatedSafe(conversationId, dto);
+		return dto;
+	}
+
+	async #markConversationMessageFailed(
+		conversationId: string,
+		messageId: string,
+		errorMessage: string,
+	): Promise<ConversationMessageDto> {
+		const [updated] = await this.#db
+			.update(conversationMessageTable)
+			.set({
+				deliveryStatus: "failed",
+				rawPayload: { deliveryError: errorMessage.slice(0, 1000) },
+				updatedAt: new Date(),
+			})
+			.where(eq(conversationMessageTable.id, messageId))
+			.returning(conversationMessageSelection);
+		if (!updated) {
+			throw new CommerceError(
+				"conversation_message_not_found",
+				"Message not found.",
+				404,
+			);
+		}
+		const dto = this.#toMessageDto(updated);
+		await this.#touchConversationPreview(
+			conversationId,
+			dto.body,
+			updated.sentAt,
+		);
+		await this.#publishMessageCreatedSafe(conversationId, dto);
+		return dto;
+	}
+
+	async #publishMessageCreatedSafe(
+		conversationId: string,
+		message: ConversationMessageDto,
+	): Promise<void> {
+		try {
+			await this.#realtimePublisher.publishMessageCreated(
+				conversationId,
+				message,
+			);
+		} catch (error) {
+			this.#trackRealtimePublishFailure(conversationId, error);
+		}
+	}
+
+	async #publishConversationUpdatedSafe(
+		conversationId: string,
+		conversation: ConversationSummary,
+	): Promise<void> {
+		try {
+			await this.#realtimePublisher.publishConversationUpdated(
+				conversationId,
+				conversation,
+			);
+		} catch (error) {
+			this.#trackRealtimePublishFailure(conversationId, error);
+		}
+	}
+
+	async #provisionConversation(
+		row: {
+			orderId: string;
+			provider: string;
+			providerBookingId: string;
+			providerReservationId: string | null;
+		},
+		now: Date,
+	): Promise<{ created: boolean; linked: boolean }> {
+		const gateway = this.#conversationGatewayFor(row.provider);
+		const thread =
+			gateway && row.providerReservationId
+				? await gateway.findThreadForReservation(row.providerReservationId)
+				: null;
+
+		const [created] = await this.#db
+			.insert(conversationTable)
+			.values({
+				createdAt: now,
+				externalThreadId: thread?.externalThreadId ?? null,
+				id: crypto.randomUUID(),
+				lastMessagePreview: thread?.lastMessagePreview ?? null,
+				orderId: row.orderId,
+				provider: row.provider,
+				providerBookingId: row.providerBookingId,
+				status: thread?.status ?? "pending",
+				unreadCount: thread?.unreadCount ?? 0,
+				updatedAt: now,
+			})
+			.onConflictDoNothing()
+			.returning({ id: conversationTable.id });
+
+		if (created && thread) {
+			trackEvent({
+				metadata: {
+					conversationId: created.id,
+					providerBookingId: row.providerBookingId,
+					providerReservationId: row.providerReservationId,
+				},
+				name: "conversation_linked",
+				provider: row.provider,
+				type: "integration",
+			});
+		}
+
+		return { created: Boolean(created), linked: Boolean(created && thread) };
+	}
+
+	async #tryLinkConversation(
+		conversation: {
+			externalThreadId: string | null;
+			id: string;
+			orderId: string;
+			provider: string;
+			providerBookingId: string | null;
+			status: ConversationSummary["status"];
+		},
+		now: Date,
+	): Promise<typeof conversation | null> {
+		if (!conversation.providerBookingId) {
+			return conversation;
+		}
+		const gateway = this.#conversationGatewayFor(conversation.provider);
+		if (!gateway) {
+			return conversation;
+		}
+		const [booking] = await this.#db
+			.select({
+				providerReservationId: providerBookingTable.providerReservationId,
+			})
+			.from(providerBookingTable)
+			.where(eq(providerBookingTable.id, conversation.providerBookingId))
+			.limit(1);
+		if (!booking?.providerReservationId) {
+			return conversation;
+		}
+
+		const thread = await gateway.findThreadForReservation(
+			booking.providerReservationId,
+		);
+		if (!thread) {
+			return conversation;
+		}
+
+		const [updated] = await this.#db
+			.update(conversationTable)
+			.set({
+				externalThreadId: thread.externalThreadId,
+				lastMessagePreview: thread.lastMessagePreview,
+				status: thread.status,
+				unreadCount: thread.unreadCount,
+				updatedAt: now,
+			})
+			.where(eq(conversationTable.id, conversation.id))
+			.returning({
+				externalThreadId: conversationTable.externalThreadId,
+				id: conversationTable.id,
+				orderId: conversationTable.orderId,
+				provider: conversationTable.provider,
+				providerBookingId: conversationTable.providerBookingId,
+				status: conversationTable.status,
+			});
+		return updated ?? conversation;
+	}
+
+	async #syncConversationMessages(
+		conversationId: string,
+		provider: string,
+		externalThreadId: string,
+		now: Date,
+	): Promise<number> {
+		const gateway = this.#conversationGatewayFor(provider);
+		if (!gateway) {
+			throw new Error(
+				`Conversation gateway is not configured for ${provider}.`,
+			);
+		}
+
+		const snapshot = await gateway.getThread(externalThreadId);
+		let latestMessage: ProviderConversationMessage | null = null;
+		let imported = 0;
+		for (const message of snapshot.messages) {
+			if (
+				!latestMessage ||
+				message.sentAt.getTime() >= latestMessage.sentAt.getTime()
+			) {
+				latestMessage = message;
+			}
+			const result = await this.#upsertProviderMessage(conversationId, message);
+			if (result.inserted) {
+				imported += 1;
+				trackEvent({
+					metadata: {
+						conversationId,
+						externalMessageId: message.externalMessageId,
+					},
+					name: "conversation_message_received",
+					provider,
+					type: "integration",
+				});
+				await this.#publishMessageCreatedSafe(conversationId, result.message);
+			}
+		}
+
+		const [summary] = await this.#db
+			.update(conversationTable)
+			.set({
+				lastMessageAt: latestMessage?.sentAt ?? null,
+				lastMessagePreview:
+					latestMessage?.body !== undefined
+						? normalizeConversationPreview(latestMessage.body)
+						: snapshot.thread.lastMessagePreview,
+				lastSyncedAt: now,
+				status: snapshot.thread.status,
+				unreadCount: snapshot.thread.unreadCount,
+				updatedAt: now,
+			})
+			.where(eq(conversationTable.id, conversationId))
+			.returning(conversationSummarySelection);
+		if (summary) {
+			await this.#publishConversationUpdatedSafe(
+				conversationId,
+				this.#toConversationSummary(summary),
+			);
+		}
+		return imported;
+	}
+
+	async #upsertProviderMessage(
+		conversationId: string,
+		message: ProviderConversationMessage,
+	): Promise<{ inserted: boolean; message: ConversationMessageDto }> {
+		const [existing] = await this.#db
+			.select({ id: conversationMessageTable.id })
+			.from(conversationMessageTable)
+			.where(
+				and(
+					eq(conversationMessageTable.conversationId, conversationId),
+					eq(
+						conversationMessageTable.externalMessageId,
+						message.externalMessageId,
+					),
+				),
+			)
+			.limit(1);
+		const now = new Date();
+		if (existing) {
+			const [updated] = await this.#db
+				.update(conversationMessageTable)
+				.set({
+					body: message.body,
+					deliveryStatus: "sent",
+					isAutomatic: message.isAutomatic,
+					rawPayload: message.raw,
+					senderType: message.senderType,
+					sentAt: message.sentAt,
+					updatedAt: now,
+				})
+				.where(eq(conversationMessageTable.id, existing.id))
+				.returning(conversationMessageSelection);
+			if (!updated) {
+				throw new CommerceError(
+					"conversation_message_not_found",
+					"Message not found.",
+					404,
+				);
+			}
+			return { inserted: false, message: this.#toMessageDto(updated) };
+		}
+
+		const [inserted] = await this.#db
+			.insert(conversationMessageTable)
+			.values({
+				body: message.body,
+				conversationId,
+				createdAt: now,
+				deliveryStatus: "sent",
+				externalMessageId: message.externalMessageId,
+				id: crypto.randomUUID(),
+				isAutomatic: message.isAutomatic,
+				rawPayload: message.raw,
+				senderType: message.senderType,
+				sentAt: message.sentAt,
+				updatedAt: now,
+			})
+			.returning(conversationMessageSelection);
+		if (!inserted) {
+			throw new CommerceError(
+				"conversation_unavailable",
+				"Could not import the message.",
+				503,
+			);
+		}
+		return { inserted: true, message: this.#toMessageDto(inserted) };
+	}
+
+	#trackRealtimePublishFailure(conversationId: string, error: unknown): void {
+		trackEvent({
+			metadata: {
+				conversationId,
+				error: error instanceof Error ? error.message : String(error),
+			},
+			name: "conversation_realtime_publish_failed",
+			severity: "warning",
+			type: "integration",
+		});
+	}
+
+	#trackConversationReconciliationFailure(
+		provider: string,
+		reference: string,
+		error: unknown,
+	): void {
+		trackEvent({
+			metadata: {
+				error: error instanceof Error ? error.message : String(error),
+				reference,
+			},
+			name: "conversation_reconcile_failed",
+			provider,
+			severity: "warning",
+			type: "integration",
+		});
 	}
 
 	async #readResolvedOrder(
