@@ -45,6 +45,34 @@ export async function createIdentityVerificationSession(
 	return snapshot(session);
 }
 
+/**
+ * Creates a document VerificationSession for an order guest. This is intentionally
+ * keyed to `bookingGuest.id`, not a signed-in account, so magic-link order access
+ * can complete verification without requiring registration.
+ */
+export async function createGuestIdentityVerificationSession(
+	stripe: Stripe,
+	params: {
+		bookingGuestId: string;
+		orderId: string;
+		providerBookingId: string;
+		returnUrl?: string;
+	},
+): Promise<IdentityVerificationSnapshot> {
+	const session = await stripe.identity.verificationSessions.create({
+		type: "document",
+		client_reference_id: params.bookingGuestId,
+		metadata: {
+			bookingGuestId: params.bookingGuestId,
+			orderId: params.orderId,
+			providerBookingId: params.providerBookingId,
+		},
+		options: { document: { require_matching_selfie: true } },
+		...(params.returnUrl ? { return_url: params.returnUrl } : {}),
+	});
+	return snapshot(session);
+}
+
 /** Retrieves the current state of a VerificationSession by id. */
 export async function retrieveIdentityVerificationSession(
 	stripe: Stripe,

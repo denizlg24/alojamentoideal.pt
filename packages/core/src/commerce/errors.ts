@@ -1,4 +1,5 @@
 export type CommerceErrorCode =
+	| "booking_guest_not_found"
 	| "cart_changed"
 	| "cart_converted"
 	| "cart_expired"

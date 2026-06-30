@@ -1338,6 +1338,9 @@ export const bookingGuest = pgTable(
 			() => userIdentityDocument.id,
 			{ onDelete: "set null" },
 		),
+		orderMemberId: text("order_member_id").references(() => orderMember.id, {
+			onDelete: "set null",
+		}),
 		position: integer("position").notNull(),
 		identityStatus: text("identity_status")
 			.$type<BookingGuestIdentityStatus>()
@@ -1374,10 +1377,16 @@ export const bookingGuest = pgTable(
 			.where(sql`${table.stripeVerificationSessionId} is not null`),
 		index("booking_guests_provider_booking_idx").on(table.providerBookingId),
 		index("booking_guests_user_idx").on(table.userId),
+		index("booking_guests_order_member_idx")
+			.on(table.orderMemberId)
+			.where(sql`${table.orderMemberId} is not null`),
 		index("booking_guests_identity_document_idx").on(
 			table.userIdentityDocumentId,
 		),
 		index("booking_guests_purge_after_idx").on(table.purgeAfter),
+		uniqueIndex("booking_guests_booking_member_uidx")
+			.on(table.providerBookingId, table.orderMemberId)
+			.where(sql`${table.orderMemberId} is not null`),
 		check("booking_guests_position_nonneg", sql`${table.position} >= 0`),
 		check(
 			"booking_guests_identity_status_check",

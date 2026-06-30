@@ -63,9 +63,13 @@ export const GET = withApiRoute<OrderStatusRouteContext>(
 				amountMinor: record.totalMinor,
 				amountPaidMinor: record.amountPaidMinor,
 				bookingStatus: record.bookingStatus,
+				conversationAvailability: record.conversationAvailability,
 				currency: record.currency,
+				guestProgress: record.guestProgress,
 				orderId: record.orderId,
+				orderUrl: `/order/${encodeURIComponent(record.publicReference)}`,
 				paymentStatus,
+				provisioningSubState: record.provisioningSubState,
 				publicReference: record.publicReference,
 			};
 			return Response.json(body);

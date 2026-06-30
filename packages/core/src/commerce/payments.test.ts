@@ -1,5 +1,9 @@
 import { describe, expect, test } from "bun:test";
-import { mapStripePaymentStatus, toOrderBookingStatus } from "./payments";
+import {
+	mapStripePaymentStatus,
+	toOrderBookingStatus,
+	toOrderProvisioningSubState,
+} from "./payments";
 
 describe("mapStripePaymentStatus", () => {
 	test("maps the statuses checkout cares about", () => {
@@ -37,5 +41,38 @@ describe("toOrderBookingStatus", () => {
 
 	test("falls back to draft for unexpected values", () => {
 		expect(toOrderBookingStatus("weird")).toBe("draft");
+	});
+});
+
+describe("toOrderProvisioningSubState", () => {
+	test("distinguishes held, paid, confirmed, and refunded states", () => {
+		expect(
+			toOrderProvisioningSubState({
+				amountPaidMinor: 0,
+				amountRefundedMinor: 0,
+				bookingStatus: "pending",
+			}),
+		).toBe("held-unpaid");
+		expect(
+			toOrderProvisioningSubState({
+				amountPaidMinor: 1000,
+				amountRefundedMinor: 0,
+				bookingStatus: "pending",
+			}),
+		).toBe("paid-confirming");
+		expect(
+			toOrderProvisioningSubState({
+				amountPaidMinor: 1000,
+				amountRefundedMinor: 0,
+				bookingStatus: "confirmed",
+			}),
+		).toBe("confirmed");
+		expect(
+			toOrderProvisioningSubState({
+				amountPaidMinor: 1000,
+				amountRefundedMinor: 1000,
+				bookingStatus: "cancelled",
+			}),
+		).toBe("refunded");
 	});
 });

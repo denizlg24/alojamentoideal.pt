@@ -1,6 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import type { BookingGuestIdentityStatus } from "@workspace/db";
-import { summarizeGuestProgress } from "./order-detail";
+import {
+	summarizeConversationAvailability,
+	summarizeGuestProgress,
+} from "./order-detail";
 
 describe("summarizeGuestProgress", () => {
 	test("an empty set is zeroed", () => {
@@ -41,5 +44,32 @@ describe("summarizeGuestProgress", () => {
 			total: 6,
 			verified: 1,
 		});
+	});
+});
+
+describe("summarizeConversationAvailability", () => {
+	test("reports unavailable when no conversation exists", () => {
+		expect(summarizeConversationAvailability([])).toBe("unavailable");
+	});
+
+	test("reports pending until an active external thread is linked", () => {
+		expect(
+			summarizeConversationAvailability([
+				{ externalThreadId: null, status: "pending" },
+			]),
+		).toBe("pending");
+		expect(
+			summarizeConversationAvailability([
+				{ externalThreadId: "thread_1", status: "archived" },
+			]),
+		).toBe("pending");
+	});
+
+	test("reports available for an active linked thread", () => {
+		expect(
+			summarizeConversationAvailability([
+				{ externalThreadId: "thread_1", status: "active" },
+			]),
+		).toBe("available");
 	});
 });

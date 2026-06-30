@@ -1,4 +1,8 @@
 import type { OrderBillingAddressSnapshot } from "@workspace/db";
+import type {
+	OrderConversationAvailability,
+	OrderGuestProgress,
+} from "./order-detail";
 
 /**
  * Checkout payment types shared between the PaymentIntent route, the order
@@ -15,6 +19,12 @@ export type OrderBookingStatus =
 	| "draft"
 	| "failed"
 	| "pending";
+
+export type OrderProvisioningSubState =
+	| "confirmed"
+	| "held-unpaid"
+	| "paid-confirming"
+	| "refunded";
 
 /**
  * Normalized payment status surfaced to the client. Maps the subset of Stripe
@@ -89,8 +99,11 @@ export interface PayableOrder {
 export interface OrderStatusRecord {
 	amountPaidMinor: number;
 	bookingStatus: OrderBookingStatus;
+	conversationAvailability: OrderConversationAvailability;
 	currency: string;
+	guestProgress: OrderGuestProgress;
 	orderId: string;
+	provisioningSubState: OrderProvisioningSubState;
 	publicReference: string;
 	stripePaymentIntentId: string | null;
 	totalMinor: number;
@@ -101,9 +114,13 @@ export interface OrderStatusResponse {
 	amountMinor: number;
 	amountPaidMinor: number;
 	bookingStatus: OrderBookingStatus;
+	conversationAvailability: OrderConversationAvailability;
 	currency: string;
+	guestProgress: OrderGuestProgress;
 	orderId: string;
+	orderUrl: string;
 	paymentStatus: CheckoutPaymentStatus;
+	provisioningSubState: OrderProvisioningSubState;
 	publicReference: string;
 }
 
@@ -285,6 +302,27 @@ export function toOrderBookingStatus(value: string): OrderBookingStatus {
 	return ORDER_BOOKING_STATUSES.has(value as OrderBookingStatus)
 		? (value as OrderBookingStatus)
 		: "draft";
+}
+
+export function toOrderProvisioningSubState({
+	amountPaidMinor,
+	amountRefundedMinor,
+	bookingStatus,
+}: {
+	amountPaidMinor: number;
+	amountRefundedMinor: number;
+	bookingStatus: OrderBookingStatus;
+}): OrderProvisioningSubState {
+	if (bookingStatus === "confirmed") {
+		return "confirmed";
+	}
+	if (bookingStatus === "cancelled" || amountRefundedMinor > 0) {
+		return "refunded";
+	}
+	if (amountPaidMinor > 0) {
+		return "paid-confirming";
+	}
+	return "held-unpaid";
 }
 
 /**

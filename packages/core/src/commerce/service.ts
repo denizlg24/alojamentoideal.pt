@@ -7,6 +7,7 @@ import {
 	accommodationListing as accommodationListingTable,
 	accommodationQuoteSnapshot as accommodationQuoteSnapshotTable,
 	apiIdempotencyKey as apiIdempotencyKeyTable,
+	type BookingGuestIdentityStatus,
 	bookingGuest as bookingGuestTable,
 	cartItem as cartItemTable,
 	cart as cartTable,
@@ -35,6 +36,14 @@ import {
 	sql,
 } from "drizzle-orm";
 import { parseQuoteBody } from "../accommodations";
+import type {
+	IdentityVerificationStatus,
+	VerifiedIdentityDocumentFields,
+} from "../account";
+import {
+	decryptIdentityField,
+	encryptIdentityField,
+} from "../account/identity-encryption";
 import type { RefundRequest, RefundResult } from "../integrations/stripe";
 import { trackEvent } from "../observability";
 import {
@@ -70,8 +79,18 @@ import {
 	type OrderDetailCharge,
 	type OrderDetailItem,
 	type OrderDetailMember,
+	summarizeConversationAvailability,
 	summarizeGuestProgress,
 } from "./order-detail";
+import {
+	type BookingGuestDetail,
+	type BookingGuestIdentityFields,
+	type BookingGuestIdentitySessionTarget,
+	type BookingGuestList,
+	type BookingGuestUpdateInput,
+	bookingGuestPurgeAfter,
+	identityStatusToBookingGuestStatus,
+} from "./order-guests";
 import {
 	allocateDiscountByHousingBase,
 	buildDiscountChargeRow,
@@ -96,6 +115,7 @@ import {
 	type ReconcileReservationsSummary,
 	type RecordOrderPaymentFailureResult,
 	toOrderBookingStatus,
+	toOrderProvisioningSubState,
 } from "./payments";
 import {
 	buildHoldRequest,
@@ -173,6 +193,29 @@ const conversationMessageSelection = {
 	senderMemberId: conversationMessageTable.senderMemberId,
 	senderType: conversationMessageTable.senderType,
 	sentAt: conversationMessageTable.sentAt,
+};
+
+const bookingGuestSelection = {
+	dateOfBirthEncrypted: bookingGuestTable.dateOfBirthEncrypted,
+	documentExpiresOnEncrypted: bookingGuestTable.documentExpiresOnEncrypted,
+	documentIssuingCountryEncrypted:
+		bookingGuestTable.documentIssuingCountryEncrypted,
+	documentNumberEncrypted: bookingGuestTable.documentNumberEncrypted,
+	documentTypeEncrypted: bookingGuestTable.documentTypeEncrypted,
+	firstNameEncrypted: bookingGuestTable.firstNameEncrypted,
+	id: bookingGuestTable.id,
+	identityStatus: bookingGuestTable.identityStatus,
+	lastNameEncrypted: bookingGuestTable.lastNameEncrypted,
+	nationalityEncrypted: bookingGuestTable.nationalityEncrypted,
+	orderMemberId: bookingGuestTable.orderMemberId,
+	position: bookingGuestTable.position,
+	providerBookingId: bookingGuestTable.providerBookingId,
+	purgeAfter: bookingGuestTable.purgeAfter,
+	residenceCountryEncrypted: bookingGuestTable.residenceCountryEncrypted,
+	stripeVerificationReportId: bookingGuestTable.stripeVerificationReportId,
+	stripeVerificationSessionId: bookingGuestTable.stripeVerificationSessionId,
+	submittedAt: bookingGuestTable.submittedAt,
+	userId: bookingGuestTable.userId,
 };
 
 type Transaction = Parameters<Parameters<Database["transaction"]>[0]>[0];
@@ -298,6 +341,85 @@ type InviteDelivery = (delivery: {
 
 /** Lightweight address shape check for invite recipients (defence, not parsing). */
 const EMAIL_ADDRESS_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+function decryptGuestField(value: Buffer | Uint8Array | null): string | null {
+	return value ? decryptIdentityField(value) : null;
+}
+
+function encryptGuestField(value: string | null): Buffer | null {
+	return value === null ? null : encryptIdentityField(value);
+}
+
+function encryptGuestFields(fields: BookingGuestIdentityFields) {
+	return {
+		dateOfBirthEncrypted: encryptGuestField(fields.dateOfBirth),
+		documentExpiresOnEncrypted: encryptGuestField(fields.documentExpiresOn),
+		documentIssuingCountryEncrypted: encryptGuestField(
+			fields.documentIssuingCountry,
+		),
+		documentNumberEncrypted: encryptGuestField(fields.documentNumber),
+		documentTypeEncrypted: encryptGuestField(fields.documentType),
+		firstNameEncrypted: encryptGuestField(fields.firstName),
+		lastNameEncrypted: encryptGuestField(fields.lastName),
+		nationalityEncrypted: encryptGuestField(fields.nationality),
+		residenceCountryEncrypted: encryptGuestField(fields.residenceCountry),
+	};
+}
+
+function encryptVerifiedGuestField(
+	value: string | null,
+	existing: Buffer | null,
+): Buffer | null {
+	return value === null ? existing : encryptIdentityField(value);
+}
+
+function bookingGuestDto(row: {
+	dateOfBirthEncrypted: Buffer | null;
+	documentExpiresOnEncrypted: Buffer | null;
+	documentIssuingCountryEncrypted: Buffer | null;
+	documentNumberEncrypted: Buffer | null;
+	documentTypeEncrypted: Buffer | null;
+	firstNameEncrypted: Buffer | null;
+	id: string;
+	identityStatus: BookingGuestIdentityStatus;
+	lastNameEncrypted: Buffer | null;
+	nationalityEncrypted: Buffer | null;
+	orderMemberId: string | null;
+	position: number;
+	purgeAfter: Date | null;
+	residenceCountryEncrypted: Buffer | null;
+	submittedAt: Date | null;
+}): BookingGuestDetail {
+	return {
+		fields: {
+			dateOfBirth: decryptGuestField(row.dateOfBirthEncrypted),
+			documentExpiresOn: decryptGuestField(row.documentExpiresOnEncrypted),
+			documentIssuingCountry: decryptGuestField(
+				row.documentIssuingCountryEncrypted,
+			),
+			documentNumber: decryptGuestField(row.documentNumberEncrypted),
+			documentType: decryptGuestField(row.documentTypeEncrypted),
+			firstName: decryptGuestField(row.firstNameEncrypted),
+			lastName: decryptGuestField(row.lastNameEncrypted),
+			nationality: decryptGuestField(row.nationalityEncrypted),
+			residenceCountry: decryptGuestField(row.residenceCountryEncrypted),
+		},
+		id: row.id,
+		identityStatus: row.identityStatus,
+		orderMemberId: row.orderMemberId,
+		position: row.position,
+		purgeAfter: row.purgeAfter ? row.purgeAfter.toISOString() : null,
+		submittedAt: row.submittedAt ? row.submittedAt.toISOString() : null,
+	};
+}
+
+function parseWebhookTimestamp(value: string | null): Date | null {
+	if (!value) {
+		return null;
+	}
+	const date = new Date(value);
+	return Number.isNaN(date.getTime()) ? null : date;
+}
 
 interface RevalidatedSnapshot {
 	itemId: string;
@@ -877,6 +999,7 @@ export class CommerceService {
 		const [row] = await this.#db
 			.select({
 				amountPaidMinor: orderTable.amountPaidMinor,
+				amountRefundedMinor: orderTable.amountRefundedMinor,
 				cartToken: cartTable.cartToken,
 				currency: orderTable.currency,
 				id: orderTable.id,
@@ -901,11 +1024,42 @@ export class CommerceService {
 			throw new CommerceError("order_not_found", "Order not found.", 404);
 		}
 
+		const [guestRows, conversationRows] = await Promise.all([
+			this.#db
+				.select({
+					identityStatus: bookingGuestTable.identityStatus,
+				})
+				.from(bookingGuestTable)
+				.innerJoin(
+					providerBookingTable,
+					eq(providerBookingTable.id, bookingGuestTable.providerBookingId),
+				)
+				.where(eq(providerBookingTable.orderId, row.id)),
+			this.#db
+				.select({
+					externalThreadId: conversationTable.externalThreadId,
+					status: conversationTable.status,
+				})
+				.from(conversationTable)
+				.where(eq(conversationTable.orderId, row.id)),
+		]);
+		const bookingStatus = toOrderBookingStatus(row.status);
+
 		return {
 			amountPaidMinor: row.amountPaidMinor,
-			bookingStatus: toOrderBookingStatus(row.status),
+			bookingStatus,
+			conversationAvailability:
+				summarizeConversationAvailability(conversationRows),
 			currency: row.currency,
+			guestProgress: summarizeGuestProgress(
+				guestRows.map((guest) => guest.identityStatus),
+			),
 			orderId: row.id,
+			provisioningSubState: toOrderProvisioningSubState({
+				amountPaidMinor: row.amountPaidMinor,
+				amountRefundedMinor: row.amountRefundedMinor,
+				bookingStatus,
+			}),
 			publicReference: row.publicReference,
 			stripePaymentIntentId: row.stripePaymentIntentId,
 			totalMinor: row.totalMinor,
@@ -1400,6 +1554,502 @@ export class CommerceService {
 				403,
 			);
 		}
+	}
+
+	async readBookingGuests(
+		access: ResolvedOrderAccess,
+		providerBookingId: string,
+	): Promise<BookingGuestList> {
+		await this.#loadProviderBookingForAccess(access, providerBookingId);
+		const rows = await this.#readBookingGuestRows(this.#db, providerBookingId);
+
+		if (access.role === "owner") {
+			this.#assertOrderPermission(access, "manage_all_guests");
+			return {
+				bookingId: providerBookingId,
+				guests: rows.map(bookingGuestDto),
+			};
+		}
+
+		this.#assertOrderPermission(access, "manage_own_guest");
+		const member = access.member;
+		if (!member) {
+			throw new CommerceError(
+				"order_access_denied",
+				"You do not have access to do that.",
+				403,
+			);
+		}
+
+		const owned = rows.find((row) => row.orderMemberId === member.id);
+		const claimable = owned ?? rows.find((row) => row.orderMemberId === null);
+		if (!claimable) {
+			throw new CommerceError(
+				"order_full",
+				"No guest slot is available for this booking.",
+				409,
+			);
+		}
+
+		return {
+			bookingId: providerBookingId,
+			guests: [bookingGuestDto(claimable)],
+		};
+	}
+
+	async updateBookingGuests(
+		access: ResolvedOrderAccess,
+		providerBookingId: string,
+		inputs: BookingGuestUpdateInput[],
+	): Promise<BookingGuestList> {
+		if (inputs.length === 0) {
+			throw invalidRequest("At least one guest is required.", [
+				{ message: "At least one guest is required.", path: "guests" },
+			]);
+		}
+
+		await this.#loadProviderBookingForAccess(access, providerBookingId);
+		const now = new Date();
+
+		if (access.role === "owner") {
+			this.#assertOrderPermission(access, "manage_all_guests");
+			await this.#db.transaction(async (tx) => {
+				const booking = await this.#loadProviderBookingForAccess(
+					access,
+					providerBookingId,
+					tx,
+				);
+				for (const [index, input] of inputs.entries()) {
+					if (!input.id) {
+						throw invalidRequest("Guest id is required.", [
+							{
+								message: "Guest id is required.",
+								path: `guests.${index}.id`,
+							},
+						]);
+					}
+					await this.#updateGuestIdentityFields(tx, {
+						guestId: input.id,
+						fields: input.fields,
+						now,
+						orderMemberId: undefined,
+						providerBookingId,
+						purgeAfter: bookingGuestPurgeAfter(booking.stayEndsAt, now),
+					});
+				}
+			});
+		} else {
+			this.#assertOrderPermission(access, "manage_own_guest");
+			const member = access.member;
+			if (!member) {
+				throw new CommerceError(
+					"order_access_denied",
+					"You do not have access to do that.",
+					403,
+				);
+			}
+			if (inputs.length !== 1) {
+				throw invalidRequest("Members can update one guest slot.", [
+					{
+						message: "Members can update one guest slot.",
+						path: "guests",
+					},
+				]);
+			}
+			const input = inputs[0];
+			if (!input) {
+				throw invalidRequest("A guest is required.", [
+					{ message: "A guest is required.", path: "guests" },
+				]);
+			}
+			await this.#db.transaction(async (tx) => {
+				const booking = await this.#loadProviderBookingForAccess(
+					access,
+					providerBookingId,
+					tx,
+				);
+				const target = await this.#claimGuestForMember(tx, {
+					memberId: member.id,
+					providerBookingId,
+					requestedGuestId: input.id ?? null,
+					userId: member.userId,
+				});
+				await this.#updateGuestIdentityFields(tx, {
+					guestId: target.id,
+					fields: input.fields,
+					now,
+					orderMemberId: member.id,
+					providerBookingId,
+					purgeAfter: bookingGuestPurgeAfter(booking.stayEndsAt, now),
+				});
+			});
+		}
+
+		trackEvent({
+			metadata: { orderId: access.order.id, providerBookingId },
+			name: "guest_identity_provided",
+			provider: this.#provider,
+			type: "integration",
+		});
+
+		return this.readBookingGuests(access, providerBookingId);
+	}
+
+	async prepareBookingGuestIdentitySession(
+		access: ResolvedOrderAccess,
+		providerBookingId: string,
+		guestId: string,
+	): Promise<BookingGuestIdentitySessionTarget> {
+		await this.#loadProviderBookingForAccess(access, providerBookingId);
+
+		if (access.role === "owner") {
+			this.#assertOrderPermission(access, "manage_all_guests");
+			await this.#loadBookingGuestForAccess(providerBookingId, guestId);
+			return {
+				bookingGuestId: guestId,
+				orderId: access.order.id,
+				providerBookingId,
+			};
+		}
+
+		this.#assertOrderPermission(access, "manage_own_guest");
+		const member = access.member;
+		if (!member) {
+			throw new CommerceError(
+				"order_access_denied",
+				"You do not have access to do that.",
+				403,
+			);
+		}
+
+		await this.#db.transaction(async (tx) => {
+			await this.#claimGuestForMember(tx, {
+				memberId: member.id,
+				providerBookingId,
+				requestedGuestId: guestId,
+				userId: member.userId,
+			});
+		});
+
+		return {
+			bookingGuestId: guestId,
+			orderId: access.order.id,
+			providerBookingId,
+		};
+	}
+
+	async linkBookingGuestIdentitySession(
+		guestId: string,
+		sessionId: string,
+		status: Exclude<IdentityVerificationStatus, "unstarted">,
+	): Promise<void> {
+		const now = new Date();
+		const [updated] = await this.#db
+			.update(bookingGuestTable)
+			.set({
+				identityStatus: identityStatusToBookingGuestStatus(status),
+				stripeVerificationSessionId: sessionId,
+				updatedAt: now,
+			})
+			.where(eq(bookingGuestTable.id, guestId))
+			.returning({ id: bookingGuestTable.id });
+		if (!updated) {
+			throw new CommerceError(
+				"booking_guest_not_found",
+				"Guest not found.",
+				404,
+			);
+		}
+	}
+
+	async applyBookingGuestIdentityStatus({
+		sessionId,
+		status,
+		statusChangedAt,
+		verifiedFields,
+	}: {
+		sessionId: string;
+		status: Exclude<IdentityVerificationStatus, "unstarted">;
+		statusChangedAt: string | null;
+		verifiedFields?: VerifiedIdentityDocumentFields;
+	}): Promise<string | null> {
+		const [existing] = await this.#db
+			.select({
+				...bookingGuestSelection,
+				stayEndsAt: providerBookingTable.stayEndsAt,
+			})
+			.from(bookingGuestTable)
+			.innerJoin(
+				providerBookingTable,
+				eq(providerBookingTable.id, bookingGuestTable.providerBookingId),
+			)
+			.where(eq(bookingGuestTable.stripeVerificationSessionId, sessionId))
+			.limit(1);
+
+		if (!existing) {
+			return null;
+		}
+
+		const nextStatus = identityStatusToBookingGuestStatus(status);
+		if (existing.identityStatus === "verified" && nextStatus !== "verified") {
+			return existing.id;
+		}
+
+		const now = new Date();
+		const statusAt = parseWebhookTimestamp(statusChangedAt) ?? now;
+		const set: Partial<typeof bookingGuestTable.$inferInsert> = {
+			identityStatus: nextStatus,
+			purgeAfter:
+				existing.purgeAfter ?? bookingGuestPurgeAfter(existing.stayEndsAt, now),
+			updatedAt: now,
+		};
+
+		if (
+			(nextStatus === "processing" || nextStatus === "verified") &&
+			!existing.submittedAt
+		) {
+			set.submittedAt = statusAt;
+		}
+
+		if (nextStatus === "verified") {
+			if (!verifiedFields) {
+				throw new Error("verified guest identity fields are required");
+			}
+			Object.assign(set, {
+				dateOfBirthEncrypted: encryptVerifiedGuestField(
+					verifiedFields.dateOfBirth,
+					existing.dateOfBirthEncrypted,
+				),
+				documentExpiresOnEncrypted: encryptVerifiedGuestField(
+					verifiedFields.documentExpiresOn,
+					existing.documentExpiresOnEncrypted,
+				),
+				documentIssuingCountryEncrypted: encryptVerifiedGuestField(
+					verifiedFields.documentIssuingCountry,
+					existing.documentIssuingCountryEncrypted,
+				),
+				documentNumberEncrypted: encryptVerifiedGuestField(
+					verifiedFields.documentNumber,
+					existing.documentNumberEncrypted,
+				),
+				documentTypeEncrypted: encryptVerifiedGuestField(
+					verifiedFields.documentType,
+					existing.documentTypeEncrypted,
+				),
+				firstNameEncrypted: encryptVerifiedGuestField(
+					verifiedFields.firstName,
+					existing.firstNameEncrypted,
+				),
+				lastNameEncrypted: encryptVerifiedGuestField(
+					verifiedFields.lastName,
+					existing.lastNameEncrypted,
+				),
+				nationalityEncrypted: encryptVerifiedGuestField(
+					verifiedFields.nationality,
+					existing.nationalityEncrypted,
+				),
+				stripeVerificationReportId: verifiedFields.stripeVerificationReportId,
+			});
+		}
+
+		await this.#db
+			.update(bookingGuestTable)
+			.set(set)
+			.where(eq(bookingGuestTable.id, existing.id));
+
+		if (nextStatus === "verified") {
+			trackEvent({
+				metadata: {
+					bookingGuestId: existing.id,
+					providerBookingId: existing.providerBookingId,
+				},
+				name: "guest_identity_verified",
+				provider: this.#provider,
+				type: "integration",
+			});
+		}
+
+		return existing.id;
+	}
+
+	async #loadProviderBookingForAccess(
+		access: ResolvedOrderAccess,
+		providerBookingId: string,
+		db: DbExecutor = this.#db,
+	): Promise<{ id: string; stayEndsAt: Date | null }> {
+		const [booking] = await db
+			.select({
+				id: providerBookingTable.id,
+				stayEndsAt: providerBookingTable.stayEndsAt,
+			})
+			.from(providerBookingTable)
+			.where(
+				and(
+					eq(providerBookingTable.id, providerBookingId),
+					eq(providerBookingTable.orderId, access.order.id),
+				),
+			)
+			.limit(1);
+		if (!booking) {
+			throw new CommerceError(
+				"booking_guest_not_found",
+				"Booking not found.",
+				404,
+			);
+		}
+		return booking;
+	}
+
+	async #readBookingGuestRows(db: DbExecutor, providerBookingId: string) {
+		return db
+			.select(bookingGuestSelection)
+			.from(bookingGuestTable)
+			.where(eq(bookingGuestTable.providerBookingId, providerBookingId))
+			.orderBy(asc(bookingGuestTable.position));
+	}
+
+	async #loadBookingGuestForAccess(providerBookingId: string, guestId: string) {
+		const [guest] = await this.#db
+			.select(bookingGuestSelection)
+			.from(bookingGuestTable)
+			.where(
+				and(
+					eq(bookingGuestTable.id, guestId),
+					eq(bookingGuestTable.providerBookingId, providerBookingId),
+				),
+			)
+			.limit(1);
+		if (!guest) {
+			throw new CommerceError(
+				"booking_guest_not_found",
+				"Guest not found.",
+				404,
+			);
+		}
+		return guest;
+	}
+
+	async #claimGuestForMember(
+		tx: Transaction,
+		input: {
+			memberId: string;
+			providerBookingId: string;
+			requestedGuestId: string | null;
+			userId: string | null;
+		},
+	) {
+		const rows = await tx
+			.select(bookingGuestSelection)
+			.from(bookingGuestTable)
+			.where(eq(bookingGuestTable.providerBookingId, input.providerBookingId))
+			.orderBy(asc(bookingGuestTable.position))
+			.for("update");
+		const owned = rows.find((row) => row.orderMemberId === input.memberId);
+		const requested = input.requestedGuestId
+			? rows.find((row) => row.id === input.requestedGuestId)
+			: undefined;
+		if (input.requestedGuestId && !requested) {
+			throw new CommerceError(
+				"booking_guest_not_found",
+				"Guest not found.",
+				404,
+			);
+		}
+
+		const target =
+			requested ?? owned ?? rows.find((row) => row.orderMemberId === null);
+		if (!target) {
+			throw new CommerceError(
+				"order_full",
+				"No guest slot is available for this booking.",
+				409,
+			);
+		}
+		if (owned && target.id !== owned.id) {
+			throw new CommerceError(
+				"order_access_denied",
+				"You can only update your own guest details.",
+				403,
+			);
+		}
+		if (target.orderMemberId && target.orderMemberId !== input.memberId) {
+			throw new CommerceError(
+				"order_access_denied",
+				"You can only update your own guest details.",
+				403,
+			);
+		}
+
+		if (target.orderMemberId === input.memberId) {
+			return target;
+		}
+
+		const [claimed] = await tx
+			.update(bookingGuestTable)
+			.set({
+				orderMemberId: input.memberId,
+				updatedAt: new Date(),
+				userId: input.userId ?? target.userId,
+			})
+			.where(eq(bookingGuestTable.id, target.id))
+			.returning(bookingGuestSelection);
+		return claimed ?? target;
+	}
+
+	async #updateGuestIdentityFields(
+		tx: Transaction,
+		input: {
+			fields: BookingGuestIdentityFields;
+			guestId: string;
+			now: Date;
+			orderMemberId: string | undefined;
+			providerBookingId: string;
+			purgeAfter: Date;
+		},
+	) {
+		const [existing] = await tx
+			.select(bookingGuestSelection)
+			.from(bookingGuestTable)
+			.where(
+				and(
+					eq(bookingGuestTable.id, input.guestId),
+					eq(bookingGuestTable.providerBookingId, input.providerBookingId),
+				),
+			)
+			.limit(1)
+			.for("update");
+		if (!existing) {
+			throw new CommerceError(
+				"booking_guest_not_found",
+				"Guest not found.",
+				404,
+			);
+		}
+		if (
+			input.orderMemberId !== undefined &&
+			existing.orderMemberId !== null &&
+			existing.orderMemberId !== input.orderMemberId
+		) {
+			throw new CommerceError(
+				"order_access_denied",
+				"You can only update your own guest details.",
+				403,
+			);
+		}
+
+		const identityStatus =
+			existing.identityStatus === "verified" ? "verified" : "provided";
+		await tx
+			.update(bookingGuestTable)
+			.set({
+				...encryptGuestFields(input.fields),
+				identityStatus,
+				orderMemberId: input.orderMemberId ?? existing.orderMemberId,
+				purgeAfter: input.purgeAfter,
+				submittedAt: input.now,
+				updatedAt: input.now,
+			})
+			.where(eq(bookingGuestTable.id, input.guestId));
 	}
 
 	async readOrderConversations(
@@ -1975,11 +2625,16 @@ export class CommerceService {
 			}));
 		}
 
+		const bookingStatus = toOrderBookingStatus(orderRow.status);
+		const conversations = await this.readOrderConversations(access);
+
 		return {
-			bookingStatus: toOrderBookingStatus(orderRow.status),
+			bookingStatus,
 			contact,
+			conversationAvailability:
+				summarizeConversationAvailability(conversations),
 			createdAt: orderRow.createdAt.toISOString(),
-			conversations: await this.readOrderConversations(access),
+			conversations,
 			currency: orderRow.currency,
 			guestProgress: orderGuestProgress,
 			items,
@@ -1995,6 +2650,11 @@ export class CommerceService {
 						totalMinor: orderRow.totalMinor,
 					}
 				: null,
+			provisioningSubState: toOrderProvisioningSubState({
+				amountPaidMinor: orderRow.amountPaidMinor,
+				amountRefundedMinor: orderRow.amountRefundedMinor,
+				bookingStatus,
+			}),
 			reference: orderRow.publicReference,
 			role: access.role,
 		};

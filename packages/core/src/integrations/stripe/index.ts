@@ -4,6 +4,7 @@ export {
 	StripeConfigurationError,
 } from "./client";
 export {
+	createGuestIdentityVerificationSession,
 	createIdentityVerificationSession,
 	type IdentityVerificationResetOutcome,
 	type IdentityVerificationSnapshot,

@@ -254,6 +254,28 @@ async function handleIdentityUpdated(
 	event: Extract<RelevantStripeEvent, { type: "identity_updated" }>,
 	stripe: ReturnType<typeof createStripeClientFromEnv>,
 ): Promise<void> {
+	const verifiedFields =
+		event.status === "verified"
+			? await retrieveVerifiedIdentityDocumentFields(stripe, event.sessionId)
+			: undefined;
+
+	if (event.bookingGuestId) {
+		const guestId = await commerceService().applyBookingGuestIdentityStatus({
+			sessionId: event.sessionId,
+			status: event.status,
+			statusChangedAt: event.verifiedAt ?? event.statusChangedAt,
+			verifiedFields,
+		});
+		if (!guestId) {
+			logger.warn("Stripe identity event referenced an unknown booking guest", {
+				bookingGuestId: event.bookingGuestId,
+				sessionIdHash: stripeSessionLogId(event.sessionId),
+				status: event.status,
+			});
+		}
+		return;
+	}
+
 	const repository = accountProfileRepository();
 	const knownSession = await repository.hasIdentitySession(event.sessionId);
 	if (!knownSession) {
@@ -266,11 +288,6 @@ async function handleIdentityUpdated(
 		);
 		return;
 	}
-
-	const verifiedFields =
-		event.status === "verified"
-			? await retrieveVerifiedIdentityDocumentFields(stripe, event.sessionId)
-			: undefined;
 
 	const userId = await repository.applyIdentityStatus({
 		sessionId: event.sessionId,

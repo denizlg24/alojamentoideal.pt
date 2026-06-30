@@ -6,7 +6,7 @@ import type {
 	ProviderBookingStatus,
 } from "@workspace/db";
 import type { OrderRole } from "./order-access";
-import type { OrderBookingStatus } from "./payments";
+import type { OrderBookingStatus, OrderProvisioningSubState } from "./payments";
 
 /**
  * Guest-registration progress for a booking (or the whole order). Counts only —
@@ -108,6 +108,11 @@ export interface OrderConversationSummary {
 	unreadCount: number;
 }
 
+export type OrderConversationAvailability =
+	| "available"
+	| "pending"
+	| "unavailable";
+
 /**
  * The durable order hub read model behind `GET /api/orders/[reference]`. Built
  * from a {@link ResolvedOrderAccess}, so sensitive sections (`pricing`,
@@ -117,6 +122,7 @@ export interface OrderConversationSummary {
 export interface OrderDetail {
 	bookingStatus: OrderBookingStatus;
 	contact: OrderContactSummary | null;
+	conversationAvailability: OrderConversationAvailability;
 	conversations: OrderConversationSummary[];
 	createdAt: string;
 	currency: string;
@@ -124,6 +130,7 @@ export interface OrderDetail {
 	items: OrderDetailItem[];
 	members: OrderDetailMember[] | null;
 	pricing: OrderDetailPricing | null;
+	provisioningSubState: OrderProvisioningSubState;
 	reference: string;
 	role: OrderRole;
 }
@@ -147,4 +154,24 @@ export function summarizeGuestProgress(
 		total: statuses.length,
 		verified,
 	};
+}
+
+export function summarizeConversationAvailability(
+	conversations: ReadonlyArray<{
+		externalThreadId: string | null;
+		status: ConversationStatus;
+	}>,
+): OrderConversationAvailability {
+	if (
+		conversations.some(
+			(conversation) =>
+				conversation.status === "active" && conversation.externalThreadId,
+		)
+	) {
+		return "available";
+	}
+	if (conversations.length > 0) {
+		return "pending";
+	}
+	return "unavailable";
 }
