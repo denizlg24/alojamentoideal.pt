@@ -21,7 +21,7 @@ const nextConfig: NextConfig = {
 	experimental: {
 		// Page-data collection runs in worker processes. Catalog prerendering reads
 		// Postgres, so keep build fanout aligned with the DB build pool cap.
-		cpus: readPositiveInteger("NEXT_BUILD_WORKERS", 2),
+		// cpus: readPositiveInteger("NEXT_BUILD_WORKERS", 2),
 	},
 	images: {
 		// Listing/activity photos are served from the Hostify and Bokun CDNs.

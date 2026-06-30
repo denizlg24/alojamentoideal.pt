@@ -17,9 +17,11 @@ interface Section {
  */
 export function OrderSectionNav({
 	reference,
+	showMessages,
 	showPeople,
 }: {
 	reference: string;
+	showMessages: boolean;
 	showPeople: boolean;
 }) {
 	const pathname = usePathname();
@@ -27,9 +29,15 @@ export function OrderSectionNav({
 
 	const sections: Section[] = [
 		{ href: root, key: "overview", label: "Overview" },
-		{ href: `${root}/messages`, key: "messages", label: "Messages" },
 		{ href: `${root}/guests`, key: "guests", label: "Guests" },
 	];
+	if (showMessages) {
+		sections.splice(1, 0, {
+			href: `${root}/messages`,
+			key: "messages",
+			label: "Messages",
+		});
+	}
 	if (showPeople) {
 		sections.push({ href: `${root}/people`, key: "people", label: "People" });
 	}

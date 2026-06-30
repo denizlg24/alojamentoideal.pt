@@ -6,8 +6,10 @@ import {
 	type HostifyCreateTransactionInput,
 	HostifyNetworkError,
 	type HostifyRequestContext,
+	HostifyResponseValidationError,
 	HostifyTimeoutError,
 } from "../integrations/hostify";
+import { logger } from "../observability";
 import { minorUnitFactor } from "./money";
 
 /**
@@ -265,11 +267,48 @@ function classifyError(error: unknown): ClassifiedError {
 	) {
 		return { code: error.name, message: error.message, transient: true };
 	}
+	if (error instanceof HostifyResponseValidationError) {
+		// Default classification is permanent: a read that cannot be parsed must
+		// surface (e.g. hold lookup) rather than be mistaken for "no hold". The
+		// confirm/cancel mutation paths override this to transient via
+		// `toMutationFailure`, because there the same drift is ambiguous about
+		// whether the change applied.
+		const fields = error.issues.map((issue) => issue.path).join(", ");
+		return {
+			code: error.name,
+			message: fields ? `${error.message} (fields: ${fields})` : error.message,
+			transient: false,
+		};
+	}
 	return {
 		code: error instanceof Error ? error.name : "unknown_error",
 		message: error instanceof Error ? error.message : String(error),
 		transient: false,
 	};
+}
+
+/**
+ * Surfaces a provider response that failed schema validation, including the
+ * exact failing fields and a PII-safe skeleton of the real body. A schema drift
+ * on a mutation is otherwise invisible (the saga only persists a generic
+ * message), and on `confirm` it can drive a wrongful refund, so it is logged at
+ * the point the mutation is reported as failed.
+ */
+function logUnexpectedResponseShape(
+	operation: string,
+	reservationId: string,
+	error: unknown,
+): void {
+	if (!(error instanceof HostifyResponseValidationError)) {
+		return;
+	}
+	logger.error("Hostify reservation mutation returned an unexpected shape", {
+		issues: error.issues,
+		operation,
+		requestId: error.requestId,
+		reservationId,
+		responseShape: error.responseShape,
+	});
 }
 
 function toRecord(value: unknown): Record<string, unknown> {
@@ -451,22 +490,24 @@ export class HostifyReservationGateway implements ProviderReservationGateway {
 
 	async confirmHold(args: ConfirmHoldArgs): Promise<MutateHoldResult> {
 		try {
+			await this.#completeHoldTransaction(
+				args.transactionId,
+				args.paymentReference,
+			);
+
 			const response = await this.#client.reservations.update(
 				args.reservationId,
 				{ status: "accepted" },
 				this.#context,
 			);
-			const reservation = response.reservation as HostifyReservationShape;
-			await this.#completeHoldTransaction(
-				args.transactionId,
-				args.paymentReference,
-			);
+
 			return {
 				kind: "ok",
-				providerStatus: reservation.status ?? null,
-				raw: toRecord(response.reservation),
+				providerStatus: response.update_data?.status ?? null,
+				raw: toRecord(response.update_data),
 			};
 		} catch (error) {
+			logUnexpectedResponseShape("confirm", args.reservationId, error);
 			// A failed confirm on an already-accepted reservation (re-delivery race)
 			// must not trigger a false compensation: re-read and treat as success.
 			const reconciled = await this.#reconcileStatus(
@@ -480,7 +521,7 @@ export class HostifyReservationGateway implements ProviderReservationGateway {
 				);
 				return reconciled;
 			}
-			return toMutateFailure(classifyError(error));
+			return toMutationFailure(error);
 		}
 	}
 
@@ -491,14 +532,14 @@ export class HostifyReservationGateway implements ProviderReservationGateway {
 				{ notes: args.reason, status: "cancelled_by_host" },
 				this.#context,
 			);
-			const reservation = response.reservation as HostifyReservationShape;
 			await this.#voidHoldTransaction(args.transactionId, args.reason);
 			return {
 				kind: "ok",
-				providerStatus: reservation.status ?? null,
-				raw: toRecord(response.reservation),
+				providerStatus: response.update_data?.status ?? null,
+				raw: toRecord(response.update_data),
 			};
 		} catch (error) {
+			logUnexpectedResponseShape("cancel", args.reservationId, error);
 			const reconciled = await this.#reconcileStatus(
 				args.reservationId,
 				(status) => CANCELLED_PROVIDER_STATUSES.has(status),
@@ -507,7 +548,7 @@ export class HostifyReservationGateway implements ProviderReservationGateway {
 				await this.#voidHoldTransaction(args.transactionId, args.reason);
 				return reconciled;
 			}
-			return toMutateFailure(classifyError(error));
+			return toMutationFailure(error);
 		}
 	}
 
@@ -613,6 +654,24 @@ function toMutateFailure(classified: ClassifiedError): MutateHoldResult {
 		kind: classified.transient ? "transient" : "permanent",
 		message: classified.message,
 	};
+}
+
+/**
+ * Failure mapping for the confirm/cancel mutation paths. An unparseable response
+ * is forced to transient here (overriding the default permanent classification)
+ * because the mutation may have applied server-side: retrying and reconciling
+ * against live state is safer than refunding a possibly-settled booking.
+ */
+function toMutationFailure(error: unknown): MutateHoldResult {
+	const classified = classifyError(error);
+	if (error instanceof HostifyResponseValidationError) {
+		return {
+			code: classified.code,
+			kind: "transient",
+			message: classified.message,
+		};
+	}
+	return toMutateFailure(classified);
 }
 
 /** Prefix marking a synthetic reservation id produced by the dry-run gateway. */

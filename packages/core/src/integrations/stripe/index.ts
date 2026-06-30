@@ -17,6 +17,7 @@ export {
 	type PaymentIntentParams,
 	type PaymentIntentSnapshot,
 	retrievePaymentIntentSnapshot,
+	type StripePaymentMethodSummary,
 } from "./payment-intents";
 export {
 	createRefund,

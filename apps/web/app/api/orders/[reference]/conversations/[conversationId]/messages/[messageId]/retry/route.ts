@@ -1,6 +1,7 @@
 import {
 	commerceErrorResponse,
 	commerceService,
+	readJson,
 	resolveOrderAccessContext,
 } from "@/lib/api/commerce";
 import { withApiRoute } from "@/lib/api/route";
@@ -13,6 +14,16 @@ interface RetryConversationMessageRouteContext {
 	}>;
 }
 
+function readSocketId(body: unknown): string | null {
+	if (body && typeof body === "object" && "socketId" in body) {
+		const value = (body as { socketId?: unknown }).socketId;
+		if (typeof value === "string" && value.length > 0) {
+			return value;
+		}
+	}
+	return null;
+}
+
 export const POST = withApiRoute<RetryConversationMessageRouteContext>(
 	{
 		name: "orders.conversation_messages_retry",
@@ -20,6 +31,7 @@ export const POST = withApiRoute<RetryConversationMessageRouteContext>(
 	},
 	async (request: Request, context): Promise<Response> => {
 		const { conversationId, messageId, reference } = await context.params;
+		const payload = await readJson(request);
 		const accessContext = await resolveOrderAccessContext(request, reference);
 
 		try {
@@ -29,6 +41,7 @@ export const POST = withApiRoute<RetryConversationMessageRouteContext>(
 				access,
 				conversationId,
 				messageId,
+				{ excludeSocketId: readSocketId(payload) },
 			);
 			return Response.json(
 				{ message },

@@ -4,14 +4,25 @@ import type {
 	ConversationMessageDto,
 	OrderConversationAvailability,
 } from "@workspace/core/commerce";
+import {
+	Avatar,
+	AvatarFallback,
+	AvatarImage,
+} from "@workspace/ui/components/avatar";
+import { Badge } from "@workspace/ui/components/badge";
 import { Button } from "@workspace/ui/components/button";
 import { Textarea } from "@workspace/ui/components/textarea";
 import { cn } from "@workspace/ui/lib/utils";
 import { format } from "date-fns";
+import { User } from "lucide-react";
+import { useRouter } from "next/navigation";
 import { type KeyboardEvent, useEffect, useRef, useState } from "react";
 import { toCheckoutError } from "@/lib/checkout/errors";
 import * as orderApi from "@/lib/order/api-client";
 import { useOrderConversation } from "@/lib/order/realtime";
+
+const HOST_NAME = "Alojamento Ideal";
+const HOST_AVATAR_SRC = "/alojamento-ideal-logo.png";
 
 type UiMessage = ConversationMessageDto & { localOnly?: boolean };
 
@@ -31,6 +42,16 @@ function replaceById(
 	);
 }
 
+function replaceAt(
+	messages: UiMessage[],
+	index: number,
+	next: UiMessage,
+): UiMessage[] {
+	const copy = [...messages];
+	copy[index] = next;
+	return sortBySentAt(copy);
+}
+
 function formatTime(value: string): string {
 	const date = new Date(value);
 	return Number.isNaN(date.getTime()) ? "" : format(date, "p");
@@ -38,19 +59,13 @@ function formatTime(value: string): string {
 
 function MessageBubble({
 	message,
+	mounted,
 	onRetry,
 }: {
 	message: UiMessage;
+	mounted: boolean;
 	onRetry: (message: UiMessage) => void;
 }) {
-	if (message.senderType === "system") {
-		return (
-			<p className="mx-auto max-w-[80%] text-center text-muted-foreground text-xs">
-				{message.body}
-			</p>
-		);
-	}
-
 	const isGuest = message.senderType === "guest";
 	const failed = message.deliveryStatus === "failed";
 	const pending = message.deliveryStatus === "pending";
@@ -87,9 +102,118 @@ function MessageBubble({
 						</button>
 					</>
 				) : (
-					<span>{formatTime(message.sentAt)}</span>
+					<span suppressHydrationWarning>
+						{mounted ? formatTime(message.sentAt) : ""}
+					</span>
 				)}
 			</div>
+		</div>
+	);
+}
+
+interface MessageGroupData {
+	automated: boolean;
+	key: string;
+	messages: UiMessage[];
+	senderType: ConversationMessageDto["senderType"];
+}
+
+// Collapse consecutive messages from the same author into one group so the
+// identity row (avatar + name) renders once per run instead of per bubble. Host
+// runs are also split on `isAutomatic` so the "Automated" tag never mislabels a
+// personal reply, and system notices never merge with anything.
+function groupMessages(messages: UiMessage[]): MessageGroupData[] {
+	const groups: MessageGroupData[] = [];
+	for (const message of messages) {
+		const last = groups.at(-1);
+		const automated = message.senderType === "host" && message.isAutomatic;
+		if (
+			last &&
+			last.senderType === message.senderType &&
+			message.senderType !== "system" &&
+			last.automated === automated
+		) {
+			last.messages.push(message);
+		} else {
+			groups.push({
+				automated,
+				key: message.id,
+				messages: [message],
+				senderType: message.senderType,
+			});
+		}
+	}
+	return groups;
+}
+
+function MessageGroup({
+	group,
+	mounted,
+	onRetry,
+}: {
+	group: MessageGroupData;
+	mounted: boolean;
+	onRetry: (message: UiMessage) => void;
+}) {
+	if (group.senderType === "system") {
+		return (
+			<>
+				{group.messages.map((message) => (
+					<p
+						className="mx-auto max-w-[80%] text-center text-muted-foreground text-xs"
+						key={message.id}
+					>
+						{message.body}
+					</p>
+				))}
+			</>
+		);
+	}
+
+	const isGuest = group.senderType === "guest";
+
+	return (
+		<div
+			className={cn(
+				"flex flex-col gap-1",
+				isGuest ? "items-end" : "items-start",
+			)}
+		>
+			<div
+				className={cn(
+					"flex items-center gap-1.5",
+					isGuest && "flex-row-reverse",
+				)}
+			>
+				<Avatar size="sm">
+					{isGuest ? (
+						<AvatarFallback>
+							<User className="size-3" />
+						</AvatarFallback>
+					) : (
+						<>
+							<AvatarImage alt={HOST_NAME} src={HOST_AVATAR_SRC} />
+							<AvatarFallback>AI</AvatarFallback>
+						</>
+					)}
+				</Avatar>
+				<span className="font-medium text-foreground text-xs">
+					{isGuest ? "You" : HOST_NAME}
+				</span>
+				{group.automated && (
+					<Badge className="h-4 px-1.5 font-normal" variant="outline">
+						Automated
+					</Badge>
+				)}
+			</div>
+			{group.messages.map((message) => (
+				<MessageBubble
+					key={message.id}
+					message={message}
+					mounted={mounted}
+					onRetry={onRetry}
+				/>
+			))}
 		</div>
 	);
 }
@@ -119,17 +243,34 @@ export function OrderMessages({
 	);
 	const [input, setInput] = useState("");
 	const [error, setError] = useState<string | null>(null);
+	const [mounted, setMounted] = useState(false);
 	const listRef = useRef<HTMLDivElement>(null);
+	const router = useRouter();
+
+	useEffect(() => setMounted(true), []);
 
 	const canSend = availability === "available" && conversationId !== null;
 
-	useOrderConversation({
+	const { socketIdRef } = useOrderConversation({
 		channelName,
 		enabled: conversationId !== null,
 		onMessage: (incoming) => {
 			setMessages((current) => {
-				if (current.some((message) => message.id === incoming.id)) {
-					return current;
+				// Same row we already hold: apply status/content transitions in place so
+				// other viewers move a message from "Sending…" to sent. Never regress an
+				// already-delivered message back to pending on a late-arriving echo.
+				const existing = current.find((message) => message.id === incoming.id);
+				if (existing) {
+					if (
+						existing.deliveryStatus === "sent" &&
+						incoming.deliveryStatus === "pending"
+					) {
+						return current;
+					}
+					return replaceById(current, incoming.id, {
+						...incoming,
+						localOnly: false,
+					});
 				}
 				if (
 					incoming.externalMessageId &&
@@ -140,11 +281,42 @@ export function OrderMessages({
 				) {
 					return current;
 				}
+				// Belt-and-suspenders for the sender's own echo if socket exclusion did
+				// not apply (e.g. the connection had no socket id yet): reconcile the
+				// echo with the optimistic bubble we already rendered instead of adding a
+				// duplicate. Server-side socket exclusion handles the common case.
+				if (incoming.senderType === "guest") {
+					const optimistic = current.findIndex(
+						(message) => message.localOnly && message.body === incoming.body,
+					);
+					if (optimistic !== -1) {
+						return replaceAt(current, optimistic, {
+							...incoming,
+							localOnly: false,
+						});
+					}
+				}
 				return sortBySentAt([...current, { ...incoming, localOnly: false }]);
 			});
 		},
 		reference,
 	});
+
+	// The conversation is provisioned asynchronously: only once the booking is
+	// confirmed and its provider thread exists does the reconcile job link it to
+	// the order. Until the server hands us a conversation id, poll for it so the
+	// thread opens on its own instead of waiting for a manual reload.
+	// `router.refresh()` re-runs the page and re-passes the (now present) props,
+	// which stops this effect and enables the realtime subscription.
+	useEffect(() => {
+		if (conversationId !== null || availability === "unavailable") {
+			return;
+		}
+		const interval = setInterval(() => {
+			router.refresh();
+		}, 10000);
+		return () => clearInterval(interval);
+	}, [availability, conversationId, router]);
 
 	// Keep the thread pinned to the latest message as it grows (and on mount).
 	// biome-ignore lint/correctness/useExhaustiveDependencies: the effect must re-run when the message count changes, even though the body reads it only through the ref.
@@ -164,6 +336,7 @@ export function OrderMessages({
 				reference,
 				conversationId,
 				body,
+				socketIdRef.current,
 			);
 			setMessages((current) =>
 				replaceById(current, localId, { ...message, localOnly: false }),
@@ -228,6 +401,7 @@ export function OrderMessages({
 				reference,
 				conversationId,
 				message.id,
+				socketIdRef.current,
 			);
 			setMessages((current) =>
 				replaceById(current, message.id, { ...sent, localOnly: false }),
@@ -275,10 +449,11 @@ export function OrderMessages({
 						No messages yet. Say hello to start the conversation.
 					</p>
 				) : (
-					messages.map((message) => (
-						<MessageBubble
-							key={message.id}
-							message={message}
+					groupMessages(messages).map((group) => (
+						<MessageGroup
+							group={group}
+							key={group.key}
+							mounted={mounted}
 							onRetry={handleRetry}
 						/>
 					))

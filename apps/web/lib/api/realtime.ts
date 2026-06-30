@@ -68,11 +68,14 @@ export function createPusherRealtimePublisher(): RealtimePublisher {
 				{ conversation },
 			);
 		},
-		async publishMessageCreated(orderId, conversationId, message) {
+		async publishMessageCreated(orderId, conversationId, message, options) {
 			await client.trigger(
 				conversationChannelName(orderId, conversationId),
 				"message.created",
 				{ message },
+				options?.excludeSocketId
+					? { socket_id: options.excludeSocketId }
+					: undefined,
 			);
 		},
 	};

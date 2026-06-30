@@ -1,4 +1,5 @@
 import type { OrderDetail } from "@workspace/core/commerce";
+import Image from "next/image";
 import type { ReactNode } from "react";
 import { SiteFooter } from "@/components/home/site-footer";
 import { SiteHeader } from "@/components/home/site-header";
@@ -42,10 +43,12 @@ export function OrderHubShell({
 				<div className="flex flex-col gap-6">
 					<header className="flex items-start gap-4">
 						{item?.imageUrl && (
-							<img
+							<Image
 								alt={title}
 								className="size-20 shrink-0 rounded-xl object-cover sm:size-24"
+								height={96}
 								src={item.imageUrl}
+								width={96}
 							/>
 						)}
 						<div className="flex flex-col gap-1">
@@ -66,6 +69,7 @@ export function OrderHubShell({
 
 					<OrderSectionNav
 						reference={detail.reference}
+						showMessages={detail.role === "owner"}
 						showPeople={detail.role === "owner"}
 					/>
 

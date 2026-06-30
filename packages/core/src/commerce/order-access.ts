@@ -39,11 +39,7 @@ const ORDER_PERMISSIONS: Record<OrderRole, ReadonlySet<OrderPermission>> = {
 		"manage_all_guests",
 		"manage_own_guest",
 	]),
-	member: new Set<OrderPermission>([
-		"view_booking",
-		"chat",
-		"manage_own_guest",
-	]),
+	member: new Set<OrderPermission>(["view_booking", "manage_own_guest"]),
 };
 
 /** Pure permission decision for a resolved order role. */

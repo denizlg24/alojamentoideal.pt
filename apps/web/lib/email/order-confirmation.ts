@@ -75,16 +75,44 @@ function formatBillingAddress(address: OrderBillingAddressSnapshot): string {
 	return parts.length > 0 ? parts.join(", ") : "Not provided";
 }
 
+function titleCasePaymentPart(value: string): string {
+	return value
+		.split(/[_\s-]+/)
+		.filter(Boolean)
+		.map(
+			(part) => `${part.charAt(0).toUpperCase()}${part.slice(1).toLowerCase()}`,
+		)
+		.join(" ");
+}
+
+function formatPaymentMethod(method: OrderConfirmationFacts["paymentMethod"]): {
+	cardLastFour?: string;
+	label: string;
+} {
+	if (!method) {
+		return { label: "Online payment" };
+	}
+	if (method.type === "card") {
+		return {
+			cardLastFour: method.last4 ?? undefined,
+			label: method.brand ? titleCasePaymentPart(method.brand) : "Card",
+		};
+	}
+	return { label: titleCasePaymentPart(method.type) || "Online payment" };
+}
+
 export function buildOrderConfirmationEmail(
 	facts: OrderConfirmationFacts,
 	manageUrl: string,
 ): EmailMessage {
 	const amount = formatAmount(facts.amountPaidMinor, facts.currency);
+	const paymentMethod = formatPaymentMethod(facts.paymentMethod);
 
 	return buildBrandedOrderConfirmationEmail({
 		accommodationImage: facts.accommodationImage ?? FALLBACK_IMAGE_URL,
 		accommodationTitle: facts.accommodationTitle,
 		billingAddress: formatBillingAddress(facts.billingAddress),
+		cardLastFour: paymentMethod.cardLastFour,
 		checkIn: formatDate(facts.checkIn),
 		checkOut: formatDate(facts.checkOut),
 		contactEmail: facts.email,
@@ -93,7 +121,7 @@ export function buildOrderConfirmationEmail(
 		guests: formatGuests(facts.guests),
 		manageUrl,
 		orderNumber: facts.publicReference,
-		paymentMethod: "Online payment",
+		paymentMethod: paymentMethod.label,
 		totalPrice: amount,
 	});
 }

@@ -48,15 +48,18 @@ export function OrderPeople({
 	const [error, setError] = useState<string | null>(null);
 	const [notice, setNotice] = useState<string | null>(null);
 
-	const activeCount = members.filter(
-		(member) => member.status === "active",
+	// Anyone not revoked is holding a spot: the owner, joined members, and
+	// still-pending invites all count against the guest capacity, so the owner
+	// cannot invite more people than the booking has room for.
+	const occupiedCount = members.filter(
+		(member) => member.status !== "revoked",
 	).length;
-	const spotsFull = capacity > 0 && activeCount >= capacity;
+	const spotsFull = capacity > 0 && occupiedCount >= capacity;
 
 	async function handleInvite(event: FormEvent<HTMLFormElement>) {
 		event.preventDefault();
 		const trimmed = email.trim();
-		if (!trimmed) {
+		if (!trimmed || spotsFull) {
 			return;
 		}
 		setInviting(true);
@@ -138,39 +141,42 @@ export function OrderPeople({
 				<h2 className="font-heading font-medium text-base">People</h2>
 				<p className="text-muted-foreground text-sm leading-relaxed">
 					Invite the people joining you. Each person gets their own private link
-					to chat and add their guest details.
+					to add their guest details.
 				</p>
 				{capacity > 0 && (
 					<p className="text-muted-foreground text-xs">
-						{activeCount} of {capacity} spots used
+						{occupiedCount} of {capacity} spots used
 					</p>
 				)}
 			</div>
 
-			<form className="flex flex-col gap-2 sm:flex-row" onSubmit={handleInvite}>
-				<Input
-					aria-label="Guest email"
-					autoComplete="email"
-					disabled={inviting}
-					onChange={(event) => setEmail(event.target.value)}
-					placeholder="guest@email.com"
-					type="email"
-					value={email}
-				/>
-				<Button
-					className="shrink-0"
-					disabled={inviting || email.trim().length === 0}
-					type="submit"
-				>
-					{inviting ? "Sending…" : "Send invite"}
-				</Button>
-			</form>
-
-			{spotsFull && (
+			{spotsFull ? (
 				<p className="text-muted-foreground text-xs">
-					Every spot is currently filled. New guests can only join once a spot
-					frees up.
+					Every spot is filled. Remove a guest to free up a spot before sending
+					another invite.
 				</p>
+			) : (
+				<form
+					className="flex flex-col gap-2 sm:flex-row"
+					onSubmit={handleInvite}
+				>
+					<Input
+						aria-label="Guest email"
+						autoComplete="email"
+						disabled={inviting}
+						onChange={(event) => setEmail(event.target.value)}
+						placeholder="guest@email.com"
+						type="email"
+						value={email}
+					/>
+					<Button
+						className="shrink-0"
+						disabled={inviting || email.trim().length === 0}
+						type="submit"
+					>
+						{inviting ? "Sending…" : "Send invite"}
+					</Button>
+				</form>
 			)}
 			{error && <p className="text-destructive text-sm">{error}</p>}
 			{notice && <p className="text-emerald-700 text-sm">{notice}</p>}

@@ -183,6 +183,13 @@
       "when": 1782814415164,
       "tag": "0025_unknown_jocasta",
       "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1782843001615,
+      "tag": "0026_rapid_avengers",
+      "breakpoints": true
     }
   ]
 }

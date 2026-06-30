@@ -44,7 +44,17 @@ export interface ProviderConversationGateway {
 		reservationId: string,
 	): Promise<ProviderConversationThread | null>;
 	getThread(threadId: string): Promise<ProviderConversationSnapshot>;
-	sendMessage(threadId: string, body: string): Promise<string | null>;
+	/**
+	 * Delivers a guest-authored message into the provider thread. `channelMessageId`
+	 * is our own message id, handed to the provider so the thread renders it as the
+	 * guest (not the host) and so retries of the same message are idempotent on the
+	 * provider side.
+	 */
+	sendMessage(
+		threadId: string,
+		body: string,
+		channelMessageId: string,
+	): Promise<string | null>;
 }
 
 export interface ConversationSummary {
@@ -79,11 +89,21 @@ export interface ReconcileConversationsSummary {
 	synced: number;
 }
 
+export interface PublishMessageOptions {
+	/**
+	 * Pusher socket id to exclude from the broadcast. Set to the sender's own
+	 * connection so the browser that originated a message does not receive its own
+	 * echo and duplicate the optimistic bubble it already rendered.
+	 */
+	excludeSocketId?: string | null;
+}
+
 export interface RealtimePublisher {
 	publishMessageCreated(
 		orderId: string,
 		conversationId: string,
 		message: ConversationMessageDto,
+		options?: PublishMessageOptions,
 	): Promise<void>;
 	publishConversationUpdated(
 		orderId: string,
@@ -174,11 +194,22 @@ function idToString(id: HostifyId | null | undefined): string | null {
 	return id === null || id === undefined ? null : String(id);
 }
 
+// Hostify serializes `created` as a UTC time with no timezone designator (e.g.
+// "2026-06-30 05:21:00"). `new Date()` would read a designator-less string in
+// the running process's local zone, shifting every imported message by the
+// server's offset (and, via the re-import upsert, our own messages too). Treat a
+// designator-less value as UTC; honour an explicit `Z`/offset when present.
 function parseDate(value: string | null | undefined): Date | null {
 	if (!value) {
 		return null;
 	}
-	const parsed = new Date(value);
+	const trimmed = value.trim();
+	if (trimmed.length === 0) {
+		return null;
+	}
+	const hasTimezone = /[zZ]$|[+-]\d{2}:?\d{2}$/.test(trimmed);
+	const normalized = hasTimezone ? trimmed : `${trimmed.replace(" ", "T")}Z`;
+	const parsed = new Date(normalized);
 	return Number.isNaN(parsed.getTime()) ? null : parsed;
 }
 
@@ -218,6 +249,7 @@ function mapThread(thread: HostifyThread): ProviderConversationThread | null {
 
 function mapMessage(
 	message: HostifyMessage,
+	threadGuestId: string | null,
 ): ProviderConversationMessage | null {
 	const externalMessageId = idToString(message.id);
 	const body = trimMessageBody(message.message ?? message.notes ?? "");
@@ -226,12 +258,24 @@ function mapMessage(
 		return null;
 	}
 
+	// Every message in a Hostify thread carries the thread's `guest_id`, so its
+	// mere presence says nothing about direction. A message is from the guest only
+	// when its `guest_id` matches the thread's guest; host replies and automated
+	// messages carry a different (host) id. With no thread guest to compare
+	// against, default to host so an imported message never masquerades as the
+	// guest.
+	const messageGuestId = idToString(message.guest_id);
+	const senderType: ConversationMessageSenderType =
+		threadGuestId !== null && messageGuestId === threadGuestId
+			? "guest"
+			: "host";
+
 	return {
 		body,
 		externalMessageId,
 		isAutomatic: message.is_automatic === 1,
 		raw: toRecord(message),
-		senderType: message.guest_id ? "guest" : "host",
+		senderType,
 		sentAt,
 	};
 }
@@ -275,9 +319,10 @@ export class HostifyConversationGateway implements ProviderConversationGateway {
 		if (!thread) {
 			throw new Error("Hostify inbox thread response did not include an id.");
 		}
+		const threadGuestId = idToString(response.thread.guest_id);
 		return {
 			messages: (response.messages ?? [])
-				.map((message) => mapMessage(message))
+				.map((message) => mapMessage(message, threadGuestId))
 				.filter((message): message is ProviderConversationMessage =>
 					Boolean(message),
 				),
@@ -285,9 +330,18 @@ export class HostifyConversationGateway implements ProviderConversationGateway {
 		};
 	}
 
-	async sendMessage(threadId: string, body: string): Promise<string | null> {
-		const response = await this.#client.inbox.reply(
-			{ message: body, send_by: "channel", thread_id: threadId },
+	async sendMessage(
+		threadId: string,
+		body: string,
+		channelMessageId: string,
+	): Promise<string | null> {
+		const response = await this.#client.inbox.receiveReply(
+			{
+				channel_message_id: channelMessageId,
+				message: body,
+				sent_by: "guest",
+				thread_id: threadId,
+			},
 			this.#context,
 		);
 		return idToString(response.id);

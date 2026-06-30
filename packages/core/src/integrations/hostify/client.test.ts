@@ -122,6 +122,24 @@ describe("HostifyClient", () => {
 		);
 	});
 
+	it("parses the reservations.update envelope (update_data, not reservation)", async () => {
+		const client = new HostifyClient({
+			apiKey: API_KEY,
+			fetch: async () =>
+				Response.json({
+					env: "https://go-pmsapi.hostify.com/",
+					success: true,
+					update_data: { status: "accepted" },
+				}),
+			maxReadRetries: 0,
+		});
+
+		const response = await client.reservations.update(701, {
+			status: "accepted",
+		});
+		expect(response.update_data?.status).toBe("accepted");
+	});
+
 	it("normalizes and redacts provider errors", async () => {
 		const client = new HostifyClient({
 			apiKey: API_KEY,

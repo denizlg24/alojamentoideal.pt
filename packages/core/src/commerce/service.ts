@@ -109,6 +109,7 @@ import {
 	type OrderConfirmationFacts,
 	type OrderFinalizationEmailKind,
 	type OrderPaymentFailureInput,
+	type OrderPaymentMethodSummary,
 	type OrderStatusRecord,
 	type PayableOrder,
 	type PaymentAmount,
@@ -423,6 +424,41 @@ function parseWebhookTimestamp(value: string | null): Date | null {
 	return Number.isNaN(date.getTime()) ? null : date;
 }
 
+function nonEmptyPaymentPart(value: string | null | undefined): string | null {
+	const trimmed = value?.trim();
+	return trimmed ? trimmed : null;
+}
+
+function normalizePaymentMethodSummary(
+	paymentMethod: OrderPaymentMethodSummary | null | undefined,
+): OrderPaymentMethodSummary | null {
+	const type = nonEmptyPaymentPart(paymentMethod?.type);
+	if (!type) {
+		return null;
+	}
+	return {
+		brand: nonEmptyPaymentPart(paymentMethod?.brand),
+		last4: nonEmptyPaymentPart(paymentMethod?.last4),
+		type,
+	};
+}
+
+function paymentMethodFromOrderRow(row: {
+	stripePaymentMethodBrand: string | null;
+	stripePaymentMethodLast4: string | null;
+	stripePaymentMethodType: string | null;
+}): OrderPaymentMethodSummary | null {
+	const type = nonEmptyPaymentPart(row.stripePaymentMethodType);
+	if (!type) {
+		return null;
+	}
+	return {
+		brand: nonEmptyPaymentPart(row.stripePaymentMethodBrand),
+		last4: nonEmptyPaymentPart(row.stripePaymentMethodLast4),
+		type,
+	};
+}
+
 interface RevalidatedSnapshot {
 	itemId: string;
 	snapshot: NormalizedAccommodationQuoteSnapshot;
@@ -477,6 +513,9 @@ interface SagaContext {
 		refundRequestedAt: Date | null;
 		status: string;
 		stripePaymentIntentId: string | null;
+		stripePaymentMethodBrand: string | null;
+		stripePaymentMethodLast4: string | null;
+		stripePaymentMethodType: string | null;
 		stripeRefundId: string | null;
 		stripeRefundIdempotencyKey: string | null;
 	};
@@ -874,6 +913,16 @@ export class CommerceService {
 		payment: PaymentAmount,
 	): Promise<MarkOrderPaidResult> {
 		return this.#db.transaction(async (tx) => {
+			const paymentMethod = normalizePaymentMethodSummary(
+				payment.paymentMethod,
+			);
+			const paymentMethodFields = paymentMethod
+				? {
+						stripePaymentMethodBrand: paymentMethod.brand,
+						stripePaymentMethodLast4: paymentMethod.last4,
+						stripePaymentMethodType: paymentMethod.type,
+					}
+				: {};
 			const [order] = await tx
 				.select({
 					currency: orderTable.currency,
@@ -900,6 +949,7 @@ export class CommerceService {
 						amountPaidMinor: payment.amountMinor,
 						failureCode: "amount_mismatch",
 						status: "pending",
+						...paymentMethodFields,
 						updatedAt: new Date(),
 					})
 					.where(
@@ -927,6 +977,7 @@ export class CommerceService {
 				.set({
 					amountPaidMinor: payment.amountMinor,
 					status: "pending",
+					...paymentMethodFields,
 					updatedAt: new Date(),
 				})
 				.where(
@@ -2113,8 +2164,10 @@ export class CommerceService {
 		access: ResolvedOrderAccess,
 		conversationId: string,
 		input: { body: string },
+		options: { excludeSocketId?: string | null } = {},
 	): Promise<ConversationMessageDto> {
 		this.#assertOrderPermission(access, "chat");
+		const excludeSocketId = options.excludeSocketId ?? null;
 		const body = trimMessageBody(input.body);
 		if (body.length === 0) {
 			throw invalidRequest("Message body is required.", [
@@ -2164,6 +2217,7 @@ export class CommerceService {
 			access.order.id,
 			conversationId,
 			pending,
+			excludeSocketId,
 		);
 
 		const gateway = this.#conversationGatewayFor(conversation.provider);
@@ -2173,6 +2227,7 @@ export class CommerceService {
 				conversationId,
 				pending.id,
 				"Conversation gateway is not configured.",
+				excludeSocketId,
 			);
 		}
 
@@ -2180,6 +2235,7 @@ export class CommerceService {
 			const externalMessageId = await gateway.sendMessage(
 				conversation.externalThreadId,
 				body,
+				pending.id,
 			);
 			const delivered = await this.#markConversationMessageDelivered(
 				access.order.id,
@@ -2187,6 +2243,7 @@ export class CommerceService {
 				pending.id,
 				externalMessageId,
 				now,
+				excludeSocketId,
 			);
 			trackEvent({
 				metadata: {
@@ -2218,6 +2275,7 @@ export class CommerceService {
 				conversationId,
 				pending.id,
 				message,
+				excludeSocketId,
 			);
 		}
 	}
@@ -2226,8 +2284,10 @@ export class CommerceService {
 		access: ResolvedOrderAccess,
 		conversationId: string,
 		messageId: string,
+		options: { excludeSocketId?: string | null } = {},
 	): Promise<ConversationMessageDto> {
 		this.#assertOrderPermission(access, "chat");
+		const excludeSocketId = options.excludeSocketId ?? null;
 		const conversation = await this.#loadConversationForAccess(
 			access,
 			conversationId,
@@ -2291,6 +2351,7 @@ export class CommerceService {
 			access.order.id,
 			conversationId,
 			this.#toMessageDto(pending),
+			excludeSocketId,
 		);
 
 		const gateway = this.#conversationGatewayFor(conversation.provider);
@@ -2300,6 +2361,7 @@ export class CommerceService {
 				conversationId,
 				messageId,
 				"Conversation gateway is not configured.",
+				excludeSocketId,
 			);
 		}
 
@@ -2307,6 +2369,7 @@ export class CommerceService {
 			const externalMessageId = await gateway.sendMessage(
 				conversation.externalThreadId,
 				pending.body,
+				messageId,
 			);
 			return this.#markConversationMessageDelivered(
 				access.order.id,
@@ -2314,6 +2377,7 @@ export class CommerceService {
 				messageId,
 				externalMessageId,
 				new Date(),
+				excludeSocketId,
 			);
 		} catch (error) {
 			return this.#markConversationMessageFailed(
@@ -2321,6 +2385,7 @@ export class CommerceService {
 				conversationId,
 				messageId,
 				error instanceof Error ? error.message : String(error),
+				excludeSocketId,
 			);
 		}
 	}
@@ -2456,6 +2521,9 @@ export class CommerceService {
 				discountMinor: orderTable.discountMinor,
 				publicReference: orderTable.publicReference,
 				status: orderTable.status,
+				stripePaymentMethodBrand: orderTable.stripePaymentMethodBrand,
+				stripePaymentMethodLast4: orderTable.stripePaymentMethodLast4,
+				stripePaymentMethodType: orderTable.stripePaymentMethodType,
 				subtotalMinor: orderTable.subtotalMinor,
 				taxMinor: orderTable.taxMinor,
 				totalMinor: orderTable.totalMinor,
@@ -2657,7 +2725,9 @@ export class CommerceService {
 		}
 
 		const bookingStatus = toOrderBookingStatus(orderRow.status);
-		const conversations = await this.readOrderConversations(access);
+		const conversations = orderRoleCan(access.role, "chat")
+			? await this.readOrderConversations(access)
+			: [];
 
 		return {
 			bookingStatus,
@@ -2670,6 +2740,7 @@ export class CommerceService {
 			guestProgress: orderGuestProgress,
 			items,
 			members,
+			paymentMethod: isOwner ? paymentMethodFromOrderRow(orderRow) : null,
 			pricing: isOwner
 				? {
 						amountPaidMinor: orderRow.amountPaidMinor,
@@ -2811,6 +2882,7 @@ export class CommerceService {
 		messageId: string,
 		externalMessageId: string | null,
 		fallbackSentAt: Date,
+		excludeSocketId: string | null = null,
 	): Promise<ConversationMessageDto> {
 		const [updated] = await this.#db
 			.update(conversationMessageTable)
@@ -2836,7 +2908,12 @@ export class CommerceService {
 			dto.body,
 			updated.sentAt,
 		);
-		await this.#publishMessageCreatedSafe(orderId, conversationId, dto);
+		await this.#publishMessageCreatedSafe(
+			orderId,
+			conversationId,
+			dto,
+			excludeSocketId,
+		);
 		return dto;
 	}
 
@@ -2845,6 +2922,7 @@ export class CommerceService {
 		conversationId: string,
 		messageId: string,
 		errorMessage: string,
+		excludeSocketId: string | null = null,
 	): Promise<ConversationMessageDto> {
 		const [updated] = await this.#db
 			.update(conversationMessageTable)
@@ -2869,7 +2947,12 @@ export class CommerceService {
 			dto.body,
 			updated.sentAt,
 		);
-		await this.#publishMessageCreatedSafe(orderId, conversationId, dto);
+		await this.#publishMessageCreatedSafe(
+			orderId,
+			conversationId,
+			dto,
+			excludeSocketId,
+		);
 		return dto;
 	}
 
@@ -2877,12 +2960,14 @@ export class CommerceService {
 		orderId: string,
 		conversationId: string,
 		message: ConversationMessageDto,
+		excludeSocketId: string | null = null,
 	): Promise<void> {
 		try {
 			await this.#realtimePublisher.publishMessageCreated(
 				orderId,
 				conversationId,
 				message,
+				{ excludeSocketId },
 			);
 		} catch (error) {
 			this.#trackRealtimePublishFailure(conversationId, error);
@@ -3111,12 +3196,15 @@ export class CommerceService {
 					conversationMessageTable.externalMessageId,
 				],
 				targetWhere: sql`${conversationMessageTable.externalMessageId} is not null`,
+				// Sender is settled at first insert and must not be rewritten on
+				// re-import: a guest message we sent through the channel comes back from
+				// the provider classified as host, so re-applying `senderType` here would
+				// flip our own messages to the wrong side.
 				set: {
 					body: message.body,
 					deliveryStatus: "sent",
 					isAutomatic: message.isAutomatic,
 					rawPayload: message.raw,
-					senderType: message.senderType,
 					sentAt: message.sentAt,
 					updatedAt: now,
 				},
@@ -5395,6 +5483,7 @@ export class CommerceService {
 				const marked = await this.markOrderPaid(orderId, {
 					amountMinor: live.amountMinor,
 					currency: live.currency,
+					paymentMethod: live.paymentMethod,
 				});
 				if (marked.outcome === "amount_mismatch") {
 					const compensated = await this.compensateOrder(
@@ -5635,6 +5724,9 @@ export class CommerceService {
 				refundRequestedAt: orderTable.refundRequestedAt,
 				status: orderTable.status,
 				stripePaymentIntentId: orderTable.stripePaymentIntentId,
+				stripePaymentMethodBrand: orderTable.stripePaymentMethodBrand,
+				stripePaymentMethodLast4: orderTable.stripePaymentMethodLast4,
+				stripePaymentMethodType: orderTable.stripePaymentMethodType,
 				stripeRefundId: orderTable.stripeRefundId,
 				stripeRefundIdempotencyKey: orderTable.stripeRefundIdempotencyKey,
 			})
@@ -6451,6 +6543,7 @@ export class CommerceService {
 			guests: first?.guests ?? 0,
 			name: context.contact?.name ?? "",
 			orderId: context.order.id,
+			paymentMethod: paymentMethodFromOrderRow(context.order),
 			publicReference: context.order.publicReference,
 		};
 	}

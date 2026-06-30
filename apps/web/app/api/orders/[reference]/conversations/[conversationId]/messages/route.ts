@@ -23,6 +23,16 @@ function readMessageBody(body: unknown): string | null {
 	return null;
 }
 
+function readSocketId(body: unknown): string | null {
+	if (body && typeof body === "object" && "socketId" in body) {
+		const value = (body as { socketId?: unknown }).socketId;
+		if (typeof value === "string" && value.length > 0) {
+			return value;
+		}
+	}
+	return null;
+}
+
 function readLimit(request: Request): number | null | undefined {
 	const raw = new URL(request.url).searchParams.get("limit");
 	if (!raw) {
@@ -79,7 +89,8 @@ export const POST = withApiRoute<ConversationMessagesRouteContext>(
 	},
 	async (request: Request, context): Promise<Response> => {
 		const { conversationId, reference } = await context.params;
-		const body = readMessageBody(await readJson(request));
+		const payload = await readJson(request);
+		const body = readMessageBody(payload);
 		if (body === null) {
 			return Response.json(
 				{ code: "invalid_request", error: "Message body is required." },
@@ -94,9 +105,8 @@ export const POST = withApiRoute<ConversationMessagesRouteContext>(
 			const message = await service.sendConversationMessage(
 				access,
 				conversationId,
-				{
-					body,
-				},
+				{ body },
+				{ excludeSocketId: readSocketId(payload) },
 			);
 			return Response.json(
 				{ message },

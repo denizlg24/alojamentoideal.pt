@@ -220,6 +220,20 @@ export interface HostifyReceiveReplyImageInput {
 	thread_id: HostifyId;
 }
 
+export interface HostifyApproveReservationInput {
+	reservation_id: HostifyId;
+}
+
+export interface HostifyDeclineReservationInput {
+	reservation_id: HostifyId;
+	reason_code?:
+		| "dates_not_available"
+		| "not_a_good_fit"
+		| "waiting_for_better_reservation"
+		| "not_comfortable";
+	message?: string;
+}
+
 export interface HostifyInquiryActionInput {
 	thread_id: HostifyId;
 }

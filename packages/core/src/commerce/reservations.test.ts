@@ -127,8 +127,8 @@ function fakeClient(overrides: {
 				calls.reservationUpdate.push({ id, input });
 				return (
 					overrides.reservationUpdate?.() ?? {
-						reservation: { id, status: input.status ?? "pending" },
 						success: true,
+						update_data: { status: input.status ?? "pending" },
 					}
 				);
 			},
@@ -239,6 +239,26 @@ describe("HostifyReservationGateway.confirmHold", () => {
 			transactionId: "555",
 		});
 		expect(result.kind).toBe("ok");
+	});
+
+	test("an unparseable confirm response is transient, not a hard failure", async () => {
+		const { client } = fakeClient({
+			reservationGet: () => ({
+				reservation: { id: 999, status: "pending" },
+				success: true,
+			}),
+			reservationUpdate: () => {
+				throw new HostifyResponseValidationError("schema drift");
+			},
+		});
+		const gateway = new HostifyReservationGateway({ client });
+		const result = await gateway.confirmHold({
+			paymentReference: "pi_123",
+			reservationId: "999",
+			transactionId: "555",
+		});
+		// Ambiguous parse failure must not hard-fail into compensation/refund.
+		expect(result.kind).toBe("transient");
 	});
 });
 

@@ -1,8 +1,15 @@
 import type { OrderDetail } from "@workspace/core/commerce";
-import { ChevronRight, MessageCircle, UserPlus, Users } from "lucide-react";
+import {
+	ChevronRight,
+	MessageCircle,
+	ReceiptText,
+	UserPlus,
+	Users,
+} from "lucide-react";
 import Link from "next/link";
 import type { ReactNode } from "react";
 import { formatMinor, formatStayRangeLong } from "@/lib/checkout/format";
+import { countryName } from "@/lib/site/countries";
 
 function statusBody(detail: OrderDetail): string {
 	switch (detail.provisioningSubState) {
@@ -23,9 +30,9 @@ function statusBody(detail: OrderDetail): string {
 
 function Field({ label, value }: { label: string; value: ReactNode }) {
 	return (
-		<div className="flex items-baseline justify-between gap-4 py-2">
+		<div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1.4fr)] items-start gap-4 py-2">
 			<dt className="text-muted-foreground text-sm">{label}</dt>
-			<dd className="text-right font-medium text-sm">{value}</dd>
+			<dd className="break-words text-right font-medium text-sm">{value}</dd>
 		</div>
 	);
 }
@@ -49,12 +56,44 @@ function LinkRow({
 			<span className="grid size-9 shrink-0 place-items-center rounded-full bg-muted text-muted-foreground">
 				{icon}
 			</span>
-			<span className="flex flex-col">
+			<span className="flex min-w-0 flex-col">
 				<span className="font-medium text-sm">{title}</span>
-				<span className="text-muted-foreground text-xs">{subtitle}</span>
+				<span className="break-words text-muted-foreground text-xs">
+					{subtitle}
+				</span>
 			</span>
-			<ChevronRight className="ml-auto size-4 text-muted-foreground" />
+			<ChevronRight className="ml-auto size-4 shrink-0 text-muted-foreground" />
 		</Link>
+	);
+}
+
+function DisabledActionRow({
+	icon,
+	subtitle,
+	title,
+}: {
+	icon: ReactNode;
+	subtitle: string;
+	title: string;
+}) {
+	return (
+		<button
+			aria-disabled="true"
+			className="-mx-2 flex w-[calc(100%+1rem)] cursor-not-allowed items-center gap-3 rounded-xl px-2 py-3 text-left opacity-60"
+			disabled
+			type="button"
+		>
+			<span className="grid size-9 shrink-0 place-items-center rounded-full bg-muted text-muted-foreground">
+				{icon}
+			</span>
+			<span className="flex min-w-0 flex-col">
+				<span className="font-medium text-sm">{title}</span>
+				<span className="break-words text-muted-foreground text-xs">
+					{subtitle}
+				</span>
+			</span>
+			<ChevronRight className="ml-auto size-4 shrink-0 text-muted-foreground" />
+		</button>
 	);
 }
 
@@ -78,6 +117,82 @@ function guestsSubtitle(detail: OrderDetail): string {
 		return "All guest details are complete";
 	}
 	return `${verified} of ${total} guests completed`;
+}
+
+function titleCasePaymentPart(value: string): string {
+	return value
+		.split(/[_\s-]+/)
+		.filter(Boolean)
+		.map(
+			(part) => `${part.charAt(0).toUpperCase()}${part.slice(1).toLowerCase()}`,
+		)
+		.join(" ");
+}
+
+function paymentMethodLabel(detail: OrderDetail): string {
+	const method = detail.paymentMethod;
+	if (!method) {
+		return "Not recorded";
+	}
+	if (method.type === "card") {
+		const brand = method.brand ? titleCasePaymentPart(method.brand) : "Card";
+		return method.last4 ? `${brand} ending in ${method.last4}` : brand;
+	}
+	return titleCasePaymentPart(method.type) || "Online payment";
+}
+
+function paymentStatusLabel(detail: OrderDetail): string {
+	switch (detail.provisioningSubState) {
+		case "confirmed":
+			return "Paid and confirmed";
+		case "paid-confirming":
+			return "Paid, confirming booking";
+		case "held-unpaid":
+			return "Awaiting payment";
+		case "refunded":
+			return "Refunded";
+		case "cancelled":
+			return "Cancelled";
+		default:
+			return detail.bookingStatus;
+	}
+}
+
+function stringPart(value: unknown): string | null {
+	return typeof value === "string" && value.trim().length > 0
+		? value.trim()
+		: null;
+}
+
+function formatBillingAddress(
+	address: NonNullable<OrderDetail["contact"]>["billingAddress"],
+): string {
+	const cityLine = [address.postalCode, address.city]
+		.map(stringPart)
+		.filter((part): part is string => part !== null)
+		.join(" ");
+	const countryCode = stringPart(address.country);
+	const parts = [
+		stringPart(address.line1),
+		stringPart(address.line2),
+		cityLine || null,
+		stringPart(address.region),
+		countryCode ? countryName(countryCode) : null,
+	].filter((part): part is string => part !== null);
+
+	return parts.length > 0 ? parts.join(", ") : "Not provided";
+}
+
+function chargeLabel(
+	charge: NonNullable<OrderDetail["items"][number]["charges"]>[number],
+): string {
+	const quantity = Number.parseFloat(charge.quantity);
+	if (!Number.isFinite(quantity) || quantity === 1) {
+		return charge.name;
+	}
+	return `${charge.name} x ${quantity.toLocaleString("en", {
+		maximumFractionDigits: 2,
+	})}`;
 }
 
 export function OrderOverview({ detail }: { detail: OrderDetail }) {
@@ -117,8 +232,77 @@ export function OrderOverview({ detail }: { detail: OrderDetail }) {
 
 			{pricing && (
 				<section className="flex flex-col gap-2">
-					<h2 className="font-heading font-medium text-base">Price</h2>
-					<dl>
+					<h2 className="font-heading font-medium text-base">Order details</h2>
+					<dl className="divide-y divide-border/60">
+						<Field label="Payment status" value={paymentStatusLabel(detail)} />
+						<Field label="Payment method" value={paymentMethodLabel(detail)} />
+					</dl>
+				</section>
+			)}
+
+			{detail.contact && (
+				<section className="flex flex-col gap-2">
+					<h2 className="font-heading font-medium text-base">
+						Contact details
+					</h2>
+					<dl className="divide-y divide-border/60">
+						<Field label="Name" value={detail.contact.name} />
+						<Field label="Email" value={detail.contact.email} />
+						<Field label="Phone" value={detail.contact.phoneE164} />
+						{detail.contact.isCompany && detail.contact.companyName && (
+							<Field label="Company" value={detail.contact.companyName} />
+						)}
+						{detail.contact.taxNumber && (
+							<Field label="Tax number" value={detail.contact.taxNumber} />
+						)}
+						<Field
+							label="Billing address"
+							value={formatBillingAddress(detail.contact.billingAddress)}
+						/>
+					</dl>
+				</section>
+			)}
+
+			{pricing && (
+				<section className="flex flex-col gap-2">
+					<h2 className="font-heading font-medium text-base">
+						Price breakdown
+					</h2>
+					<div className="divide-y divide-border/60">
+						{detail.items.map((item) =>
+							item.charges && item.charges.length > 0 ? (
+								<div className="py-2 first:pt-0" key={item.id}>
+									<p className="font-medium text-sm">{item.title}</p>
+									<dl className="mt-1">
+										{item.charges.map((charge) => (
+											<Field
+												key={`${item.id}-${charge.position}`}
+												label={chargeLabel(charge)}
+												value={formatMinor(charge.grossMinor, pricing.currency)}
+											/>
+										))}
+									</dl>
+								</div>
+							) : null,
+						)}
+					</div>
+					<dl className="divide-y divide-border/60 border-border/60 border-t">
+						<Field
+							label="Subtotal"
+							value={formatMinor(pricing.subtotalMinor, pricing.currency)}
+						/>
+						{pricing.discountMinor > 0 && (
+							<Field
+								label="Discount"
+								value={`-${formatMinor(pricing.discountMinor, pricing.currency)}`}
+							/>
+						)}
+						{pricing.taxMinor > 0 && (
+							<Field
+								label="Tax"
+								value={formatMinor(pricing.taxMinor, pricing.currency)}
+							/>
+						)}
 						<Field
 							label="Total"
 							value={formatMinor(pricing.totalMinor, pricing.currency)}
@@ -144,17 +328,24 @@ export function OrderOverview({ detail }: { detail: OrderDetail }) {
 				<h2 className="mb-1 font-heading font-medium text-base">
 					Manage your booking
 				</h2>
-				<LinkRow
-					href={`${root}/messages`}
-					icon={<MessageCircle className="size-4" />}
-					subtitle={conversationSubtitle(detail)}
-					title="Messages"
-				/>
+				{detail.role === "owner" && (
+					<LinkRow
+						href={`${root}/messages`}
+						icon={<MessageCircle className="size-4" />}
+						subtitle={conversationSubtitle(detail)}
+						title="Messages"
+					/>
+				)}
 				<LinkRow
 					href={`${root}/guests`}
 					icon={<Users className="size-4" />}
 					subtitle={guestsSubtitle(detail)}
 					title="Guest registration"
+				/>
+				<DisabledActionRow
+					icon={<ReceiptText className="size-4" />}
+					subtitle="Invoice generation is not available yet"
+					title="Generate invoice"
 				/>
 				{detail.role === "owner" && (
 					<LinkRow

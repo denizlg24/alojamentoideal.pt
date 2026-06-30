@@ -105,7 +105,7 @@ describe("HostifyConversationGateway", () => {
 		expect(thread).toBeNull();
 	});
 
-	test("maps thread messages and filters empty or undated provider rows", async () => {
+	test("classifies sender by thread guest and filters empty or undated rows", async () => {
 		const client = {
 			inbox: {
 				get: async () => ({
@@ -119,6 +119,7 @@ describe("HostifyConversationGateway", () => {
 						},
 						{
 							created: "2026-06-29T10:01:00.000Z",
+							guest_id: 99,
 							id: "m2",
 							is_automatic: 1,
 							message: "Host reply",
@@ -130,6 +131,7 @@ describe("HostifyConversationGateway", () => {
 					success: true,
 					thread: {
 						channel_unread: 2,
+						guest_id: 42,
 						id: "thread-1",
 						is_archived: 0,
 						preview: "Host reply",
@@ -164,6 +166,7 @@ describe("HostifyConversationGateway", () => {
 				isAutomatic: true,
 				raw: {
 					created: "2026-06-29T10:01:00.000Z",
+					guest_id: 99,
 					id: "m2",
 					is_automatic: 1,
 					message: "Host reply",
@@ -174,11 +177,38 @@ describe("HostifyConversationGateway", () => {
 		]);
 	});
 
-	test("sends guest replies by channel", async () => {
+	test("reads designator-less provider timestamps as UTC", async () => {
+		const client = {
+			inbox: {
+				get: async () => ({
+					messages: [
+						{
+							created: "2026-06-30 05:21:00",
+							guest_id: 42,
+							id: "m1",
+							message: "Naive timestamp",
+						},
+					],
+					success: true,
+					thread: { guest_id: 42, id: "thread-1" },
+				}),
+			},
+		} as unknown as HostifyClient;
+
+		const snapshot = await new HostifyConversationGateway({
+			client,
+		}).getThread("thread-1");
+
+		expect(snapshot.messages[0]?.sentAt).toEqual(
+			new Date("2026-06-30T05:21:00.000Z"),
+		);
+	});
+
+	test("delivers guest messages as the guest with our channel message id", async () => {
 		const calls: unknown[] = [];
 		const client = {
 			inbox: {
-				reply: async (input: unknown) => {
+				receiveReply: async (input: unknown) => {
 					calls.push(input);
 					return { id: 789, success: true };
 				},
@@ -188,11 +218,17 @@ describe("HostifyConversationGateway", () => {
 		const id = await new HostifyConversationGateway({ client }).sendMessage(
 			"thread-1",
 			"Hello",
+			"local-row-1",
 		);
 
 		expect(id).toBe("789");
 		expect(calls).toEqual([
-			{ message: "Hello", send_by: "channel", thread_id: "thread-1" },
+			{
+				channel_message_id: "local-row-1",
+				message: "Hello",
+				sent_by: "guest",
+				thread_id: "thread-1",
+			},
 		]);
 	});
 });

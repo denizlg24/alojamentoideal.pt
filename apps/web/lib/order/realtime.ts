@@ -5,7 +5,7 @@ import type {
 	ConversationSummary,
 } from "@workspace/core/commerce";
 import Pusher from "pusher-js";
-import { useEffect, useRef } from "react";
+import { type MutableRefObject, useEffect, useRef } from "react";
 
 export function isRealtimeConfigured(): boolean {
 	return Boolean(
@@ -22,6 +22,16 @@ interface UseOrderConversationOptions {
 	reference: string;
 }
 
+export interface UseOrderConversationResult {
+	/**
+	 * The browser's current Pusher socket id, or `null` before the connection is
+	 * established. Read it at send time and hand it to the message API so the
+	 * server excludes this connection from the broadcast, preventing the sender
+	 * from receiving an echo of its own message.
+	 */
+	socketIdRef: MutableRefObject<string | null>;
+}
+
 /**
  * Subscribes the browser to a conversation's private Pusher channel for the
  * lifetime of the component. The channel is authorized server-side via
@@ -35,9 +45,10 @@ export function useOrderConversation({
 	onConversation,
 	onMessage,
 	reference,
-}: UseOrderConversationOptions): void {
+}: UseOrderConversationOptions): UseOrderConversationResult {
 	const onMessageRef = useRef(onMessage);
 	const onConversationRef = useRef(onConversation);
+	const socketIdRef = useRef<string | null>(null);
 	onMessageRef.current = onMessage;
 	onConversationRef.current = onConversation;
 
@@ -59,6 +70,13 @@ export function useOrderConversation({
 			},
 			cluster,
 		});
+		socketIdRef.current = pusher.connection.socket_id || null;
+		pusher.connection.bind("connected", () => {
+			socketIdRef.current = pusher.connection.socket_id || null;
+		});
+		pusher.connection.bind("disconnected", () => {
+			socketIdRef.current = null;
+		});
 		const channel = pusher.subscribe(channelName);
 
 		channel.bind(
@@ -76,8 +94,13 @@ export function useOrderConversation({
 
 		return () => {
 			channel.unbind_all();
+			pusher.connection.unbind("connected");
+			pusher.connection.unbind("disconnected");
 			pusher.unsubscribe(channelName);
 			pusher.disconnect();
+			socketIdRef.current = null;
 		};
 	}, [channelName, enabled, reference]);
+
+	return { socketIdRef };
 }

@@ -24,7 +24,15 @@ export interface PaymentIntentSnapshot {
 	clientSecret: string;
 	currency: string;
 	id: string;
+	paymentMethod: StripePaymentMethodSummary | null;
 	status: Stripe.PaymentIntent.Status;
+}
+
+/** Non-sensitive payment method display data from Stripe charge details. */
+export interface StripePaymentMethodSummary {
+	brand: string | null;
+	last4: string | null;
+	type: string;
 }
 
 /**
@@ -49,7 +57,35 @@ function toSnapshot(intent: Stripe.PaymentIntent): PaymentIntentSnapshot {
 		clientSecret: intent.client_secret,
 		currency: intent.currency.toUpperCase(),
 		id: intent.id,
+		paymentMethod: paymentMethodSummaryFromIntent(intent),
 		status: intent.status,
+	};
+}
+
+function expandedCharge(
+	charge: Stripe.PaymentIntent["latest_charge"],
+): Stripe.Charge | null {
+	return charge && typeof charge !== "string" ? charge : null;
+}
+
+function paymentMethodSummaryFromIntent(
+	intent: Stripe.PaymentIntent,
+): StripePaymentMethodSummary | null {
+	const details = expandedCharge(intent.latest_charge)?.payment_method_details;
+	if (!details?.type) {
+		return null;
+	}
+	if (details.type === "card") {
+		return {
+			brand: details.card?.brand ?? null,
+			last4: details.card?.last4 ?? null,
+			type: details.type,
+		};
+	}
+	return {
+		brand: null,
+		last4: null,
+		type: details.type,
 	};
 }
 
@@ -111,7 +147,11 @@ export async function createOrUpdatePaymentIntent(
 export async function retrievePaymentIntentSnapshot(
 	stripe: Stripe,
 	paymentIntentId: string,
+	options: { includePaymentMethod?: boolean } = {},
 ): Promise<PaymentIntentSnapshot> {
-	const intent = await stripe.paymentIntents.retrieve(paymentIntentId);
+	const intent = await stripe.paymentIntents.retrieve(
+		paymentIntentId,
+		options.includePaymentMethod ? { expand: ["latest_charge"] } : undefined,
+	);
 	return toSnapshot(intent);
 }

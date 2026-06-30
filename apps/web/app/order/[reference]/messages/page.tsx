@@ -35,6 +35,9 @@ async function OrderMessagesRoute({ params }: OrderMessagesPageProps) {
 	if (!loaded) {
 		return <OrderAccessDenied />;
 	}
+	if (loaded.detail.role !== "owner") {
+		return <OrderAccessDenied />;
+	}
 
 	const conversation = primaryConversation(loaded.detail.conversations);
 	let initialMessages: ConversationMessageDto[] = [];

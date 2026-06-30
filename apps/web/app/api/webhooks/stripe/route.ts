@@ -10,6 +10,7 @@ import {
 	getStripeWebhookSecret,
 	interpretStripeEvent,
 	type RelevantStripeEvent,
+	retrievePaymentIntentSnapshot,
 	retrieveVerifiedIdentityDocumentFields,
 	StripeConfigurationError,
 	StripeWebhookSignatureError,
@@ -43,6 +44,7 @@ function stripeSessionLogId(sessionId: string): string {
  */
 async function handlePaymentSucceeded(
 	event: Extract<RelevantStripeEvent, { type: "payment_succeeded" }>,
+	stripe: ReturnType<typeof createStripeClientFromEnv>,
 ): Promise<void> {
 	if (!event.orderId) {
 		logger.warn("Stripe payment_intent.succeeded without orderId metadata", {
@@ -53,9 +55,14 @@ async function handlePaymentSucceeded(
 
 	try {
 		const service = commerceService();
+		const paymentMethod = await loadPaymentMethodSummary(
+			stripe,
+			event.paymentIntentId,
+		);
 		const marked = await service.markOrderPaid(event.orderId, {
 			amountMinor: event.amountReceivedMinor,
 			currency: event.currency,
+			paymentMethod,
 		});
 
 		if (marked.outcome === "not_found") {
@@ -119,6 +126,28 @@ async function handlePaymentSucceeded(
 	}
 }
 
+async function loadPaymentMethodSummary(
+	stripe: ReturnType<typeof createStripeClientFromEnv>,
+	paymentIntentId: string,
+) {
+	try {
+		const snapshot = await retrievePaymentIntentSnapshot(
+			stripe,
+			paymentIntentId,
+			{
+				includePaymentMethod: true,
+			},
+		);
+		return snapshot.paymentMethod;
+	} catch (error) {
+		logger.warn("Failed to read Stripe payment method summary", {
+			error: error instanceof Error ? error.message : String(error),
+			paymentIntentId,
+		});
+		return null;
+	}
+}
+
 /**
  * Drives the provider hold confirmation after payment and dispatches the right
  * customer email. Shared by the webhook and any future inline caller.
@@ -131,6 +160,10 @@ async function finalizeReservation(
 	const result = await service.confirmOrderReservations(orderId);
 	switch (result.outcome) {
 		case "confirmed":
+			logger.info("Order confirmed: provider holds accepted", {
+				orderId,
+				paymentIntentId,
+			});
 			if (!result.confirmation.email) {
 				logger.warn("Confirmed order has no contact email; skipping email", {
 					orderId,
@@ -146,6 +179,10 @@ async function finalizeReservation(
 			);
 			return;
 		case "compensated":
+			logger.error("Order refunded: provider hold could not be confirmed", {
+				orderId,
+				paymentIntentId,
+			});
 			Sentry.captureException(
 				new Error("Order refunded: provider hold could not be confirmed"),
 				{ extra: { orderId, paymentIntentId }, level: "error" },
@@ -158,6 +195,10 @@ async function finalizeReservation(
 			);
 			return;
 		case "manual_recovery":
+			logger.error("Order needs manual recovery: auto-refund disabled", {
+				orderId,
+				paymentIntentId,
+			});
 			Sentry.captureException(
 				new Error("Order needs manual recovery: auto-refund disabled"),
 				{ extra: { orderId, paymentIntentId }, level: "error" },
@@ -310,7 +351,7 @@ async function handleStripeEvent(
 ): Promise<void> {
 	switch (event.type) {
 		case "payment_succeeded":
-			await handlePaymentSucceeded(event);
+			await handlePaymentSucceeded(event, stripe);
 			return;
 		case "payment_failed":
 			await handlePaymentFailed(event);

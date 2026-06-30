@@ -286,10 +286,12 @@ export function commerceService(): CommerceService {
 					const snapshot = await retrievePaymentIntentSnapshot(
 						stripe,
 						paymentIntentId,
+						{ includePaymentMethod: true },
 					);
 					return {
 						amountMinor: snapshot.amountMinor,
 						currency: snapshot.currency,
+						paymentMethod: snapshot.paymentMethod,
 						status: mapStripePaymentStatus(snapshot.status),
 					};
 				}

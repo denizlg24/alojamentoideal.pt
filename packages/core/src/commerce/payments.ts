@@ -40,6 +40,13 @@ export type CheckoutPaymentStatus =
 	| "succeeded"
 	| "unknown";
 
+/** Non-sensitive display summary of the payment method used for an order. */
+export interface OrderPaymentMethodSummary {
+	brand: string | null;
+	last4: string | null;
+	type: string;
+}
+
 /** Successful PaymentIntent creation/refresh for a payable draft order. */
 export interface CreatePaymentIntentResponse {
 	amountMinor: number;
@@ -153,6 +160,7 @@ export interface OrderConfirmationFacts {
 	guests: number;
 	name: string;
 	orderId: string;
+	paymentMethod: OrderPaymentMethodSummary | null;
 	publicReference: string;
 }
 
@@ -160,6 +168,7 @@ export interface OrderConfirmationFacts {
 export interface PaymentAmount {
 	amountMinor: number;
 	currency: string;
+	paymentMethod?: OrderPaymentMethodSummary | null;
 }
 
 /**
@@ -258,6 +267,7 @@ export type CompensateOrderResult =
 export interface PaymentIntentLiveStatus {
 	amountMinor: number;
 	currency: string;
+	paymentMethod?: OrderPaymentMethodSummary | null;
 	status: CheckoutPaymentStatus;
 }
 

@@ -57,15 +57,15 @@ describe("orderRoleCan", () => {
 		}
 	});
 
-	test("a member may view, chat, and fill only their own guest slot", () => {
+	test("a member may view and fill only their own guest slot", () => {
 		expect(orderRoleCan("member", "view_booking")).toBe(true);
-		expect(orderRoleCan("member", "chat")).toBe(true);
 		expect(orderRoleCan("member", "manage_own_guest")).toBe(true);
 	});
 
-	test("a member cannot see price/contact or manage people or other guests", () => {
+	test("a member cannot see price/contact, chat, or manage people or other guests", () => {
 		expect(orderRoleCan("member", "view_price")).toBe(false);
 		expect(orderRoleCan("member", "view_contact")).toBe(false);
+		expect(orderRoleCan("member", "chat")).toBe(false);
 		expect(orderRoleCan("member", "invite_members")).toBe(false);
 		expect(orderRoleCan("member", "manage_members")).toBe(false);
 		expect(orderRoleCan("member", "manage_all_guests")).toBe(false);

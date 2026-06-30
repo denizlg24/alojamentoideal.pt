@@ -6,7 +6,11 @@ import type {
 	ProviderBookingStatus,
 } from "@workspace/db";
 import type { OrderRole } from "./order-access";
-import type { OrderBookingStatus, OrderProvisioningSubState } from "./payments";
+import type {
+	OrderBookingStatus,
+	OrderPaymentMethodSummary,
+	OrderProvisioningSubState,
+} from "./payments";
 
 /**
  * Guest-registration progress for a booking (or the whole order). Counts only —
@@ -117,8 +121,8 @@ export type OrderConversationAvailability =
 /**
  * The durable order hub read model behind `GET /api/orders/[reference]`. Built
  * from a {@link ResolvedOrderAccess}, so sensitive sections (`pricing`,
- * `contact`, `members`, per-item money/charges) are `null` for a `member` and
- * populated only for the `owner`.
+ * `contact`, `members`, payment method, per-item money/charges) are `null` for
+ * a `member` and populated only for the `owner`.
  */
 export interface OrderDetail {
 	bookingStatus: OrderBookingStatus;
@@ -130,6 +134,7 @@ export interface OrderDetail {
 	guestProgress: OrderGuestProgress;
 	items: OrderDetailItem[];
 	members: OrderDetailMember[] | null;
+	paymentMethod: OrderPaymentMethodSummary | null;
 	pricing: OrderDetailPricing | null;
 	provisioningSubState: OrderProvisioningSubState;
 	reference: string;

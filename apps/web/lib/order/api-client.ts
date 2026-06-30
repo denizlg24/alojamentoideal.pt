@@ -66,10 +66,11 @@ export function sendConversationMessage(
 	reference: string,
 	conversationId: string,
 	body: string,
+	socketId?: string | null,
 ): Promise<{ message: ConversationMessageDto }> {
 	return request<{ message: ConversationMessageDto }>(
 		`${base(reference)}/conversations/${seg(conversationId)}/messages`,
-		jsonBody({ body }),
+		jsonBody({ body, socketId }),
 	);
 }
 
@@ -77,12 +78,13 @@ export function retryConversationMessage(
 	reference: string,
 	conversationId: string,
 	messageId: string,
+	socketId?: string | null,
 ): Promise<{ message: ConversationMessageDto }> {
 	return request<{ message: ConversationMessageDto }>(
 		`${base(reference)}/conversations/${seg(conversationId)}/messages/${seg(
 			messageId,
 		)}/retry`,
-		jsonBody({}),
+		jsonBody({ socketId }),
 	);
 }
 
