@@ -88,14 +88,15 @@ function present(order: OrderStatusResponse): Presentation {
 			break;
 	}
 
-	// Payment is recorded but the reservation is still being finalized: the saga
-	// holds the booking before it flips to confirmed, so reassure rather than
-	// imply the stay is settled.
+	// Payment is recorded but the reservation is still being confirmed. Rather than
+	// hold the guest here polling for the flip to confirmed (which can take a while
+	// when the provider is slow to accept), present the pending result and send them
+	// to the booking page, where they can check back any time.
 	if (order.provisioningSubState === "paid-confirming") {
 		return {
-			body: "Payment received. We're finalizing your booking and will confirm by email shortly. This usually takes only a moment.",
+			body: "We've received your payment and your reservation is pending. We're confirming your booking and will email you once it's done. You can track it any time from your booking page.",
 			tone: "success",
-			title: "Finalizing your booking",
+			title: "Payment received",
 		};
 	}
 
@@ -174,7 +175,12 @@ export function BookingCompleteView() {
 				}
 				setState({ order, status: "ready" });
 				attempts += 1;
-				if (!isTerminal(order) && attempts < MAX_POLLS) {
+				// Stop once payment has settled: a paid order is shown as "pending" and
+				// the guest is directed to the booking page rather than kept polling for
+				// the provider-side confirmation, which can lag.
+				const settled =
+					isTerminal(order) || order.provisioningSubState === "paid-confirming";
+				if (!settled && attempts < MAX_POLLS) {
 					timer = setTimeout(poll, POLL_INTERVAL_MS);
 				}
 			} catch (error) {

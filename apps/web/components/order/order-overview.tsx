@@ -9,14 +9,43 @@ import {
 import Link from "next/link";
 import type { ReactNode } from "react";
 import { formatMinor, formatStayRangeLong } from "@/lib/checkout/format";
+import { siteConfig } from "@/lib/site/config";
 import { countryName } from "@/lib/site/countries";
 
-function statusBody(detail: OrderDetail): string {
+/**
+ * A paid booking whose confirmation has been retried past the grace window (the
+ * provider has not yet accepted the hold). The copy softens to manage
+ * expectations without exposing any provider/system detail.
+ */
+function isConfirmationDelayed(detail: OrderDetail): boolean {
+	return (
+		detail.provisioningSubState === "paid-confirming" &&
+		detail.items.some((item) => item.providerBooking?.needsRecovery)
+	);
+}
+
+function statusBody(detail: OrderDetail): ReactNode {
 	switch (detail.provisioningSubState) {
 		case "confirmed":
 			return "Your stay is confirmed. We've emailed your booking details and you can manage everything here.";
 		case "paid-confirming":
-			return "Payment received. We're finalizing your booking and will confirm by email shortly.";
+			if (isConfirmationDelayed(detail)) {
+				return (
+					<>
+						This is taking a little longer than usual. No action is needed from
+						you. If your booking hasn't been confirmed in the next few days,
+						please email us at{" "}
+						<a
+							className="font-medium underline underline-offset-2"
+							href={`mailto:${siteConfig.supportEmail}`}
+						>
+							{siteConfig.supportEmail}
+						</a>
+						.
+					</>
+				);
+			}
+			return "We're confirming your booking and will email you as soon as it's done.";
 		case "held-unpaid":
 			return "We're holding your dates while your payment is completed.";
 		case "refunded":
