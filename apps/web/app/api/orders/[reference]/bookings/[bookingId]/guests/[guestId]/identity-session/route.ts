@@ -61,7 +61,7 @@ export const POST = withApiRoute<OrderGuestIdentitySessionRouteContext>(
 				guestId,
 			);
 			const returnUrl = new URL(
-				`/order/${encodeURIComponent(reference)}?identity=complete`,
+				`/order/${encodeURIComponent(reference)}/guests?identity=complete`,
 				siteConfig.url,
 			).toString();
 			const session = await createGuestIdentityVerificationSession(stripe, {
