@@ -486,8 +486,8 @@ set per retention policy.
 
 ## Frontend
 
-> Visual baseline is the legacy order page in
-> `E:\Ocean Informatix\AlojamentoIdeal.pt\alojamentoideal`. Copy style per
+> Visual baseline is an AirBnB style order page. UI should be intuitive, clear, clean and minimalistic.
+> Avoid heavy cards and borders, for popovers, dialogs, always think of UX on mobile first. Copy style per
 > `AGENTS.md` (no host/marketplace language, no em dashes).
 
 ### F0 — Completion page + unavailable/failed surface  *(independent; can start now; finishes the M5 Part G gap)*

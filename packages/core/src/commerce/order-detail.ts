@@ -57,6 +57,7 @@ export interface OrderDetailItem {
 	pricing: OrderItemPricing | null;
 	propertyTimezone: string | null;
 	providerBooking: {
+		id: string;
 		needsRecovery: boolean;
 		status: ProviderBookingStatus;
 	} | null;

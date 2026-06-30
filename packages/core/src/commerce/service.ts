@@ -2590,6 +2590,7 @@ export class CommerceService {
 			providerBooking:
 				row.bookingId && row.bookingStatus
 					? {
+							id: row.bookingId,
 							needsRecovery: row.bookingNeedsRecovery ?? false,
 							status: row.bookingStatus,
 						}
