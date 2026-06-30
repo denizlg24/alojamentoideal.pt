@@ -159,6 +159,13 @@ const DEFAULT_PROPERTY_TIMEZONE = "Europe/Lisbon";
 const RESERVATION_RETRY_BASE_MS = 60 * 1000;
 const RESERVATION_RETRY_MAX_MS = 30 * 60 * 1000;
 const DEFAULT_MAX_RESERVATION_ATTEMPTS = 6;
+// A confirmed payment whose accept will not settle on the provider (e.g. Hostify
+// refuses to accept a far-future reservation and leaves it pending) is never
+// refunded: the hold is alive and the dates are held. After this many not-settled
+// reads the booking is flagged `needsRecovery` for an operator and the nudge
+// cadence drops to daily until the accept finally takes.
+const CONFIRM_SETTLE_GRACE_ATTEMPTS = 6;
+const RESERVATION_SETTLE_RETRY_MS = 24 * 60 * 60 * 1000;
 const DEFAULT_RESERVATION_SOURCE = "alojamentoideal";
 // Grace past `checkoutExpiresAt` before the cron releases an abandoned hold.
 const ABANDONED_HOLD_GRACE_MS = 5 * 60 * 1000;
@@ -526,7 +533,7 @@ type HoldItemResult =
 	| "transient"
 	| "permanent"
 	| { unavailable: string };
-type MutateItemResult = "ok" | "transient" | "permanent";
+type MutateItemResult = "ok" | "transient" | "permanent" | "not_settled";
 type PersistHoldPlacedResult = "already_linked" | "conflict" | "persisted";
 
 /** Email side-effects the reconciler delegates back to the app (transport seam). */
@@ -4789,6 +4796,7 @@ export class CommerceService {
 
 		let sawTransient = false;
 		let sawPermanent = false;
+		let sawNotSettled = false;
 		for (const booking of context.bookings) {
 			const result = await this.#confirmHold(
 				booking,
@@ -4798,6 +4806,8 @@ export class CommerceService {
 				sawTransient = true;
 			} else if (result === "permanent") {
 				sawPermanent = true;
+			} else if (result === "not_settled") {
+				sawNotSettled = true;
 			}
 		}
 
@@ -4818,7 +4828,10 @@ export class CommerceService {
 			return { outcome: "not_applicable" };
 		}
 
-		if (sawTransient) {
+		// A still-pending accept (`not_settled`) leaves the order pending for the
+		// cron exactly like a transient confirm, but is deliberately kept out of the
+		// `sawPermanent` path above so it can never trigger a refund on a live hold.
+		if (sawTransient || sawNotSettled) {
 			return { outcome: "pending_retry" };
 		}
 
@@ -5253,7 +5266,13 @@ export class CommerceService {
 						),
 						and(
 							eq(providerBookingTable.normalizedStatus, "pending"),
-							eq(providerBookingTable.needsRecovery, false),
+							// A hold whose accept will not settle is flagged `needsRecovery`
+							// for the operator yet must keep getting its daily nudge, so it
+							// is selected despite the flag via its distinct error code.
+							or(
+								eq(providerBookingTable.needsRecovery, false),
+								eq(providerBookingTable.lastErrorCode, "confirm_not_settled"),
+							),
 						),
 						and(
 							eq(providerBookingTable.normalizedStatus, "failed"),
@@ -6096,6 +6115,15 @@ export class CommerceService {
 				);
 				return "ok";
 			}
+			if (result.kind === "not_settled") {
+				await this.#recordConfirmNotSettled(
+					currentBooking,
+					result.providerStatus,
+					result.raw,
+					tx,
+				);
+				return "not_settled";
+			}
 			if (result.kind === "transient") {
 				const exhausted = await this.#recordBookingAttempt(
 					currentBooking,
@@ -6378,6 +6406,60 @@ export class CommerceService {
 				updatedAt: new Date(),
 			})
 			.where(eq(providerBookingTable.id, providerBookingId));
+	}
+
+	/**
+	 * Records a confirm whose accept has not taken on the provider yet (the hold is
+	 * alive and `pending`, the payment captured). This is never a failure and never
+	 * compensates: refunding a paid, still-held booking would be wrong. The booking
+	 * stays `pending` and is retried — first on the standard backoff, then daily
+	 * once the grace count is passed, at which point `needsRecovery` is set so an
+	 * operator can finish the accept by hand. The reconciler's `pending` selection
+	 * is widened to keep nudging these despite the `needsRecovery` flag.
+	 */
+	async #recordConfirmNotSettled(
+		booking: SagaBooking,
+		providerStatus: string | null,
+		raw: Record<string, unknown>,
+		db: DbExecutor = this.#db,
+	): Promise<void> {
+		const now = new Date();
+		const attemptCount = booking.attemptCount + 1;
+		const gracePassed = attemptCount >= CONFIRM_SETTLE_GRACE_ATTEMPTS;
+		await db
+			.update(providerBookingTable)
+			.set({
+				attemptCount,
+				lastAttemptAt: now,
+				lastErrorCode: "confirm_not_settled",
+				lastErrorMessage: `Hostify accept has not taken; reservation still ${providerStatus ?? "unconfirmed"}.`,
+				needsRecovery: gracePassed,
+				nextAttemptAt: gracePassed
+					? new Date(now.getTime() + RESERVATION_SETTLE_RETRY_MS)
+					: this.#backoffFrom(now, attemptCount),
+				providerStatus,
+				providerUpdatedAt: now,
+				rawOperationalPayload: raw,
+				updatedAt: now,
+			})
+			.where(eq(providerBookingTable.id, booking.providerBookingId));
+
+		// Alert the operator exactly once, when the grace count is first crossed.
+		if (attemptCount === CONFIRM_SETTLE_GRACE_ATTEMPTS) {
+			trackEvent({
+				metadata: {
+					attemptCount,
+					orderItemId: booking.orderItemId,
+					providerBookingId: booking.providerBookingId,
+					providerReservationId: booking.providerReservationId,
+					providerStatus,
+				},
+				name: "reservation_confirm_stuck",
+				provider: this.#provider,
+				severity: "warning",
+				type: "integration",
+			});
+		}
 	}
 
 	/** Records a retryable attempt; returns true when the retry cap is exhausted. */
