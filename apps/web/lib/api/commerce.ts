@@ -28,7 +28,8 @@ import {
 import { getRedis } from "@workspace/core/redis";
 import type { AppliedDiscountSnapshot } from "@workspace/db";
 import { CART_COOKIE_NAME, getDb } from "@workspace/db";
-import { getServerUser } from "@/lib/auth/session";
+import { cookies } from "next/headers";
+import { getCurrentUser, getServerUser } from "@/lib/auth/session";
 import { HOSTIFY_PROVIDER } from "@/lib/catalog/constants";
 import { quoteFailure } from "./hostify-errors";
 import { createPusherRealtimePublisher } from "./realtime";
@@ -185,6 +186,44 @@ export function memberCookie(reference: string, token: string): string {
 		attributes.push("Secure");
 	}
 	return attributes.join("; ");
+}
+
+/**
+ * Server Component / Server Action variant of {@link resolveOrderAccessContext}.
+ * Builds the order-access context from `next/headers` so pages and actions can
+ * authorize an order without a `Request` object.
+ */
+export async function resolveOrderAccessFromCookies(
+	reference: string,
+): Promise<OrderAccessContext> {
+	const [store, user] = await Promise.all([cookies(), getCurrentUser()]);
+	return {
+		cartToken: store.get(CART_COOKIE_NAME)?.value ?? null,
+		memberToken:
+			store.get(orderMemberCookieName(reference))?.value ??
+			store.get(ORDER_MEMBER_COOKIE_NAME)?.value ??
+			null,
+		userId: user?.id ?? null,
+	};
+}
+
+/**
+ * Binds the browser to a redeemed member from a Server Action by writing the
+ * order-scoped httpOnly cookie through the `next/headers` store. Mirrors the
+ * attributes of {@link memberCookie}, which the access route handler emits.
+ */
+export async function setOrderMemberCookie(
+	reference: string,
+	token: string,
+): Promise<void> {
+	const store = await cookies();
+	store.set(orderMemberCookieName(reference), token, {
+		httpOnly: true,
+		maxAge: ORDER_MEMBER_COOKIE_MAX_AGE_SECONDS,
+		path: "/",
+		sameSite: "lax",
+		secure: process.env.NODE_ENV === "production",
+	});
 }
 
 function optionalStripeClient(): ReturnType<
