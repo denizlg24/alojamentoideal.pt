@@ -111,6 +111,10 @@ describe("isMemberTokenExpired", () => {
 			),
 		).toBe(true);
 	});
+
+	test("an expiry exactly at now has lapsed", () => {
+		expect(isMemberTokenExpired({ expiresAt: now }, now)).toBe(true);
+	});
 });
 
 describe("memberInviteExpiresAt", () => {
@@ -141,12 +145,17 @@ describe("orderMemberCapacity", () => {
 
 describe("canAcceptMember", () => {
 	test("admits a new member only below capacity (the owner occupies a slot)", () => {
-		// A solo booking (capacity 1) is full once the owner holds it.
-		expect(canAcceptMember(1, 1)).toBe(false);
+		// A solo booking (capacity 1) is full because the owner occupies it.
+		expect(canAcceptMember(0, 1)).toBe(false);
 		// A two-guest booking admits the owner plus one accepted invite.
-		expect(canAcceptMember(1, 2)).toBe(true);
-		expect(canAcceptMember(2, 2)).toBe(false);
+		expect(canAcceptMember(0, 2)).toBe(true);
+		expect(canAcceptMember(1, 2)).toBe(false);
 		// A zero-capacity order (no accommodation items) admits no one.
 		expect(canAcceptMember(0, 0)).toBe(false);
+	});
+
+	test("can count capacity without the implicit owner slot when requested", () => {
+		expect(canAcceptMember(0, 1, false)).toBe(true);
+		expect(canAcceptMember(1, 1, false)).toBe(false);
 	});
 });

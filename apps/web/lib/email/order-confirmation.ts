@@ -104,22 +104,21 @@ export function buildOrderConfirmationEmail(
  * re-delivered webhook never produces a duplicate email. Provisioning the booker
  * as the order's `owner` member is bound here, the one guarded once-per-order
  * action both the webhook and the reconciler cron funnel through. The raw access
- * token is minted before sending so the "Manage reservation" CTA can carry it,
- * then activated only after the mail provider accepts the message; only its hash
- * is persisted.
+ * token is activated before sending so an accepted email never carries a dead
+ * "Manage reservation" CTA; only its hash is persisted.
  */
 export async function sendOrderConfirmationEmail(
 	facts: OrderConfirmationFacts,
 ): Promise<void> {
 	const token = generateMemberToken();
-	const manageUrl = orderHubUrl(facts.publicReference, token);
-	await getEmailSender().send({
-		to: facts.email,
-		...buildOrderConfirmationEmail(facts, manageUrl),
-	});
 	await commerceService().activateOwnerAccessToken(
 		facts.orderId,
 		facts.email,
 		token,
 	);
+	const manageUrl = orderHubUrl(facts.publicReference, token);
+	await getEmailSender().send({
+		to: facts.email,
+		...buildOrderConfirmationEmail(facts, manageUrl),
+	});
 }

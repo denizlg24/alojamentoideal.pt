@@ -149,6 +149,9 @@ const isoDateString = z
 	.string()
 	.trim()
 	.regex(/^\d{4}-\d{2}-\d{2}$/, "Use YYYY-MM-DD");
+const optionalIsoDateString = isoDateString
+	.nullish()
+	.transform((value) => value ?? null);
 const countryCode = z
 	.string()
 	.trim()
@@ -165,7 +168,7 @@ const optionalGuestField = (maxLength: number) =>
 
 const guestIdentityFieldsSchema = z.object({
 	dateOfBirth: isoDateString,
-	documentExpiresOn: optionalGuestField(10),
+	documentExpiresOn: optionalIsoDateString,
 	documentIssuingCountry: countryCode
 		.nullish()
 		.transform((value) => value ?? null),

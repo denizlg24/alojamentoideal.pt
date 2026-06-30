@@ -25,7 +25,7 @@ CREATE TABLE "messages" (
 	"sent_at" timestamp with time zone NOT NULL,
 	"read_at" timestamp with time zone,
 	"is_automatic" boolean DEFAULT false NOT NULL,
-	"delivery_status" text DEFAULT 'sent' NOT NULL,
+	"delivery_status" text DEFAULT 'pending' NOT NULL,
 	"raw_payload" jsonb,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
 	"updated_at" timestamp with time zone DEFAULT now() NOT NULL,

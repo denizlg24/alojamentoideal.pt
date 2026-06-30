@@ -409,6 +409,10 @@ function plainCompensationHtml(text: string): string {
 	return `<div style="font-family:system-ui,sans-serif;line-height:1.5">${paragraphs}</div>`;
 }
 
+function orderInviteFallbackHtml(input: OrderInviteEmailInput): string {
+	return `<div style="font-family:system-ui,sans-serif;line-height:1.5"><p>Hi,</p><p>You've been invited to join booking ${escapeHtml(input.orderNumber)} for ${escapeHtml(input.accommodationTitle)} with ${APP_NAME}.</p><p><a href="${escapeHtml(input.inviteUrl)}">Open your booking</a> to message us and add your guest details.</p><p>This invitation link expires in ${input.expiresInHours} hours. If it lapses, ask whoever booked to resend it.</p><p>The ${APP_NAME} team</p></div>`;
+}
+
 export interface OrderInviteEmailInput {
 	/** Property name for the subject and body, e.g. "Sunny Loft in Porto". */
 	accommodationTitle: string;
@@ -455,7 +459,7 @@ export function buildOrderInviteEmail(
 	}
 
 	const text = orderInviteFallbackText(input);
-	return { html: plainCompensationHtml(text), subject, text };
+	return { html: orderInviteFallbackHtml(input), subject, text };
 }
 
 function orderInviteFallbackText(input: OrderInviteEmailInput): string {

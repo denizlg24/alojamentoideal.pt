@@ -2171,7 +2171,7 @@
             "id",
             "order_id"
           ],
-          "onDelete": "no action",
+          "onDelete": "set null",
           "onUpdate": "no action"
         }
       },
@@ -2260,7 +2260,7 @@
           "type": "text",
           "primaryKey": false,
           "notNull": true,
-          "default": "'sent'"
+          "default": "'pending'"
         },
         "raw_payload": {
           "name": "raw_payload",
@@ -2426,7 +2426,7 @@
             "id",
             "order_id"
           ],
-          "onDelete": "no action",
+          "onDelete": "set null",
           "onUpdate": "no action"
         }
       },

@@ -33,7 +33,7 @@ export const POST = withApiRoute<OrderGuestIdentitySessionRouteContext>(
 	},
 	async (request: Request, context): Promise<Response> => {
 		const { bookingId, guestId, reference } = await context.params;
-		const accessContext = await resolveOrderAccessContext(request);
+		const accessContext = await resolveOrderAccessContext(request, reference);
 
 		try {
 			const service = commerceService();

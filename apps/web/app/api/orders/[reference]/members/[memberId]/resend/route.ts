@@ -19,7 +19,7 @@ export const POST = withApiRoute<OrderMemberRouteContext>(
 	{ name: "orders.members_resend", rateLimit: { bucket: "mutation" } },
 	async (request: Request, context): Promise<Response> => {
 		const { memberId, reference } = await context.params;
-		const accessContext = await resolveOrderAccessContext(request);
+		const accessContext = await resolveOrderAccessContext(request, reference);
 		try {
 			const service = commerceService();
 			const access = await service.resolveOrderAccess(reference, accessContext);

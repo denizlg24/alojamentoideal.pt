@@ -21,6 +21,7 @@ export type OrderBookingStatus =
 	| "pending";
 
 export type OrderProvisioningSubState =
+	| "cancelled"
 	| "confirmed"
 	| "held-unpaid"
 	| "paid-confirming"
@@ -316,8 +317,11 @@ export function toOrderProvisioningSubState({
 	if (bookingStatus === "confirmed") {
 		return "confirmed";
 	}
-	if (bookingStatus === "cancelled" || amountRefundedMinor > 0) {
+	if (amountRefundedMinor > 0) {
 		return "refunded";
+	}
+	if (bookingStatus === "cancelled") {
+		return "cancelled";
 	}
 	if (amountPaidMinor > 0) {
 		return "paid-confirming";

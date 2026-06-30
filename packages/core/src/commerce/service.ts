@@ -33,6 +33,7 @@ import {
 	isNull,
 	lte,
 	or,
+	type SQL,
 	sql,
 } from "drizzle-orm";
 import { parseQuoteBody } from "../accommodations";
@@ -207,6 +208,7 @@ const bookingGuestSelection = {
 	identityStatus: bookingGuestTable.identityStatus,
 	lastNameEncrypted: bookingGuestTable.lastNameEncrypted,
 	nationalityEncrypted: bookingGuestTable.nationalityEncrypted,
+	orderId: bookingGuestTable.orderId,
 	orderMemberId: bookingGuestTable.orderMemberId,
 	position: bookingGuestTable.position,
 	providerBookingId: bookingGuestTable.providerBookingId,
@@ -1069,8 +1071,8 @@ export class CommerceService {
 	/**
 	 * Resolves who is acting on an order and what they may do — the spine every
 	 * `/order/[reference]` route authorizes through. A member is authorized by the
-	 * hashed booking-access token from their redeemed cookie (or a raw `?token=`),
-	 * while the original cart-cookie / signed-in-user grants still resolve the
+	 * hashed booking-access token from their redeemed cookie, while the original
+	 * cart-cookie / signed-in-user grants still resolve the
 	 * `owner` without a token. A revoked, expired, or unknown token falls through
 	 * to the owner grant; if neither path authorizes, the order reports as not
 	 * found so its existence stays unenumerable.
@@ -1209,16 +1211,17 @@ export class CommerceService {
 				}
 
 				const capacity = await this.#orderCapacity(tx, order.id);
-				const [activeRow] = await tx
+				const [acceptedInviteRow] = await tx
 					.select({ value: count() })
 					.from(orderMemberTable)
 					.where(
 						and(
 							eq(orderMemberTable.orderId, order.id),
+							eq(orderMemberTable.role, "member"),
 							eq(orderMemberTable.status, "active"),
 						),
 					);
-				if (!canAcceptMember(Number(activeRow?.value ?? 0), capacity)) {
+				if (!canAcceptMember(Number(acceptedInviteRow?.value ?? 0), capacity)) {
 					throw new CommerceError(
 						"order_full",
 						"This booking is already full.",
@@ -1231,6 +1234,7 @@ export class CommerceService {
 				.update(orderMemberTable)
 				.set({
 					acceptedAt: member.acceptedAt ?? now,
+					expiresAt: null,
 					lastSeenAt: now,
 					status: "active",
 					userId:
@@ -1312,6 +1316,7 @@ export class CommerceService {
 						accessTokenHash: hashMemberToken(token),
 						acceptedAt: existing.acceptedAt ?? now,
 						email: email.trim().toLowerCase(),
+						expiresAt: null,
 						status: "active",
 						userId: existing.userId ?? userId,
 					})
@@ -1763,28 +1768,40 @@ export class CommerceService {
 	}
 
 	async applyBookingGuestIdentityStatus({
+		bookingGuestId,
 		sessionId,
 		status,
 		statusChangedAt,
 		verifiedFields,
 	}: {
+		bookingGuestId?: string | null;
 		sessionId: string;
 		status: Exclude<IdentityVerificationStatus, "unstarted">;
 		statusChangedAt: string | null;
 		verifiedFields?: VerifiedIdentityDocumentFields;
 	}): Promise<string | null> {
-		const [existing] = await this.#db
-			.select({
-				...bookingGuestSelection,
-				stayEndsAt: providerBookingTable.stayEndsAt,
-			})
-			.from(bookingGuestTable)
-			.innerJoin(
-				providerBookingTable,
-				eq(providerBookingTable.id, bookingGuestTable.providerBookingId),
-			)
-			.where(eq(bookingGuestTable.stripeVerificationSessionId, sessionId))
-			.limit(1);
+		const findTarget = (where: SQL) =>
+			this.#db
+				.select({
+					...bookingGuestSelection,
+					stayEndsAt: providerBookingTable.stayEndsAt,
+				})
+				.from(bookingGuestTable)
+				.innerJoin(
+					providerBookingTable,
+					eq(providerBookingTable.id, bookingGuestTable.providerBookingId),
+				)
+				.where(where)
+				.limit(1);
+
+		const [linkedTarget] = await findTarget(
+			eq(bookingGuestTable.stripeVerificationSessionId, sessionId),
+		);
+		const [fallbackTarget] =
+			!linkedTarget && bookingGuestId
+				? await findTarget(eq(bookingGuestTable.id, bookingGuestId))
+				: [];
+		const existing = linkedTarget ?? fallbackTarget;
 
 		if (!existing) {
 			return null;
@@ -1801,6 +1818,8 @@ export class CommerceService {
 			identityStatus: nextStatus,
 			purgeAfter:
 				existing.purgeAfter ?? bookingGuestPurgeAfter(existing.stayEndsAt, now),
+			stripeVerificationSessionId:
+				existing.stripeVerificationSessionId ?? sessionId,
 			updatedAt: now,
 		};
 
@@ -2037,15 +2056,15 @@ export class CommerceService {
 			);
 		}
 
-		const identityStatus =
-			existing.identityStatus === "verified" ? "verified" : "provided";
 		await tx
 			.update(bookingGuestTable)
 			.set({
 				...encryptGuestFields(input.fields),
-				identityStatus,
+				identityStatus: "provided",
 				orderMemberId: input.orderMemberId ?? existing.orderMemberId,
 				purgeAfter: input.purgeAfter,
+				stripeVerificationReportId: null,
+				stripeVerificationSessionId: null,
 				submittedAt: input.now,
 				updatedAt: input.now,
 			})
@@ -2083,11 +2102,11 @@ export class CommerceService {
 			.from(conversationMessageTable)
 			.where(eq(conversationMessageTable.conversationId, conversationId))
 			.orderBy(
-				asc(conversationMessageTable.sentAt),
-				asc(conversationMessageTable.id),
+				desc(conversationMessageTable.sentAt),
+				desc(conversationMessageTable.id),
 			)
 			.limit(limit);
-		return rows.map((row) => this.#toMessageDto(row));
+		return rows.reverse().map((row) => this.#toMessageDto(row));
 	}
 
 	async sendConversationMessage(
@@ -2253,15 +2272,26 @@ export class CommerceService {
 		const [pending] = await this.#db
 			.update(conversationMessageTable)
 			.set({ deliveryStatus: "pending", updatedAt: new Date() })
-			.where(eq(conversationMessageTable.id, messageId))
+			.where(
+				and(
+					eq(conversationMessageTable.id, messageId),
+					eq(conversationMessageTable.conversationId, conversationId),
+					eq(conversationMessageTable.deliveryStatus, "failed"),
+				),
+			)
 			.returning(conversationMessageSelection);
-		if (pending) {
-			await this.#publishMessageCreatedSafe(
-				access.order.id,
-				conversationId,
-				this.#toMessageDto(pending),
+		if (!pending) {
+			throw new CommerceError(
+				"conversation_message_not_found",
+				"Message not found.",
+				404,
 			);
 		}
+		await this.#publishMessageCreatedSafe(
+			access.order.id,
+			conversationId,
+			this.#toMessageDto(pending),
+		);
 
 		const gateway = this.#conversationGatewayFor(conversation.provider);
 		if (!gateway) {
@@ -2276,7 +2306,7 @@ export class CommerceService {
 		try {
 			const externalMessageId = await gateway.sendMessage(
 				conversation.externalThreadId,
-				messageRow.body,
+				pending.body,
 			);
 			return this.#markConversationMessageDelivered(
 				access.order.id,
@@ -3057,45 +3087,8 @@ export class CommerceService {
 		conversationId: string,
 		message: ProviderConversationMessage,
 	): Promise<{ inserted: boolean; message: ConversationMessageDto }> {
-		const [existing] = await this.#db
-			.select({ id: conversationMessageTable.id })
-			.from(conversationMessageTable)
-			.where(
-				and(
-					eq(conversationMessageTable.conversationId, conversationId),
-					eq(
-						conversationMessageTable.externalMessageId,
-						message.externalMessageId,
-					),
-				),
-			)
-			.limit(1);
 		const now = new Date();
-		if (existing) {
-			const [updated] = await this.#db
-				.update(conversationMessageTable)
-				.set({
-					body: message.body,
-					deliveryStatus: "sent",
-					isAutomatic: message.isAutomatic,
-					rawPayload: message.raw,
-					senderType: message.senderType,
-					sentAt: message.sentAt,
-					updatedAt: now,
-				})
-				.where(eq(conversationMessageTable.id, existing.id))
-				.returning(conversationMessageSelection);
-			if (!updated) {
-				throw new CommerceError(
-					"conversation_message_not_found",
-					"Message not found.",
-					404,
-				);
-			}
-			return { inserted: false, message: this.#toMessageDto(updated) };
-		}
-
-		const [inserted] = await this.#db
+		const [row] = await this.#db
 			.insert(conversationMessageTable)
 			.values({
 				body: message.body,
@@ -3111,15 +3104,34 @@ export class CommerceService {
 				sentAt: message.sentAt,
 				updatedAt: now,
 			})
-			.returning(conversationMessageSelection);
-		if (!inserted) {
+			.onConflictDoUpdate({
+				target: [
+					conversationMessageTable.conversationId,
+					conversationMessageTable.externalMessageId,
+				],
+				targetWhere: sql`${conversationMessageTable.externalMessageId} is not null`,
+				set: {
+					body: message.body,
+					deliveryStatus: "sent",
+					isAutomatic: message.isAutomatic,
+					rawPayload: message.raw,
+					senderType: message.senderType,
+					sentAt: message.sentAt,
+					updatedAt: now,
+				},
+			})
+			.returning({
+				...conversationMessageSelection,
+				inserted: sql<boolean>`xmax = 0`,
+			});
+		if (!row) {
 			throw new CommerceError(
 				"conversation_unavailable",
 				"Could not import the message.",
 				503,
 			);
 		}
-		return { inserted: true, message: this.#toMessageDto(inserted) };
+		return { inserted: row.inserted, message: this.#toMessageDto(row) };
 	}
 
 	#trackRealtimePublishFailure(conversationId: string, error: unknown): void {
@@ -3830,6 +3842,7 @@ export class CommerceService {
 						createdAt: now,
 						id: crypto.randomUUID(),
 						identityStatus: "missing" as const,
+						orderId,
 						position,
 						providerBookingId,
 						updatedAt: now,

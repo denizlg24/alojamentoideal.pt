@@ -150,10 +150,11 @@ pay -> /booking/complete?ref=AI-...        (transient, polls status; existing)
 >   superseded in B1 by `issueOwnerAccessToken` and the inline send-first invite
 >   path, and removed), and `redeemMemberToken(reference, rawToken, opts)`
 >   (idempotent `invited → active`, binds `user_id`, stamps `last_seen_at`).
-> - Web wiring in `apps/web/lib/api/commerce.ts`: `readMemberToken`,
->   `resolveOrderAccessContext`, `memberCookie` (httpOnly `ai_order_member`,
->   holds the raw token, re-hashed per request).
-> - `POST /api/orders/[reference]/access` redeems `?token=`/body token, sets the
+> - Web wiring in `apps/web/lib/api/commerce.ts`: `readMemberToken(reference)`,
+>   `resolveOrderAccessContext(request, reference)`, `memberCookie(reference,
+>   token)` (httpOnly order-scoped `ai_order_member.<ref>` cookie, holds the raw
+>   token, re-hashed per request; legacy `ai_order_member` is read as a fallback).
+> - `POST /api/orders/[reference]/access` redeems a body token only, sets the
 >   scoped cookie, returns `{ reference, role }`; invalid/revoked/expired → 404.
 > - `packages/core/src/commerce/order-detail.ts`: the `OrderDetail` read-model
 >   types (items + `accommodation_item_details` + provider-booking status +
@@ -178,11 +179,9 @@ pay -> /booking/complete?ref=AI-...        (transient, polls status; existing)
 >   member field hiding.
 > - Conversation refs in `readOrderDetail` are deferred to B2 (the
 >   `conversations` table does not exist yet); the provisioning sub-state is B4.
-> - **Known limitation**: a single `ai_order_member` cookie binds one member at a
->   time; visiting a second order overwrites it. `resolveOrderAccess` filters the
->   token by `order_id`, so a mismatched cookie is ignored (falls through to the
->   owner grant), but a member of two orders re-redeems on switch. Revisit if
->   multi-order membership becomes common.
+> - **Review hardening:** member cookies are scoped by order reference so redeeming
+>   a second order no longer overwrites the first; the access API no longer accepts
+>   raw tokens in the query string.
 
 Schema (`packages/db/src/schema.ts` + next migration after `0019`):
 
@@ -209,8 +208,8 @@ Core (`packages/core/src/commerce/`):
 Routes (`apps/web/app/api/orders/[reference]/`):
 
 - `GET /api/orders/[reference]` -> `readOrderDetail`.
-- `POST /api/orders/[reference]/access` -> redeem `?token`, set scoped cookie, flip
-  `invited -> active`, bind `user_id` when signed in.
+- `POST /api/orders/[reference]/access` -> redeem body token, set scoped cookie,
+  flip `invited -> active`, bind `user_id` when signed in.
 
 **Verify**: token redeem is idempotent; revoked/expired tokens 404; owner
 auto-resolves from cart/user without a token; sensitive fields hidden from
@@ -224,13 +223,14 @@ auto-resolves from cart/user without a token; sensitive fields hidden from
 > below, all deliberate:
 >
 > - **Owner provisioning is bound to the confirmation-email send, not the status
->   UPDATE.** `CommerceService.issueOwnerAccessToken(orderId, email)` (idempotent
->   ensure-or-rotate, persists only the hash) is called from
->   `sendOrderConfirmationEmail` — the one guarded, once-per-order action both the
->   webhook and the reconciler cron funnel through. That is the only place the raw
->   token can reach the email in *either* send path. The confirmation email's
->   "Manage reservation" CTA now points at `/order/[ref]?token=` (folded in, per
->   the A3 decision) via the shared `apps/web/lib/email/order-url.ts` helper.
+>   UPDATE.** `CommerceService.activateOwnerAccessToken(orderId, email, token)`
+>   (idempotent ensure-or-rotate, persists only the hash) is called from
+>   `sendOrderConfirmationEmail` before delivery — the one guarded,
+>   once-per-order action both the webhook and the reconciler cron funnel through.
+>   That is the only place the raw token can reach the email in *either* send path.
+>   The confirmation email's "Manage reservation" CTA points at
+>   `/order/[ref]?token=` (folded in, per the A3 decision) via the shared
+>   `apps/web/lib/email/order-url.ts` helper.
 > - **The member cap moved from invitation to acceptance.** Invites are unbounded
 >   but short-lived (`INVITE_TOKEN_TTL_MS` = 24h); `redeemMemberToken` gates the
 >   `invited -> active` flip on `canAcceptMember(activeCount, capacity)` where
@@ -259,6 +259,10 @@ auto-resolves from cart/user without a token; sensitive fields hidden from
 >   and invite reuses a still-pending row per recipient instead of piling up. A
 >   durable invite-email **outbox is deliberately out of B1 scope** (the send-first
 >   ordering is the proportionate guarantee until B2's delivery-status pattern).
+> - **Post-B4 review hardening:** accepted members now clear `expires_at`; owner
+>   rows are protected by a DB check requiring `expires_at is null`; the
+>   order-member inviter relationship is order-scoped; fallback invite HTML emits
+>   a real clickable link.
 >
 > **Left**: live-DB verification of capacity races, the new unique index, revoke-
 > kills-access mid-session, resend rotation, and owner auto-resolve; the F4 invites
@@ -317,6 +321,13 @@ re-invite rotates the token; member cap enforced.
 >   - `POST /api/realtime/auth`
 > - Env/docs: `pusher` dependency, Pusher vars in `.env.example` and `turbo.json`,
 >   and the conversation cron registered in `docs/sync-routes.md`.
+> - **Post-B4 review hardening:** `messages.delivery_status` now defaults to
+>   `pending`; provider messages with missing/invalid timestamps are skipped
+>   instead of stamped with reconciliation time; message reads fetch the latest
+>   page and return it chronologically; retry sends are guarded by an atomic
+>   `failed -> pending` transition; provider message imports use atomic upsert;
+>   composite nullable FKs use `SET NULL` semantics aligned with the
+>   single-column FKs; the Pusher server helper is marked `server-only`.
 > - Verification passed:
 >   - `bun run --filter @workspace/db typecheck`
 >   - `bun run --filter @workspace/core typecheck`
@@ -385,6 +396,45 @@ rejects non-members; outbound failure is retryable; preview/unread update.
 
 ### B3 — Guest registration + Stripe Identity (collect + verify; Hostkit deferred)  *(depends B0; pairs with F3)*
 
+> **Status: backend done; live Stripe/API verification + frontend (F3) remain.**
+> The order/guest-scoped identity capture backend is landed in
+> `0777799 feat(orders): add guest completion backend` and the follow-up review
+> fixes in this pass.
+>
+> **Done**
+> - `booking_guests.order_member_id` landed in migration
+>   `0024_little_mathemanic.sql` so a member can own exactly one slot per booking.
+> - Review hardening added `booking_guests.order_id` plus order-scoped composite
+>   FKs for `(provider_booking_id, order_id)` and `(order_member_id, order_id)` in
+>   `0025_unknown_jocasta.sql`, preventing cross-order guest/member assignment.
+> - `packages/core/src/commerce/order-guests.ts`: guest identity DTOs, purge
+>   support-window helper, and Stripe Identity-to-guest-status mapping.
+> - `parseUpdateBookingGuestsBody` validates guest identity payloads, including
+>   ISO `documentExpiresOn` and uppercase ISO country codes.
+> - `CommerceService.readBookingGuests` and `updateBookingGuests`: owner can
+>   manage all slots; a member can claim/update only their own slot; identity
+>   fields are encrypted and guest mutations emit `guest_identity_provided`.
+> - Manual identity edits now invalidate stale Stripe verification/session fields
+>   and reset `identityStatus` to `provided`.
+> - `POST .../guests/[guestId]/identity-session`: creates guest-scoped Stripe
+>   Identity sessions without requiring a signed-in account.
+> - Stripe Identity webhook now handles account-scoped and booking-guest sessions;
+>   guest reconciliation first matches by session id and falls back to Stripe
+>   metadata `bookingGuestId` for unlinked session cleanup failures.
+> - Routes landed:
+>   - `GET|PUT /api/orders/[reference]/bookings/[bookingId]/guests`
+>   - `POST /api/orders/[reference]/bookings/[bookingId]/guests/[guestId]/identity-session`
+> - Tests cover guest purge/status helpers, request parsing, and Stripe webhook
+>   metadata normalization.
+>
+> **Left**
+> - Live Stripe Identity verification using a guest/order session and webhook
+>   delivery.
+> - Live DB verification of member-owned guest slot claiming and cross-order FK
+>   enforcement.
+> - Hostkit SIBA connector/cron remains deferred by A1.
+> - F3 guest-data / identity UI.
+
 - Guest service + routes scoped to a `provider_booking` within an order, authorized
   via `OrderAccessContext`: a `member` fills *their own* guest slot; the `owner`
   manages all slots.
@@ -411,10 +461,26 @@ set per retention policy.
 
 ### B4 — Completion status read enhancements  *(depends B0; small; feeds F0/F1)*
 
+> **Status: backend done; frontend (F0/F1) remains.**
+>
+> **Done**
+> - `readOrderStatus` and `readOrderDetail` now surface
+>   `conversationAvailability`, `guestProgress`, `provisioningSubState`, and
+>   relative `orderUrl`.
+> - `provisioningSubState` distinguishes `held-unpaid`, `paid-confirming`,
+>   `confirmed`, `refunded`, and review-added `cancelled` so unpaid cancellations
+>   are not mislabeled as refunds.
+> - Conversation availability is derived from linked/active conversation rows.
+> - Tests cover provisioning sub-state mapping and conversation availability.
+>
+> **Left**
+> - F0 completion copy/state handling and F1 overview UI wiring.
+
 - Extend `readOrderStatus`/`readOrderDetail` to surface the provisioning sub-state
-  (`held-unpaid | paid-confirming | confirmed | refunded`), guest-registration
-  progress, conversation availability, and the owner `/order/[ref]` link. This is
-  mostly shaping data the saga already persists; no new writes.
+  (`held-unpaid | paid-confirming | confirmed | refunded | cancelled`),
+  guest-registration progress, conversation availability, and the owner
+  `/order/[ref]` link. This is mostly shaping data the saga already persists; no
+  new writes.
 
 ---
 
@@ -469,8 +535,11 @@ set per retention policy.
   (**done** — `0021_wandering_the_call.sql`, B1 review hardening); `conversations` +
   `messages` (**done** — `0022_faulty_power_man.sql`, B2); order-scoped
   conversation/member integrity hardening (**done** —
-  `0023_adorable_wendell_rand.sql`). Do **not** create `guest_submission_jobs` yet
-  (A1 — unused table).
+  `0023_adorable_wendell_rand.sql`); `booking_guests.order_member_id` (**done** —
+  `0024_little_mathemanic.sql`, B3); review hardening for guest/order scope,
+  owner-token expiry, message defaults, and nullable composite FKs (**done** —
+  `0025_unknown_jocasta.sql`). Do **not** create `guest_submission_jobs` yet (A1 —
+  unused table).
 - **Security/privacy**: access tokens are high-entropy and stored hashed; the
   `publicReference` is never sufficient for access on its own. Token expiry +
   rotation on resend. Guest PII stays encrypted and is never logged. Realtime

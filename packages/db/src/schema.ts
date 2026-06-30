@@ -1042,6 +1042,15 @@ export const orderMember = pgTable(
 			"order_members_status_check",
 			sql`${table.status} in ('invited', 'active', 'revoked')`,
 		),
+		check(
+			"order_members_owner_expires_null",
+			sql`${table.role} = 'member' or ${table.expiresAt} is null`,
+		),
+		foreignKey({
+			columns: [table.invitedByMemberId, table.orderId],
+			foreignColumns: [table.id, table.orderId],
+			name: "order_members_invited_by_member_order_fk",
+		}).onDelete("set null"),
 	],
 );
 
@@ -1253,7 +1262,7 @@ export const conversation = pgTable(
 			columns: [table.providerBookingId, table.orderId],
 			foreignColumns: [providerBooking.id, providerBooking.orderId],
 			name: "conversations_provider_booking_order_fk",
-		}),
+		}).onDelete("set null"),
 	],
 );
 
@@ -1283,7 +1292,7 @@ export const conversationMessage = pgTable(
 		deliveryStatus: text("delivery_status")
 			.$type<ConversationMessageDeliveryStatus>()
 			.notNull()
-			.default("sent"),
+			.default("pending"),
 		rawPayload: jsonb("raw_payload").$type<Record<string, unknown>>(),
 		createdAt: timestampWithTimezone("created_at").notNull().defaultNow(),
 		updatedAt: timestampWithTimezone("updated_at").notNull().defaultNow(),
@@ -1318,7 +1327,7 @@ export const conversationMessage = pgTable(
 			columns: [table.senderMemberId, table.orderId],
 			foreignColumns: [orderMember.id, orderMember.orderId],
 			name: "messages_sender_member_order_fk",
-		}),
+		}).onDelete("set null"),
 	],
 );
 
@@ -1328,6 +1337,9 @@ export const bookingGuest = pgTable(
 	"booking_guests",
 	{
 		id: text("id").primaryKey(),
+		orderId: text("order_id")
+			.notNull()
+			.references(() => order.id, { onDelete: "cascade" }),
 		providerBookingId: text("provider_booking_id")
 			.notNull()
 			.references(() => providerBooking.id, { onDelete: "cascade" }),
@@ -1376,6 +1388,7 @@ export const bookingGuest = pgTable(
 			.on(table.stripeVerificationSessionId)
 			.where(sql`${table.stripeVerificationSessionId} is not null`),
 		index("booking_guests_provider_booking_idx").on(table.providerBookingId),
+		index("booking_guests_order_id_idx").on(table.orderId),
 		index("booking_guests_user_idx").on(table.userId),
 		index("booking_guests_order_member_idx")
 			.on(table.orderMemberId)
@@ -1392,6 +1405,16 @@ export const bookingGuest = pgTable(
 			"booking_guests_identity_status_check",
 			sql`${table.identityStatus} in ('missing', 'provided', 'processing', 'requires_input', 'verified', 'canceled')`,
 		),
+		foreignKey({
+			columns: [table.providerBookingId, table.orderId],
+			foreignColumns: [providerBooking.id, providerBooking.orderId],
+			name: "booking_guests_provider_booking_order_fk",
+		}).onDelete("cascade"),
+		foreignKey({
+			columns: [table.orderMemberId, table.orderId],
+			foreignColumns: [orderMember.id, orderMember.orderId],
+			name: "booking_guests_order_member_order_fk",
+		}).onDelete("set null"),
 	],
 );
 

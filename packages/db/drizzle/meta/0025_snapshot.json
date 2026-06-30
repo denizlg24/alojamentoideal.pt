@@ -1,6 +1,6 @@
 {
-  "id": "7408bc18-9a57-4ff4-8489-64cd54ef5a4c",
-  "prevId": "d16ff443-ecd2-4897-9440-031c9d2dddff",
+  "id": "d5e8b299-de36-4d32-af96-15d2cc19170f",
+  "prevId": "5c37a273-1950-4209-8970-ed092901b615",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -1228,6 +1228,12 @@
           "primaryKey": true,
           "notNull": true
         },
+        "order_id": {
+          "name": "order_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
         "provider_booking_id": {
           "name": "provider_booking_id",
           "type": "text",
@@ -1242,6 +1248,12 @@
         },
         "user_identity_document_id": {
           "name": "user_identity_document_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "order_member_id": {
+          "name": "order_member_id",
           "type": "text",
           "primaryKey": false,
           "notNull": false
@@ -1411,6 +1423,21 @@
           "method": "btree",
           "with": {}
         },
+        "booking_guests_order_id_idx": {
+          "name": "booking_guests_order_id_idx",
+          "columns": [
+            {
+              "expression": "order_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
         "booking_guests_user_idx": {
           "name": "booking_guests_user_idx",
           "columns": [
@@ -1422,6 +1449,22 @@
             }
           ],
           "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "booking_guests_order_member_idx": {
+          "name": "booking_guests_order_member_idx",
+          "columns": [
+            {
+              "expression": "order_member_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "where": "\"booking_guests\".\"order_member_id\" is not null",
           "concurrently": false,
           "method": "btree",
           "with": {}
@@ -1455,9 +1498,44 @@
           "concurrently": false,
           "method": "btree",
           "with": {}
+        },
+        "booking_guests_booking_member_uidx": {
+          "name": "booking_guests_booking_member_uidx",
+          "columns": [
+            {
+              "expression": "provider_booking_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "order_member_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "\"booking_guests\".\"order_member_id\" is not null",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
         }
       },
       "foreignKeys": {
+        "booking_guests_order_id_orders_id_fk": {
+          "name": "booking_guests_order_id_orders_id_fk",
+          "tableFrom": "booking_guests",
+          "tableTo": "orders",
+          "columnsFrom": [
+            "order_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
         "booking_guests_provider_booking_id_provider_bookings_id_fk": {
           "name": "booking_guests_provider_booking_id_provider_bookings_id_fk",
           "tableFrom": "booking_guests",
@@ -1493,6 +1571,49 @@
           ],
           "columnsTo": [
             "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        },
+        "booking_guests_order_member_id_order_members_id_fk": {
+          "name": "booking_guests_order_member_id_order_members_id_fk",
+          "tableFrom": "booking_guests",
+          "tableTo": "order_members",
+          "columnsFrom": [
+            "order_member_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        },
+        "booking_guests_provider_booking_order_fk": {
+          "name": "booking_guests_provider_booking_order_fk",
+          "tableFrom": "booking_guests",
+          "tableTo": "provider_bookings",
+          "columnsFrom": [
+            "provider_booking_id",
+            "order_id"
+          ],
+          "columnsTo": [
+            "id",
+            "order_id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "booking_guests_order_member_order_fk": {
+          "name": "booking_guests_order_member_order_fk",
+          "tableFrom": "booking_guests",
+          "tableTo": "order_members",
+          "columnsFrom": [
+            "order_member_id",
+            "order_id"
+          ],
+          "columnsTo": [
+            "id",
+            "order_id"
           ],
           "onDelete": "set null",
           "onUpdate": "no action"
@@ -4349,6 +4470,21 @@
           ],
           "onDelete": "set null",
           "onUpdate": "no action"
+        },
+        "order_members_invited_by_member_order_fk": {
+          "name": "order_members_invited_by_member_order_fk",
+          "tableFrom": "order_members",
+          "tableTo": "order_members",
+          "columnsFrom": [
+            "invited_by_member_id",
+            "order_id"
+          ],
+          "columnsTo": [
+            "id",
+            "order_id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -4362,6 +4498,10 @@
         "order_members_status_check": {
           "name": "order_members_status_check",
           "value": "\"order_members\".\"status\" in ('invited', 'active', 'revoked')"
+        },
+        "order_members_owner_expires_null": {
+          "name": "order_members_owner_expires_null",
+          "value": "\"order_members\".\"role\" = 'member' or \"order_members\".\"expires_at\" is null"
         }
       },
       "isRLSEnabled": false

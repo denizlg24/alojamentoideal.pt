@@ -81,7 +81,10 @@ export const POST = withApiRoute(
 			);
 		}
 
-		const accessContext = await resolveOrderAccessContext(request);
+		const accessContext = await resolveOrderAccessContext(
+			request,
+			body.reference,
+		);
 		try {
 			const service = commerceService();
 			const access = await service.resolveOrderAccess(

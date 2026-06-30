@@ -13,26 +13,22 @@ interface OrderAccessRouteContext {
 
 /**
  * Redeems a booking-access token for an order. The raw token arrives by email
- * link (`?token=<raw>`) or request body; on success the member is flipped to
- * `active`, bound to the signed-in account when present, and the browser gets a
- * scoped httpOnly cookie so subsequent order-scoped requests authorize without
- * re-presenting the token. Invalid, revoked, or expired tokens report 404 so the
- * order stays unenumerable.
+ * link and is posted in the request body; on success the member is flipped to
+ * `active`, bound to the signed-in account when present, and the browser gets
+ * an order-scoped httpOnly cookie. Invalid, revoked, or expired tokens report
+ * 404 so the order stays unenumerable.
  */
 export const POST = withApiRoute<OrderAccessRouteContext>(
 	{ name: "orders.access_redeem", rateLimit: { bucket: "checkout.write" } },
 	async (request: Request, context): Promise<Response> => {
 		const { reference } = await context.params;
 
-		const url = new URL(request.url);
-		const queryToken = url.searchParams.get("token");
-		const body = queryToken ? null : await readJson(request);
+		const body = await readJson(request);
 		const bodyToken =
 			body && typeof body === "object" && "token" in body
 				? (body as { token?: unknown }).token
 				: null;
-		const token =
-			queryToken ?? (typeof bodyToken === "string" ? bodyToken : null);
+		const token = typeof bodyToken === "string" ? bodyToken : null;
 
 		if (!token) {
 			return Response.json(
@@ -58,7 +54,7 @@ export const POST = withApiRoute<OrderAccessRouteContext>(
 				reference: access.order.publicReference,
 				role: access.role,
 			});
-			response.headers.append("Set-Cookie", memberCookie(token));
+			response.headers.append("Set-Cookie", memberCookie(reference, token));
 			return response;
 		} catch (error) {
 			const handled = commerceErrorResponse(error);

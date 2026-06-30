@@ -19,7 +19,7 @@ export const GET = withApiRoute<OrderBookingGuestsRouteContext>(
 	{ name: "orders.booking_guests_read", rateLimit: { bucket: "cart.read" } },
 	async (request: Request, context): Promise<Response> => {
 		const { bookingId, reference } = await context.params;
-		const accessContext = await resolveOrderAccessContext(request);
+		const accessContext = await resolveOrderAccessContext(request, reference);
 
 		try {
 			const service = commerceService();
@@ -48,7 +48,7 @@ export const PUT = withApiRoute<OrderBookingGuestsRouteContext>(
 			);
 		}
 
-		const accessContext = await resolveOrderAccessContext(request);
+		const accessContext = await resolveOrderAccessContext(request, reference);
 		try {
 			const service = commerceService();
 			const access = await service.resolveOrderAccess(reference, accessContext);

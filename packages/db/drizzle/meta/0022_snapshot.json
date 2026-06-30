@@ -2161,7 +2161,7 @@
           "type": "text",
           "primaryKey": false,
           "notNull": true,
-          "default": "'sent'"
+          "default": "'pending'"
         },
         "raw_payload": {
           "name": "raw_payload",

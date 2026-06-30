@@ -7,6 +7,7 @@ import {
 	parseDeleteCartItemBody,
 	parseDraftOrderBody,
 	parseOrderContactBody,
+	parseUpdateBookingGuestsBody,
 	parseUpdateCartItemBody,
 } from "./schemas";
 
@@ -348,5 +349,45 @@ describe("commerce request parsers", () => {
 		});
 
 		expect(parsed.success).toBe(false);
+	});
+
+	test("validates guest document expiry as an ISO date", () => {
+		const baseGuest = {
+			dateOfBirth: "1990-01-01",
+			documentIssuingCountry: "pt",
+			documentNumber: "ABC123",
+			documentType: "passport",
+			firstName: "Guest",
+			lastName: "Name",
+			nationality: "pt",
+			residenceCountry: "es",
+		};
+
+		const parsed = parseUpdateBookingGuestsBody({
+			guests: [
+				{
+					fields: { ...baseGuest, documentExpiresOn: "2028-12-31" },
+					id: "guest_1",
+				},
+			],
+		});
+
+		expect(parsed.success).toBe(true);
+		if (!parsed.success) {
+			throw parsed.error;
+		}
+		expect(parsed.data.guests[0]?.fields.documentExpiresOn).toBe("2028-12-31");
+		expect(parsed.data.guests[0]?.fields.documentIssuingCountry).toBe("PT");
+
+		expect(
+			parseUpdateBookingGuestsBody({
+				guests: [
+					{
+						fields: { ...baseGuest, documentExpiresOn: "tomorrow" },
+						id: "guest_1",
+					},
+				],
+			}).success,
+		).toBe(false);
 	});
 });

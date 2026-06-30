@@ -20,7 +20,7 @@ export const GET = withApiRoute<OrderDetailRouteContext>(
 	{ name: "orders.detail_read", rateLimit: { bucket: "cart.read" } },
 	async (request: Request, context): Promise<Response> => {
 		const { reference } = await context.params;
-		const accessContext = await resolveOrderAccessContext(request);
+		const accessContext = await resolveOrderAccessContext(request, reference);
 
 		try {
 			const service = commerceService();

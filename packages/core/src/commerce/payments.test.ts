@@ -45,7 +45,7 @@ describe("toOrderBookingStatus", () => {
 });
 
 describe("toOrderProvisioningSubState", () => {
-	test("distinguishes held, paid, confirmed, and refunded states", () => {
+	test("distinguishes held, paid, confirmed, cancelled, and refunded states", () => {
 		expect(
 			toOrderProvisioningSubState({
 				amountPaidMinor: 0,
@@ -74,5 +74,12 @@ describe("toOrderProvisioningSubState", () => {
 				bookingStatus: "cancelled",
 			}),
 		).toBe("refunded");
+		expect(
+			toOrderProvisioningSubState({
+				amountPaidMinor: 0,
+				amountRefundedMinor: 0,
+				bookingStatus: "cancelled",
+			}),
+		).toBe("cancelled");
 	});
 });

@@ -40,7 +40,7 @@ export const POST = withApiRoute<OrderMembersRouteContext>(
 			);
 		}
 
-		const accessContext = await resolveOrderAccessContext(request);
+		const accessContext = await resolveOrderAccessContext(request, reference);
 		try {
 			const service = commerceService();
 			const access = await service.resolveOrderAccess(reference, accessContext);

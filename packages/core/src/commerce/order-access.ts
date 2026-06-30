@@ -148,8 +148,9 @@ export function orderMemberCapacity(
  * booker and a full house rejects further redemptions.
  */
 export function canAcceptMember(
-	activeMemberCount: number,
+	acceptedInviteCount: number,
 	capacity: number,
+	ownerOccupiesSlot = true,
 ): boolean {
-	return activeMemberCount < capacity;
+	return acceptedInviteCount + (ownerOccupiesSlot ? 1 : 0) < capacity;
 }

@@ -174,12 +174,12 @@ function idToString(id: HostifyId | null | undefined): string | null {
 	return id === null || id === undefined ? null : String(id);
 }
 
-function parseDate(value: string | null | undefined, fallback: Date): Date {
+function parseDate(value: string | null | undefined): Date | null {
 	if (!value) {
-		return fallback;
+		return null;
 	}
 	const parsed = new Date(value);
-	return Number.isNaN(parsed.getTime()) ? fallback : parsed;
+	return Number.isNaN(parsed.getTime()) ? null : parsed;
 }
 
 function statusFromThread(thread: HostifyThread): ConversationStatus {
@@ -218,11 +218,11 @@ function mapThread(thread: HostifyThread): ProviderConversationThread | null {
 
 function mapMessage(
 	message: HostifyMessage,
-	fallbackSentAt: Date,
 ): ProviderConversationMessage | null {
 	const externalMessageId = idToString(message.id);
 	const body = trimMessageBody(message.message ?? message.notes ?? "");
-	if (!externalMessageId || body.length === 0) {
+	const sentAt = parseDate(message.created);
+	if (!externalMessageId || body.length === 0 || !sentAt) {
 		return null;
 	}
 
@@ -232,7 +232,7 @@ function mapMessage(
 		isAutomatic: message.is_automatic === 1,
 		raw: toRecord(message),
 		senderType: message.guest_id ? "guest" : "host",
-		sentAt: parseDate(message.created, fallbackSentAt),
+		sentAt,
 	};
 }
 
@@ -275,10 +275,9 @@ export class HostifyConversationGateway implements ProviderConversationGateway {
 		if (!thread) {
 			throw new Error("Hostify inbox thread response did not include an id.");
 		}
-		const fallbackSentAt = new Date();
 		return {
 			messages: (response.messages ?? [])
-				.map((message) => mapMessage(message, fallbackSentAt))
+				.map((message) => mapMessage(message))
 				.filter((message): message is ProviderConversationMessage =>
 					Boolean(message),
 				),

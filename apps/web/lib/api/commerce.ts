@@ -44,6 +44,17 @@ const CART_COOKIE_MAX_AGE_SECONDS = 14 * 24 * 60 * 60;
 const ORDER_MEMBER_COOKIE_NAME = "ai_order_member";
 const ORDER_MEMBER_COOKIE_MAX_AGE_SECONDS = 30 * 24 * 60 * 60;
 
+function normalizedOrderReference(reference: string): string {
+	return reference.trim().toUpperCase();
+}
+
+function orderMemberCookieName(reference: string): string {
+	return `${ORDER_MEMBER_COOKIE_NAME}.${Buffer.from(
+		normalizedOrderReference(reference),
+		"utf8",
+	).toString("base64url")}`;
+}
+
 /**
  * Dev/prod safety switch. Real Hostify reservations are created only when this is
  * not explicitly "false" (default on, opt-out — mirrors `COMMERCE_AUTO_REFUND`).
@@ -109,9 +120,15 @@ export function readCartToken(request: Request): string | null {
 	return readCookie(request, CART_COOKIE_NAME);
 }
 
-/** Reads the redeemed booking-access token from the member cookie, if present. */
-export function readMemberToken(request: Request): string | null {
-	return readCookie(request, ORDER_MEMBER_COOKIE_NAME);
+/** Reads the redeemed booking-access token for this order, if present. */
+export function readMemberToken(
+	request: Request,
+	reference: string,
+): string | null {
+	return (
+		readCookie(request, orderMemberCookieName(reference)) ??
+		readCookie(request, ORDER_MEMBER_COOKIE_NAME)
+	);
 }
 
 /**
@@ -145,19 +162,20 @@ export function cartCookie(token: string): string {
  */
 export async function resolveOrderAccessContext(
 	request: Request,
+	reference: string,
 ): Promise<OrderAccessContext> {
 	const user = await getServerUser(request);
 	return {
 		cartToken: readCartToken(request),
-		memberToken: readMemberToken(request),
+		memberToken: readMemberToken(request, reference),
 		userId: user?.id ?? null,
 	};
 }
 
 /** Serializes the `Set-Cookie` value binding the browser to a member. */
-export function memberCookie(token: string): string {
+export function memberCookie(reference: string, token: string): string {
 	const attributes = [
-		`${ORDER_MEMBER_COOKIE_NAME}=${encodeURIComponent(token)}`,
+		`${orderMemberCookieName(reference)}=${encodeURIComponent(token)}`,
 		"Path=/",
 		`Max-Age=${ORDER_MEMBER_COOKIE_MAX_AGE_SECONDS}`,
 		"HttpOnly",

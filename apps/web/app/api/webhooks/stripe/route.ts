@@ -261,6 +261,7 @@ async function handleIdentityUpdated(
 
 	if (event.bookingGuestId) {
 		const guestId = await commerceService().applyBookingGuestIdentityStatus({
+			bookingGuestId: event.bookingGuestId,
 			sessionId: event.sessionId,
 			status: event.status,
 			statusChangedAt: event.verifiedAt ?? event.statusChangedAt,

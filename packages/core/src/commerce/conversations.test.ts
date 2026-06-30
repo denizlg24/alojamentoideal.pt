@@ -105,7 +105,7 @@ describe("HostifyConversationGateway", () => {
 		expect(thread).toBeNull();
 	});
 
-	test("maps thread messages and filters empty provider rows", async () => {
+	test("maps thread messages and filters empty or undated provider rows", async () => {
 		const client = {
 			inbox: {
 				get: async () => ({
@@ -124,6 +124,8 @@ describe("HostifyConversationGateway", () => {
 							message: "Host reply",
 						},
 						{ id: "m3", message: "   " },
+						{ id: "m4", message: "Undated" },
+						{ created: "not-a-date", id: "m5", message: "Invalid date" },
 					],
 					success: true,
 					thread: {
