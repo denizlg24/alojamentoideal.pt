@@ -51,6 +51,9 @@ next-env.d.ts
 # Hostify shape-dump diagnostic output
 packages/core/scripts/.hostify-dump/
 
+# Listing localization backfill reports
+packages/core/scripts/.listing-localization/
+
 # Envoy - Local state
 .envoy/cache/
 .envoy/latest

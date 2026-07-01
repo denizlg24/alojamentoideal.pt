@@ -2,45 +2,12 @@ import type {
 	AccommodationListingNormalizedContent,
 	AccommodationListingProcessedContent,
 } from "@workspace/db";
-import { z } from "zod";
+import {
+	LISTING_LOCALIZATION_MODEL_DEFAULT,
+	type ListingLocalizationFacts,
+	requestListingLocalization,
+} from "./localization";
 import { guideToText, type ListingCacheProjection } from "./normalizer";
-
-const DEFAULT_OPENAI_LISTING_MODEL = "gpt-5.5";
-const OPENAI_RESPONSES_URL = "https://api.openai.com/v1/responses";
-
-const localizedTextSchema = z.object({
-	en: z.string(),
-	es: z.string(),
-	pt: z.string(),
-});
-
-const processedContentSchema = z.object({
-	description: localizedTextSchema,
-	guide: localizedTextSchema,
-	title: localizedTextSchema,
-});
-
-const localizedTextJsonSchema = {
-	additionalProperties: false,
-	properties: {
-		en: { type: "string" },
-		es: { type: "string" },
-		pt: { type: "string" },
-	},
-	required: ["en", "es", "pt"],
-	type: "object",
-} as const;
-
-const processedContentJsonSchema = {
-	additionalProperties: false,
-	properties: {
-		description: localizedTextJsonSchema,
-		guide: localizedTextJsonSchema,
-		title: localizedTextJsonSchema,
-	},
-	required: ["description", "guide", "title"],
-	type: "object",
-} as const;
 
 export type ListingProcessingStatus = "failed" | "processed" | "skipped";
 
@@ -51,6 +18,8 @@ export interface ListingProcessorConfig {
 }
 
 export interface ListingProcessingInput {
+	/** Verified public attributes used to compose a missing description. */
+	facts: ListingLocalizationFacts;
 	fallback: AccommodationListingProcessedContent;
 	normalized: AccommodationListingNormalizedContent;
 	sourceHash: string;
@@ -78,7 +47,7 @@ export function createListingContentProcessor(
 
 	return new OpenAIListingContentProcessor({
 		apiKey: config.apiKey,
-		model: config.model ?? DEFAULT_OPENAI_LISTING_MODEL,
+		model: config.model ?? LISTING_LOCALIZATION_MODEL_DEFAULT,
 	});
 }
 
@@ -113,18 +82,27 @@ class OpenAIListingContentProcessor implements ListingContentProcessor {
 		input: ListingProcessingInput,
 	): Promise<ListingProcessingResult> {
 		try {
-			const parsed = await this.parseListing(input.normalized);
+			const prose = await requestListingLocalization(
+				{ apiKey: this.#apiKey, model: this.#model },
+				{
+					description: input.normalized.description ?? "",
+					facts: input.facts,
+					guide: guideToText(input.normalized.guide) ?? "",
+					translations: input.normalized.translations,
+				},
+			);
 			const processedAt = new Date();
 
 			return {
 				// Amenities are resolved deterministically from the static catalog
-				// (see normalizer); the model only localizes free-form text.
+				// (see normalizer), and the title is a proper name kept verbatim; the
+				// model only localizes the free-form description and guide.
 				content: {
 					amenities: input.fallback.amenities,
-					description: parsed.description,
-					guide: parsed.guide,
+					description: prose.description,
+					guide: prose.guide,
 					model: this.#model,
-					title: parsed.title,
+					title: input.fallback.title,
 				},
 				error: null,
 				processedAt,
@@ -141,75 +119,6 @@ class OpenAIListingContentProcessor implements ListingContentProcessor {
 			};
 		}
 	}
-
-	private async parseListing(
-		normalized: AccommodationListingNormalizedContent,
-	): Promise<
-		Omit<AccommodationListingProcessedContent, "amenities" | "model">
-	> {
-		const controller = new AbortController();
-		const timeoutId = setTimeout(() => controller.abort(), 30000);
-
-		try {
-			const response = await fetch(OPENAI_RESPONSES_URL, {
-				body: JSON.stringify({
-					input: [
-						{
-							content:
-								"You localize short-term rental listing content. Return polished, faithful en/pt/es translations. Do not invent policies, fees, access codes, or facts.",
-							role: "system",
-						},
-						{
-							content: JSON.stringify({
-								description: normalized.description,
-								guide: guideToText(normalized.guide),
-								title: normalized.title,
-								translations: normalized.translations,
-							}),
-							role: "user",
-						},
-					],
-					model: this.#model,
-					text: {
-						format: {
-							name: "listing_content",
-							schema: processedContentJsonSchema,
-							strict: true,
-							type: "json_schema",
-						},
-					},
-				}),
-				headers: {
-					Authorization: `Bearer ${this.#apiKey}`,
-					"Content-Type": "application/json",
-				},
-				method: "POST",
-				signal: controller.signal,
-			});
-			const payload = await readJson(response);
-
-			if (!response.ok) {
-				throw new Error(
-					`OpenAI listing processing failed with status ${response.status}`,
-				);
-			}
-
-			const outputText = extractOutputText(payload);
-			if (!outputText) {
-				throw new Error("OpenAI returned no listing content text");
-			}
-
-			const parsed = processedContentSchema.parse(JSON.parse(outputText));
-
-			return {
-				description: parsed.description,
-				guide: parsed.guide,
-				title: parsed.title,
-			};
-		} finally {
-			clearTimeout(timeoutId);
-		}
-	}
 }
 
 function normalizeError(error: unknown): string {
@@ -220,59 +129,35 @@ function normalizeError(error: unknown): string {
 	return "Listing content processing failed";
 }
 
-async function readJson(response: Response): Promise<unknown> {
-	const text = await response.text();
-	if (!text) {
-		return null;
-	}
-
-	try {
-		return JSON.parse(text) as unknown;
-	} catch {
-		return null;
-	}
-}
-
-function extractOutputText(payload: unknown): string | null {
-	const record = asRecord(payload);
-	if (typeof record.output_text === "string") {
-		return record.output_text;
-	}
-
-	const output = record.output;
-	if (!Array.isArray(output)) {
-		return null;
-	}
-
-	for (const item of output) {
-		const content = asRecord(item).content;
-		if (!Array.isArray(content)) {
-			continue;
-		}
-
-		for (const block of content) {
-			const text = asRecord(block).text;
-			if (typeof text === "string") {
-				return text;
-			}
-		}
-	}
-
-	return null;
-}
-
-function asRecord(value: unknown): Record<string, unknown> {
-	return typeof value === "object" && value !== null
-		? (value as Record<string, unknown>)
-		: {};
-}
-
 export function listingProcessingInput(
 	projection: ListingCacheProjection,
 ): ListingProcessingInput {
 	return {
+		facts: listingFactsFromProjection(projection),
 		fallback: projection.processedFallback,
 		normalized: projection.normalized,
 		sourceHash: projection.sourceHash,
+	};
+}
+
+/** Verified public attributes drawn from the projection for description copy. */
+function listingFactsFromProjection(
+	projection: ListingCacheProjection,
+): ListingLocalizationFacts {
+	const amenities = projection.processedFallback.amenities
+		.map((amenity) => amenity.labels.en?.trim() || amenity.sourceLabel?.trim())
+		.filter((label): label is string => Boolean(label))
+		.slice(0, 30);
+
+	return {
+		amenities,
+		bathrooms: projection.bathrooms,
+		bedrooms: projection.bedrooms,
+		beds: projection.beds,
+		capacity: projection.personCapacity,
+		city: projection.city,
+		country: projection.country,
+		propertyType: projection.propertyType,
+		title: (projection.normalized.title ?? projection.name ?? "").trim(),
 	};
 }
