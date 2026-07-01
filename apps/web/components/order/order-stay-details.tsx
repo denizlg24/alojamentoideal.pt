@@ -5,13 +5,43 @@ import { ListingAmenities } from "@/components/listings/detail/listing-amenities
 import { ListingGallery } from "@/components/listings/detail/listing-gallery";
 import { ListingLocation } from "@/components/listings/detail/listing-location";
 
+/**
+ * The processed guide is a plain string assembled from labeled sections
+ * (`Heading\nbody`, blank line between sections). Split it back into sections so
+ * each heading renders as a subheading; blocks with no body still render their
+ * heading. Kept lenient so a stray blank line never breaks the layout.
+ */
+function toGuideSections(guide: string): { body: string; heading: string }[] {
+	return guide
+		.split(/\n{2,}/)
+		.map((block) => block.trim())
+		.filter((block) => block.length > 0)
+		.map((block) => {
+			const [heading = "", ...rest] = block.split("\n");
+			return { body: rest.join("\n").trim(), heading: heading.trim() };
+		});
+}
+
 function GuideBlock({ guide }: { guide: string }) {
+	const sections = toGuideSections(guide);
+
 	return (
 		<section className="flex flex-col gap-4">
 			<h2 className="font-heading font-semibold text-2xl">House guide</h2>
-			<p className="whitespace-pre-line text-muted-foreground text-sm leading-relaxed">
-				{guide}
-			</p>
+			<div className="flex flex-col gap-4">
+				{sections.map((section) => (
+					<div className="flex flex-col gap-1" key={section.heading}>
+						<h3 className="font-heading font-medium text-base">
+							{section.heading}
+						</h3>
+						{section.body.length > 0 && (
+							<p className="whitespace-pre-line text-muted-foreground text-sm leading-relaxed">
+								{section.body}
+							</p>
+						)}
+					</div>
+				))}
+			</div>
 		</section>
 	);
 }

@@ -88,12 +88,16 @@ export function buildListingCacheProjection(
 		listing,
 		translations,
 	);
-	const guideText = guideToText(raw.guestGuide);
+	// Hostify's dedicated `guest_guide` endpoint is unpopulated on this account;
+	// the real house-guide content lives as optional fields on the `description`
+	// sibling (house rules, directions, notes/parking) plus the check-in schedule
+	// on `listing`. Assemble those into the guest-facing guide.
+	const guideText = buildHouseGuide(descriptionContent, listing);
 
 	const normalized: AccommodationListingNormalizedContent = {
 		amenities,
 		description,
-		guide: raw.guestGuide,
+		guide: guideText,
 		listing,
 		title,
 		translations,
@@ -104,7 +108,7 @@ export function buildListingCacheProjection(
 		description: versionedHash({ description, raw: raw.description }),
 		details: versionedHash(raw.details),
 		fees: versionedHash(raw.fees),
-		guide: versionedHash(raw.guestGuide),
+		guide: versionedHash(guideText),
 		location: versionedHash({
 			address: readString(listing, "address"),
 			city: readString(listing, "city"),
@@ -326,6 +330,159 @@ export function guideToText(value: unknown): string | null {
 		.flatMap(([key, nested]) => guideLines(key, nested));
 
 	return cleanString(lines.join("\n"));
+}
+
+/**
+ * The optional `description`-sibling fields that make up the guest-facing house
+ * guide, in render order. Sensitive fields (`checkin_instructions` door codes,
+ * landlord contact, payment details) are intentionally left out.
+ */
+const GUIDE_DESCRIPTION_SECTIONS: readonly { key: string; label: string }[] = [
+	{ key: "directions", label: "Getting there" },
+	{ key: "house_rules", label: "House rules" },
+	{ key: "house_manual", label: "House manual" },
+	{ key: "notes", label: "Good to know" },
+];
+
+/**
+ * Assembles the guest-facing "house guide" from the optional practical fields
+ * Hostify keeps on the `description` sibling (`house_rules`, `directions`,
+ * `notes`/parking, ...) plus the check-in schedule on the `listing` object. Each
+ * section is optional, so empty fields are dropped and the guide only ever
+ * contains real content; returns `null` when nothing is available.
+ */
+export function buildHouseGuide(
+	description: Record<string, unknown>,
+	listing: Record<string, unknown>,
+): string | null {
+	const sections: string[] = [];
+
+	const schedule = buildScheduleSection(listing);
+	if (schedule) {
+		sections.push(schedule);
+	}
+
+	for (const { key, label } of GUIDE_DESCRIPTION_SECTIONS) {
+		const body = readGuideField(description, key);
+		if (body) {
+			sections.push(`${label}\n${body}`);
+		}
+	}
+
+	return sections.length > 0 ? sections.join("\n\n") : null;
+}
+
+/** Reads a guide field, preferring the plain value and falling back to `_rtf`. */
+function readGuideField(
+	record: Record<string, unknown>,
+	key: string,
+): string | null {
+	return (
+		flattenGuideText(record[key]) ?? flattenGuideText(record[`${key}_rtf`])
+	);
+}
+
+/** Flattens a guide value (string, list, or nested object) to readable text. */
+function flattenGuideText(value: unknown): string | null {
+	if (typeof value === "string") {
+		return cleanString(value);
+	}
+
+	if (typeof value === "number" || typeof value === "boolean") {
+		return String(value);
+	}
+
+	if (Array.isArray(value)) {
+		const parts = value
+			.map(flattenGuideText)
+			.filter((part): part is string => part !== null);
+		return parts.length > 0 ? parts.join("\n") : null;
+	}
+
+	if (isRecord(value)) {
+		const parts = Object.entries(value)
+			.filter(([nestedKey]) => nestedKey !== "success")
+			.map(([, nested]) => flattenGuideText(nested))
+			.filter((part): part is string => part !== null);
+		return parts.length > 0 ? parts.join("\n") : null;
+	}
+
+	return null;
+}
+
+/** Check-in/check-out times and quiet hours, drawn from `listing` clock fields. */
+function buildScheduleSection(listing: Record<string, unknown>): string | null {
+	const lines: string[] = [];
+
+	const checkIn = formatCheckIn(
+		readTime(listing, "checkin_start"),
+		readTime(listing, "checkin_end"),
+	);
+	if (checkIn) {
+		lines.push(checkIn);
+	}
+
+	const checkout = readTime(listing, "checkout");
+	if (checkout) {
+		lines.push(`Check-out: until ${checkout}`);
+	}
+
+	const quietHours = formatTimeRange(
+		readTime(listing, "quiet_hours_from"),
+		readTime(listing, "quiet_hours_to"),
+	);
+	if (quietHours) {
+		lines.push(`Quiet hours: ${quietHours}`);
+	}
+
+	return lines.length > 0
+		? `Check-in and check-out\n${lines.join("\n")}`
+		: null;
+}
+
+/** Normalizes a Hostify `HH:MM:SS` clock string to `HH:MM`. */
+function readTime(
+	listing: Record<string, unknown>,
+	key: string,
+): string | null {
+	const raw = readScalarString(listing, key);
+	if (!raw) {
+		return null;
+	}
+
+	const match = raw.match(/^(\d{1,2}):(\d{2})/);
+	if (!match) {
+		return raw;
+	}
+
+	const [, hours = "", minutes = ""] = match;
+	return `${hours.padStart(2, "0")}:${minutes}`;
+}
+
+function formatCheckIn(
+	start: string | null,
+	end: string | null,
+): string | null {
+	if (!start) {
+		return null;
+	}
+
+	// Hostify uses `00:00` as the "no end" sentinel: check in any time after start.
+	return end && end !== "00:00" && end !== start
+		? `Check-in: ${start} to ${end}`
+		: `Check-in: from ${start}`;
+}
+
+function formatTimeRange(
+	from: string | null,
+	to: string | null,
+): string | null {
+	// `00:00`-`00:00` is Hostify's "not configured" sentinel (e.g. quiet hours).
+	if (!from || !to || from === to || (from === "00:00" && to === "00:00")) {
+		return null;
+	}
+
+	return `${from} to ${to}`;
 }
 
 export function repeatLocalized(
