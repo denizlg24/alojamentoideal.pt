@@ -1,9 +1,9 @@
 import type { OrderDetail } from "@workspace/core/commerce";
 import {
 	ChevronRight,
+	Home,
 	MessageCircle,
 	ReceiptText,
-	UserPlus,
 	Users,
 } from "lucide-react";
 import Link from "next/link";
@@ -366,6 +366,12 @@ export function OrderOverview({ detail }: { detail: OrderDetail }) {
 					/>
 				)}
 				<LinkRow
+					href={`${root}/stay`}
+					icon={<Home className="size-4" />}
+					subtitle="Photos, amenities, directions and house guide"
+					title="Stay details"
+				/>
+				<LinkRow
 					href={`${root}/guests`}
 					icon={<Users className="size-4" />}
 					subtitle={guestsSubtitle(detail)}
@@ -376,14 +382,6 @@ export function OrderOverview({ detail }: { detail: OrderDetail }) {
 					subtitle="Invoice generation is not available yet"
 					title="Generate invoice"
 				/>
-				{detail.role === "owner" && (
-					<LinkRow
-						href={`${root}/people`}
-						icon={<UserPlus className="size-4" />}
-						subtitle="Invite others to join this booking"
-						title="People"
-					/>
-				)}
 			</section>
 		</div>
 	);

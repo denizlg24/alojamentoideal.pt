@@ -15,6 +15,7 @@ import {
 	conversation as conversationTable,
 	type Database,
 	type OrderBillingAddressSnapshot,
+	type OrderMemberStatus,
 	orderContact as orderContactTable,
 	orderItemCharge as orderItemChargeTable,
 	orderItem as orderItemTable,
@@ -25,7 +26,6 @@ import {
 import {
 	and,
 	asc,
-	count,
 	desc,
 	eq,
 	gt,
@@ -38,6 +38,7 @@ import {
 } from "drizzle-orm";
 import { parseQuoteBody } from "../accommodations";
 import type {
+	GuestIdentityPrefill,
 	IdentityVerificationStatus,
 	VerifiedIdentityDocumentFields,
 } from "../account";
@@ -62,14 +63,12 @@ import { CommerceError, invalidRequest } from "./errors";
 import { hashIdempotencyRequest, idempotencyExpiresAt } from "./idempotency";
 import { housingFeeMinor, normalizeAccommodationQuoteSnapshot } from "./money";
 import {
-	canAcceptMember,
 	generateMemberToken,
 	hashMemberToken,
 	isMemberTokenExpired,
 	memberInviteExpiresAt,
 	type OrderAccessContext,
 	type OrderPermission,
-	orderMemberCapacity,
 	orderRoleCan,
 	type ResolvedOrder,
 	type ResolvedOrderAccess,
@@ -84,6 +83,7 @@ import {
 	summarizeGuestProgress,
 } from "./order-detail";
 import {
+	type BookingGuestAssignment,
 	type BookingGuestDetail,
 	type BookingGuestIdentityFields,
 	type BookingGuestIdentitySessionTarget,
@@ -383,24 +383,53 @@ function encryptVerifiedGuestField(
 	return value === null ? existing : encryptIdentityField(value);
 }
 
-function bookingGuestDto(row: {
-	dateOfBirthEncrypted: Buffer | null;
-	documentExpiresOnEncrypted: Buffer | null;
-	documentIssuingCountryEncrypted: Buffer | null;
-	documentNumberEncrypted: Buffer | null;
-	documentTypeEncrypted: Buffer | null;
-	firstNameEncrypted: Buffer | null;
-	id: string;
-	identityStatus: BookingGuestIdentityStatus;
-	lastNameEncrypted: Buffer | null;
-	nationalityEncrypted: Buffer | null;
-	orderMemberId: string | null;
-	position: number;
-	purgeAfter: Date | null;
-	residenceCountryEncrypted: Buffer | null;
-	submittedAt: Date | null;
-}): BookingGuestDetail {
+/**
+ * Classifies a guest slot for the owner's view from its bound member row (joined
+ * on `booking_guest.order_member_id`). A revoked or absent binding reads as
+ * `unassigned` — a slot the owner fills — so a cancelled invite reverts cleanly.
+ */
+function toGuestAssignment(
+	member: {
+		email: string;
+		expiresAt: Date | null;
+		id: string;
+		status: OrderMemberStatus;
+	} | null,
+): BookingGuestAssignment {
+	if (!member || member.status === "revoked") {
+		return { kind: "unassigned" };
+	}
 	return {
+		email: member.email,
+		expiresAt: member.expiresAt ? member.expiresAt.toISOString() : null,
+		kind: "member",
+		memberId: member.id,
+		status: member.status === "active" ? "active" : "invited",
+	};
+}
+
+function bookingGuestDto(
+	row: {
+		dateOfBirthEncrypted: Buffer | null;
+		documentExpiresOnEncrypted: Buffer | null;
+		documentIssuingCountryEncrypted: Buffer | null;
+		documentNumberEncrypted: Buffer | null;
+		documentTypeEncrypted: Buffer | null;
+		firstNameEncrypted: Buffer | null;
+		id: string;
+		identityStatus: BookingGuestIdentityStatus;
+		lastNameEncrypted: Buffer | null;
+		nationalityEncrypted: Buffer | null;
+		orderMemberId: string | null;
+		position: number;
+		purgeAfter: Date | null;
+		residenceCountryEncrypted: Buffer | null;
+		submittedAt: Date | null;
+	},
+	assignment: BookingGuestAssignment = { kind: "unassigned" },
+): BookingGuestDetail {
+	return {
+		assignment,
 		fields: {
 			dateOfBirth: decryptGuestField(row.dateOfBirthEncrypted),
 			documentExpiresOn: decryptGuestField(row.documentExpiresOnEncrypted),
@@ -1228,23 +1257,13 @@ export class CommerceService {
 				throw new CommerceError("order_not_found", "Order not found.", 404);
 			}
 
-			// Acceptance, not invitation, is what capacity caps (invites are unbounded
-			// and just expire). Only gate the invited -> active transition; a re-redeem
-			// of an already-active token is idempotent and must not be blocked by its
-			// own slot. Lock the order row first so concurrent redemptions of the last
-			// free slot serialize instead of both winning.
+			// Capacity is structural now: a per-guest invite already reserves one
+			// booking slot at invite time, so acceptance cannot overflow the house and
+			// needs no counting. Only gate the invited -> active transition; a re-redeem
+			// of an already-active token is idempotent. Still reject a signed-in account
+			// that already holds another active membership on this order, so one person
+			// never ends up bound to two slots.
 			if (member.status !== "active") {
-				await tx
-					.select({ id: orderTable.id })
-					.from(orderTable)
-					.where(eq(orderTable.id, order.id))
-					.for("update");
-
-				// Pending invites are unbounded, so two tokens can reach the same
-				// person. Reject activation when another active member already
-				// represents this recipient — by email, or by the redeeming account —
-				// so one person never holds two slots or double-counts against
-				// capacity. The order-row lock above serializes these checks.
 				const duplicateMatchers = [eq(orderMemberTable.email, member.email)];
 				if (options.userId) {
 					duplicateMatchers.push(eq(orderMemberTable.userId, options.userId));
@@ -1268,27 +1287,10 @@ export class CommerceService {
 						409,
 					);
 				}
-
-				const capacity = await this.#orderCapacity(tx, order.id);
-				const [acceptedInviteRow] = await tx
-					.select({ value: count() })
-					.from(orderMemberTable)
-					.where(
-						and(
-							eq(orderMemberTable.orderId, order.id),
-							eq(orderMemberTable.role, "member"),
-							eq(orderMemberTable.status, "active"),
-						),
-					);
-				if (!canAcceptMember(Number(acceptedInviteRow?.value ?? 0), capacity)) {
-					throw new CommerceError(
-						"order_full",
-						"This booking is already full.",
-						409,
-					);
-				}
 			}
 
+			const resolvedUserId =
+				options.userId && !member.userId ? options.userId : member.userId;
 			const [updated] = await tx
 				.update(orderMemberTable)
 				.set({
@@ -1296,11 +1298,25 @@ export class CommerceService {
 					expiresAt: null,
 					lastSeenAt: now,
 					status: "active",
-					userId:
-						options.userId && !member.userId ? options.userId : member.userId,
+					userId: resolvedUserId,
 				})
 				.where(eq(orderMemberTable.id, member.id))
 				.returning();
+
+			// Stamp the redeeming account onto the slot this invite reserved, so the
+			// account-reuse prefill and audit trail know whose slot it is.
+			if (resolvedUserId) {
+				await tx
+					.update(bookingGuestTable)
+					.set({ updatedAt: now, userId: resolvedUserId })
+					.where(
+						and(
+							eq(bookingGuestTable.orderId, order.id),
+							eq(bookingGuestTable.orderMemberId, member.id),
+							isNull(bookingGuestTable.userId),
+						),
+					);
+			}
 
 			return { member: updated ?? member, order, role: member.role };
 		});
@@ -1406,9 +1422,9 @@ export class CommerceService {
 	 * recipient who already holds active access so a duplicate invite cannot shadow
 	 * a real member.
 	 */
-	async inviteMember(
+	async inviteGuest(
 		access: ResolvedOrderAccess,
-		input: { email: string },
+		input: { bookingGuestId: string; email: string; providerBookingId: string },
 		deliver: InviteDelivery,
 	): Promise<InviteMemberResult> {
 		this.#assertOrderPermission(access, "invite_members");
@@ -1418,10 +1434,26 @@ export class CommerceService {
 				{ message: "Enter a valid email address.", path: "email" },
 			]);
 		}
+		await this.#loadProviderBookingForAccess(access, input.providerBookingId);
 
-		// Reuse a still-pending invite for the same recipient instead of piling up
-		// rows on a retry; reject one who already holds active access.
-		const [existing] = await this.#db
+		// The invite binds this specific slot, so first read who (if anyone) already
+		// holds it, then guard against the same person landing on two slots.
+		const slot = await this.#loadBookingGuestForAccess(
+			input.providerBookingId,
+			input.bookingGuestId,
+		);
+		const currentMember = slot.orderMemberId
+			? await this.#loadOrderMember(access.order.id, slot.orderMemberId)
+			: null;
+		if (currentMember?.status === "active") {
+			throw new CommerceError(
+				"order_member_exists",
+				"That guest slot is already filled. Remove the current guest first.",
+				409,
+			);
+		}
+
+		const [emailMember] = await this.#db
 			.select({ id: orderMemberTable.id, status: orderMemberTable.status })
 			.from(orderMemberTable)
 			.where(
@@ -1432,44 +1464,87 @@ export class CommerceService {
 				),
 			)
 			.limit(1);
-		if (existing?.status === "active") {
+		if (emailMember && emailMember.id !== currentMember?.id) {
 			throw new CommerceError(
 				"order_member_exists",
-				"That guest already has access to this booking.",
+				emailMember.status === "active"
+					? "That guest already has access to this booking."
+					: "That guest is already invited to this booking.",
 				409,
 			);
 		}
 
+		// Reuse this slot's still-pending invite row (rotating its token, and its
+		// email if the owner reassigned the slot) rather than stacking rows.
+		const reuseMemberId =
+			currentMember?.status === "invited" ? currentMember.id : null;
+		const memberId = reuseMemberId ?? crypto.randomUUID();
 		const token = generateMemberToken();
 		const expiresAt = memberInviteExpiresAt();
-		const memberId = existing?.id ?? crypto.randomUUID();
 
 		// Deliver before persisting: a mail-provider failure then leaves no dangling
-		// new invite and does not rotate a reused row's live token, so the caller
-		// gets a clean error and a safe retry. B1 ships no durable outbox; this
-		// ordering is the proportionate guarantee until one exists.
+		// invite and does not rotate a reused row's live token, so the caller gets a
+		// clean error and a safe retry.
 		await deliver({ email, token });
 
-		if (existing) {
-			await this.#db
-				.update(orderMemberTable)
-				.set({ accessTokenHash: hashMemberToken(token), expiresAt })
-				.where(eq(orderMemberTable.id, existing.id));
-		} else {
-			await this.#db.insert(orderMemberTable).values({
-				accessTokenHash: hashMemberToken(token),
-				createdAt: new Date(),
-				email,
-				expiresAt,
-				id: memberId,
-				invitedByMemberId: access.member?.id ?? null,
-				orderId: access.order.id,
-				role: "member",
-				status: "invited",
-			});
-		}
+		await this.#db.transaction(async (tx) => {
+			const [locked] = await tx
+				.select(bookingGuestSelection)
+				.from(bookingGuestTable)
+				.where(
+					and(
+						eq(bookingGuestTable.id, input.bookingGuestId),
+						eq(bookingGuestTable.providerBookingId, input.providerBookingId),
+					),
+				)
+				.limit(1)
+				.for("update");
+			if (!locked) {
+				throw new CommerceError(
+					"booking_guest_not_found",
+					"Guest not found.",
+					404,
+				);
+			}
+
+			if (reuseMemberId) {
+				await tx
+					.update(orderMemberTable)
+					.set({
+						acceptedAt: null,
+						accessTokenHash: hashMemberToken(token),
+						email,
+						expiresAt,
+						lastSeenAt: null,
+						status: "invited",
+						userId: null,
+					})
+					.where(eq(orderMemberTable.id, reuseMemberId));
+			} else {
+				await tx.insert(orderMemberTable).values({
+					accessTokenHash: hashMemberToken(token),
+					createdAt: new Date(),
+					email,
+					expiresAt,
+					id: memberId,
+					invitedByMemberId: access.member?.id ?? null,
+					orderId: access.order.id,
+					role: "member",
+					status: "invited",
+				});
+				await tx
+					.update(bookingGuestTable)
+					.set({ orderMemberId: memberId, updatedAt: new Date() })
+					.where(eq(bookingGuestTable.id, input.bookingGuestId));
+			}
+		});
+
 		trackEvent({
-			metadata: { memberId, orderId: access.order.id },
+			metadata: {
+				bookingGuestId: input.bookingGuestId,
+				memberId,
+				orderId: access.order.id,
+			},
 			name: "order_member_invited",
 			provider: this.#provider,
 			type: "integration",
@@ -1478,9 +1553,15 @@ export class CommerceService {
 	}
 
 	/**
-	 * Revokes a member's access (owner only). The token dies with the row, so a
-	 * revoked member loses access on their next request. The owner cannot be
-	 * revoked. Idempotent: re-revoking an already-revoked member is a no-op.
+	 * Revokes a member's access (owner only) and frees the guest slot they held so
+	 * the owner can fill it or re-invite. The owner cannot be revoked. Idempotent:
+	 * re-revoking an already-revoked member is a no-op.
+	 *
+	 * Slot cleanup depends on how far the member got: an `active` member may have
+	 * entered or verified their own identity, so their slot is wiped back to empty
+	 * (their PII must not linger on a slot the owner reclaims). A still-`invited`
+	 * member never touched the slot, so cancelling only unbinds it, preserving any
+	 * details the owner had pre-filled before inviting.
 	 */
 	async revokeMember(
 		access: ResolvedOrderAccess,
@@ -1498,10 +1579,50 @@ export class CommerceService {
 		if (member.status === "revoked") {
 			return;
 		}
-		await this.#db
-			.update(orderMemberTable)
-			.set({ status: "revoked" })
-			.where(eq(orderMemberTable.id, member.id));
+
+		const wipeSlotData = member.status === "active";
+		const now = new Date();
+		await this.#db.transaction(async (tx) => {
+			await tx
+				.update(orderMemberTable)
+				.set({ status: "revoked" })
+				.where(eq(orderMemberTable.id, member.id));
+
+			const slotReset: Partial<typeof bookingGuestTable.$inferInsert> =
+				wipeSlotData
+					? {
+							dateOfBirthEncrypted: null,
+							documentExpiresOnEncrypted: null,
+							documentIssuingCountryEncrypted: null,
+							documentNumberEncrypted: null,
+							documentTypeEncrypted: null,
+							firstNameEncrypted: null,
+							identityStatus: "missing",
+							lastNameEncrypted: null,
+							nationalityEncrypted: null,
+							orderMemberId: null,
+							purgeAfter: null,
+							residenceCountryEncrypted: null,
+							stripeVerificationReportId: null,
+							stripeVerificationSessionId: null,
+							submittedAt: null,
+							updatedAt: now,
+							userId: null,
+							userIdentityDocumentId: null,
+						}
+					: { orderMemberId: null, updatedAt: now };
+
+			await tx
+				.update(bookingGuestTable)
+				.set(slotReset)
+				.where(
+					and(
+						eq(bookingGuestTable.orderId, access.order.id),
+						eq(bookingGuestTable.orderMemberId, member.id),
+					),
+				);
+		});
+
 		trackEvent({
 			metadata: { memberId, orderId: access.order.id },
 			name: "order_member_revoked",
@@ -1590,22 +1711,6 @@ export class CommerceService {
 		return member;
 	}
 
-	/** Sums the order's registrable headcount (guests minus infants) for capacity. */
-	async #orderCapacity(tx: DbExecutor, orderId: string): Promise<number> {
-		const rows = await tx
-			.select({
-				guests: accommodationItemDetailTable.guests,
-				infants: accommodationItemDetailTable.infants,
-			})
-			.from(accommodationItemDetailTable)
-			.innerJoin(
-				orderItemTable,
-				eq(orderItemTable.id, accommodationItemDetailTable.orderItemId),
-			)
-			.where(eq(orderItemTable.orderId, orderId));
-		return orderMemberCapacity(rows);
-	}
-
 	/** Throws 403 when a resolved role lacks the permission an operation requires. */
 	#assertOrderPermission(
 		access: ResolvedOrderAccess,
@@ -1625,13 +1730,30 @@ export class CommerceService {
 		providerBookingId: string,
 	): Promise<BookingGuestList> {
 		await this.#loadProviderBookingForAccess(access, providerBookingId);
-		const rows = await this.#readBookingGuestRows(this.#db, providerBookingId);
+		const rows = await this.#readBookingGuestRowsWithMember(
+			this.#db,
+			providerBookingId,
+		);
 
 		if (access.role === "owner") {
 			this.#assertOrderPermission(access, "manage_all_guests");
 			return {
 				bookingId: providerBookingId,
-				guests: rows.map(bookingGuestDto),
+				guests: rows.map((row) =>
+					bookingGuestDto(
+						row,
+						toGuestAssignment(
+							row.orderMemberId && row.memberEmail
+								? {
+										email: row.memberEmail,
+										expiresAt: row.memberExpiresAt,
+										id: row.orderMemberId,
+										status: row.memberStatus ?? "invited",
+									}
+								: null,
+						),
+					),
+				),
 			};
 		}
 
@@ -1645,9 +1767,10 @@ export class CommerceService {
 			);
 		}
 
+		// Per-guest invites bind the slot at invite time, so a member only ever sees
+		// the slot they were invited to fill; there is no lazy claim of a free slot.
 		const owned = rows.find((row) => row.orderMemberId === member.id);
-		const claimable = owned ?? rows.find((row) => row.orderMemberId === null);
-		if (!claimable) {
+		if (!owned) {
 			throw new CommerceError(
 				"order_full",
 				"No guest slot is available for this booking.",
@@ -1657,7 +1780,15 @@ export class CommerceService {
 
 		return {
 			bookingId: providerBookingId,
-			guests: [bookingGuestDto(claimable)],
+			guests: [
+				bookingGuestDto(owned, {
+					email: member.email,
+					expiresAt: null,
+					kind: "member",
+					memberId: member.id,
+					status: "active",
+				}),
+			],
 		};
 	}
 
@@ -1732,11 +1863,10 @@ export class CommerceService {
 					providerBookingId,
 					tx,
 				);
-				const target = await this.#claimGuestForMember(tx, {
+				const target = await this.#loadMemberBoundGuest(tx, {
 					memberId: member.id,
 					providerBookingId,
 					requestedGuestId: input.id ?? null,
-					userId: member.userId,
 				});
 				await this.#updateGuestIdentityFields(tx, {
 					guestId: target.id,
@@ -1754,6 +1884,150 @@ export class CommerceService {
 			name: "guest_identity_provided",
 			provider: this.#provider,
 			type: "integration",
+		});
+
+		return this.readBookingGuests(access, providerBookingId);
+	}
+
+	/**
+	 * Copies a signed-in caller's already-verified account identity into a guest
+	 * slot, skipping a fresh Stripe scan. The encrypted columns are an independent
+	 * legal snapshot (values are copied, not referenced); `userIdentityDocumentId`
+	 * records provenance. The owner may apply it to any slot they manage; a member
+	 * only to the slot they were invited to fill.
+	 */
+	async applyVerifiedAccountIdentityToGuest(
+		access: ResolvedOrderAccess,
+		providerBookingId: string,
+		guestId: string,
+		prefill: GuestIdentityPrefill,
+	): Promise<BookingGuestList> {
+		const booking = await this.#loadProviderBookingForAccess(
+			access,
+			providerBookingId,
+		);
+		const now = new Date();
+		const fields: BookingGuestIdentityFields = {
+			dateOfBirth: prefill.fields.dateOfBirth,
+			documentExpiresOn: prefill.fields.documentExpiresOn,
+			documentIssuingCountry: prefill.fields.documentIssuingCountry,
+			documentNumber: prefill.fields.documentNumber,
+			documentType: prefill.fields.documentType,
+			firstName: prefill.fields.firstName,
+			lastName: prefill.fields.lastName,
+			nationality: prefill.fields.nationality,
+			residenceCountry: prefill.residenceCountry,
+		};
+
+		if (access.role === "owner") {
+			this.#assertOrderPermission(access, "manage_all_guests");
+		} else {
+			this.#assertOrderPermission(access, "manage_own_guest");
+			if (!access.member) {
+				throw new CommerceError(
+					"order_access_denied",
+					"You do not have access to do that.",
+					403,
+				);
+			}
+		}
+
+		await this.#db.transaction(async (tx) => {
+			const member = access.member;
+			const target =
+				access.role === "owner" || !member
+					? await this.#lockBookingGuest(tx, providerBookingId, guestId)
+					: await this.#loadMemberBoundGuest(tx, {
+							memberId: member.id,
+							providerBookingId,
+							requestedGuestId: guestId,
+						});
+
+			await tx
+				.update(bookingGuestTable)
+				.set({
+					...encryptGuestFields(fields),
+					identityStatus: "verified",
+					purgeAfter: bookingGuestPurgeAfter(booking.stayEndsAt, now),
+					stripeVerificationReportId: prefill.fields.stripeVerificationReportId,
+					stripeVerificationSessionId: null,
+					submittedAt: now,
+					updatedAt: now,
+					userIdentityDocumentId: prefill.userIdentityDocumentId,
+				})
+				.where(eq(bookingGuestTable.id, target.id));
+		});
+
+		trackEvent({
+			metadata: { orderId: access.order.id, providerBookingId },
+			name: "guest_identity_verified",
+			provider: this.#provider,
+			type: "integration",
+		});
+
+		return this.readBookingGuests(access, providerBookingId);
+	}
+
+	/**
+	 * Writes only the two residency fields Stripe Identity never returns
+	 * (nationality, country of residence) without disturbing verification state.
+	 * This backs the "confirm residency" step after a verified scan or account
+	 * reuse, so completing those fields does not downgrade a verified slot the way
+	 * a full manual save (which resets to `provided`) would.
+	 */
+	async patchGuestResidency(
+		access: ResolvedOrderAccess,
+		providerBookingId: string,
+		guestId: string,
+		input: { nationality: string; residenceCountry: string },
+	): Promise<BookingGuestList> {
+		await this.#loadProviderBookingForAccess(access, providerBookingId);
+		const nationality = input.nationality.trim().toUpperCase();
+		const residenceCountry = input.residenceCountry.trim().toUpperCase();
+		const isCountry = (value: string) => /^[A-Z]{2}$/.test(value);
+		if (!isCountry(nationality) || !isCountry(residenceCountry)) {
+			throw invalidRequest("A valid two-letter country code is required.", [
+				...(isCountry(nationality)
+					? []
+					: [{ message: "Enter a 2-letter code.", path: "nationality" }]),
+				...(isCountry(residenceCountry)
+					? []
+					: [{ message: "Enter a 2-letter code.", path: "residenceCountry" }]),
+			]);
+		}
+
+		const now = new Date();
+		if (access.role === "owner") {
+			this.#assertOrderPermission(access, "manage_all_guests");
+		} else {
+			this.#assertOrderPermission(access, "manage_own_guest");
+			if (!access.member) {
+				throw new CommerceError(
+					"order_access_denied",
+					"You do not have access to do that.",
+					403,
+				);
+			}
+		}
+
+		await this.#db.transaction(async (tx) => {
+			const member = access.member;
+			const target =
+				access.role === "owner" || !member
+					? await this.#lockBookingGuest(tx, providerBookingId, guestId)
+					: await this.#loadMemberBoundGuest(tx, {
+							memberId: member.id,
+							providerBookingId,
+							requestedGuestId: guestId,
+						});
+			await tx
+				.update(bookingGuestTable)
+				.set({
+					nationalityEncrypted: encryptGuestField(nationality),
+					residenceCountryEncrypted: encryptGuestField(residenceCountry),
+					updatedAt: now,
+				})
+				.where(eq(bookingGuestTable.id, target.id));
 		});
 
 		return this.readBookingGuests(access, providerBookingId);
@@ -1787,11 +2061,10 @@ export class CommerceService {
 		}
 
 		await this.#db.transaction(async (tx) => {
-			await this.#claimGuestForMember(tx, {
+			await this.#loadMemberBoundGuest(tx, {
 				memberId: member.id,
 				providerBookingId,
 				requestedGuestId: guestId,
-				userId: member.userId,
 			});
 		});
 
@@ -1978,10 +2251,27 @@ export class CommerceService {
 		return booking;
 	}
 
-	async #readBookingGuestRows(db: DbExecutor, providerBookingId: string) {
+	/**
+	 * Guest rows joined to their bound member (if any), so the owner view can label
+	 * each slot as unassigned, invited, or filled by a specific person. The join is
+	 * left so unassigned slots (the common case) still come back.
+	 */
+	async #readBookingGuestRowsWithMember(
+		db: DbExecutor,
+		providerBookingId: string,
+	) {
 		return db
-			.select(bookingGuestSelection)
+			.select({
+				...bookingGuestSelection,
+				memberEmail: orderMemberTable.email,
+				memberExpiresAt: orderMemberTable.expiresAt,
+				memberStatus: orderMemberTable.status,
+			})
 			.from(bookingGuestTable)
+			.leftJoin(
+				orderMemberTable,
+				eq(orderMemberTable.id, bookingGuestTable.orderMemberId),
+			)
 			.where(eq(bookingGuestTable.providerBookingId, providerBookingId))
 			.orderBy(asc(bookingGuestTable.position));
 	}
@@ -2007,13 +2297,45 @@ export class CommerceService {
 		return guest;
 	}
 
-	async #claimGuestForMember(
+	/** Loads and locks a single guest slot by id within a booking (owner writes). */
+	async #lockBookingGuest(
+		tx: Transaction,
+		providerBookingId: string,
+		guestId: string,
+	) {
+		const [guest] = await tx
+			.select(bookingGuestSelection)
+			.from(bookingGuestTable)
+			.where(
+				and(
+					eq(bookingGuestTable.id, guestId),
+					eq(bookingGuestTable.providerBookingId, providerBookingId),
+				),
+			)
+			.limit(1)
+			.for("update");
+		if (!guest) {
+			throw new CommerceError(
+				"booking_guest_not_found",
+				"Guest not found.",
+				404,
+			);
+		}
+		return guest;
+	}
+
+	/**
+	 * Loads the single slot a member was invited to fill, locking it for the
+	 * enclosing write. Binding happens at invite time, so a member without a bound
+	 * slot has no business editing one (409); a request that names a different slot
+	 * is rejected (403). Replaces the earlier lazy first-free-slot claim.
+	 */
+	async #loadMemberBoundGuest(
 		tx: Transaction,
 		input: {
 			memberId: string;
 			providerBookingId: string;
 			requestedGuestId: string | null;
-			userId: string | null;
 		},
 	) {
 		const rows = await tx
@@ -2023,55 +2345,21 @@ export class CommerceService {
 			.orderBy(asc(bookingGuestTable.position))
 			.for("update");
 		const owned = rows.find((row) => row.orderMemberId === input.memberId);
-		const requested = input.requestedGuestId
-			? rows.find((row) => row.id === input.requestedGuestId)
-			: undefined;
-		if (input.requestedGuestId && !requested) {
-			throw new CommerceError(
-				"booking_guest_not_found",
-				"Guest not found.",
-				404,
-			);
-		}
-
-		const target =
-			requested ?? owned ?? rows.find((row) => row.orderMemberId === null);
-		if (!target) {
+		if (!owned) {
 			throw new CommerceError(
 				"order_full",
 				"No guest slot is available for this booking.",
 				409,
 			);
 		}
-		if (owned && target.id !== owned.id) {
+		if (input.requestedGuestId && input.requestedGuestId !== owned.id) {
 			throw new CommerceError(
 				"order_access_denied",
 				"You can only update your own guest details.",
 				403,
 			);
 		}
-		if (target.orderMemberId && target.orderMemberId !== input.memberId) {
-			throw new CommerceError(
-				"order_access_denied",
-				"You can only update your own guest details.",
-				403,
-			);
-		}
-
-		if (target.orderMemberId === input.memberId) {
-			return target;
-		}
-
-		const [claimed] = await tx
-			.update(bookingGuestTable)
-			.set({
-				orderMemberId: input.memberId,
-				updatedAt: new Date(),
-				userId: input.userId ?? target.userId,
-			})
-			.where(eq(bookingGuestTable.id, target.id))
-			.returning(bookingGuestSelection);
-		return claimed ?? target;
+		return owned;
 	}
 
 	async #updateGuestIdentityFields(
@@ -2559,6 +2847,7 @@ export class CommerceService {
 				id: orderItemTable.id,
 				imageUrl: orderItemTable.imageUrlSnapshot,
 				infants: accommodationItemDetailTable.infants,
+				listingExternalId: accommodationItemDetailTable.hostifyListingId,
 				nights: accommodationItemDetailTable.nights,
 				pets: accommodationItemDetailTable.pets,
 				propertyTimezone: accommodationItemDetailTable.propertyTimezone,
@@ -2651,6 +2940,7 @@ export class CommerceService {
 			id: row.id,
 			imageUrl: row.imageUrl,
 			infants: row.infants,
+			listingExternalId: row.listingExternalId,
 			nights: row.nights,
 			pets: row.pets,
 			pricing: isOwner

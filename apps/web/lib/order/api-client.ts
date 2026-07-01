@@ -136,6 +136,41 @@ export function createGuestIdentitySession(
 	);
 }
 
+/**
+ * Confirms the residency fields Stripe never returns (nationality + country of
+ * residence) without downgrading a verified slot. Returns the refreshed list.
+ */
+export function saveGuestResidency(
+	reference: string,
+	bookingId: string,
+	guestId: string,
+	residency: { nationality: string; residenceCountry: string },
+): Promise<BookingGuestList> {
+	return request<BookingGuestList>(
+		`${base(reference)}/bookings/${seg(bookingId)}/guests/${seg(
+			guestId,
+		)}/residency`,
+		jsonBody(residency),
+	);
+}
+
+/**
+ * Fills a guest slot from the signed-in caller's already-verified account
+ * identity (no fresh Stripe scan). Returns the refreshed guest list.
+ */
+export function applyAccountIdentityToGuest(
+	reference: string,
+	bookingId: string,
+	guestId: string,
+): Promise<BookingGuestList> {
+	return request<BookingGuestList>(
+		`${base(reference)}/bookings/${seg(bookingId)}/guests/${seg(
+			guestId,
+		)}/use-account-identity`,
+		jsonBody({}),
+	);
+}
+
 // --- Members (F4) ---
 
 export interface OrderMemberInvite {
@@ -146,12 +181,17 @@ export interface OrderMemberInvite {
 	status: OrderMemberStatus;
 }
 
-export function inviteOrderMember(
+/** Invites a person to fill a specific guest slot (owner only). */
+export function inviteGuest(
 	reference: string,
+	bookingId: string,
+	guestId: string,
 	email: string,
 ): Promise<{ member: OrderMemberInvite }> {
 	return request<{ member: OrderMemberInvite }>(
-		`${base(reference)}/members`,
+		`${base(reference)}/bookings/${seg(bookingId)}/guests/${seg(
+			guestId,
+		)}/invite`,
 		jsonBody({ email }),
 	);
 }

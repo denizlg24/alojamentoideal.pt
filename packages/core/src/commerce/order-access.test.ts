@@ -1,13 +1,11 @@
 import { describe, expect, test } from "bun:test";
 import {
-	canAcceptMember,
 	generateMemberToken,
 	hashMemberToken,
 	INVITE_TOKEN_TTL_MS,
 	isMemberTokenExpired,
 	memberInviteExpiresAt,
 	ORDER_PERMISSION_LIST,
-	orderMemberCapacity,
 	orderRoleCan,
 } from "./order-access";
 import { isOrderAccessGranted } from "./service";
@@ -124,38 +122,5 @@ describe("memberInviteExpiresAt", () => {
 			now.getTime() + INVITE_TOKEN_TTL_MS,
 		);
 		expect(INVITE_TOKEN_TTL_MS).toBe(24 * 60 * 60 * 1000);
-	});
-});
-
-describe("orderMemberCapacity", () => {
-	test("registrable headcount is guests minus infants, summed per item", () => {
-		expect(
-			orderMemberCapacity([
-				{ guests: 4, infants: 1 },
-				{ guests: 2, infants: 0 },
-			]),
-		).toBe(5);
-	});
-
-	test("an empty order has no capacity, and infant-only counts never go negative", () => {
-		expect(orderMemberCapacity([])).toBe(0);
-		expect(orderMemberCapacity([{ guests: 1, infants: 3 }])).toBe(0);
-	});
-});
-
-describe("canAcceptMember", () => {
-	test("admits a new member only below capacity (the owner occupies a slot)", () => {
-		// A solo booking (capacity 1) is full because the owner occupies it.
-		expect(canAcceptMember(0, 1)).toBe(false);
-		// A two-guest booking admits the owner plus one accepted invite.
-		expect(canAcceptMember(0, 2)).toBe(true);
-		expect(canAcceptMember(1, 2)).toBe(false);
-		// A zero-capacity order (no accommodation items) admits no one.
-		expect(canAcceptMember(0, 0)).toBe(false);
-	});
-
-	test("can count capacity without the implicit owner slot when requested", () => {
-		expect(canAcceptMember(0, 1, false)).toBe(true);
-		expect(canAcceptMember(1, 1, false)).toBe(false);
 	});
 });

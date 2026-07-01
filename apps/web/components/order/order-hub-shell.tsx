@@ -70,7 +70,6 @@ export function OrderHubShell({
 					<OrderSectionNav
 						reference={detail.reference}
 						showMessages={detail.role === "owner"}
-						showPeople={detail.role === "owner"}
 					/>
 
 					{children}

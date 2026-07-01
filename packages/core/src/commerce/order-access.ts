@@ -122,31 +122,7 @@ export function memberInviteExpiresAt(now: Date = new Date()): Date {
 	return new Date(now.getTime() + INVITE_TOKEN_TTL_MS);
 }
 
-/**
- * Registrable headcount for an order: total guests minus infants across its
- * accommodation items. Infants do not occupy a registration/access slot, so they
- * are excluded. This is the ceiling on how many members (the booker plus accepted
- * invitees) may hold access — invitations themselves are unbounded and just
- * expire, but acceptance is capped to this number.
- */
-export function orderMemberCapacity(
-	items: ReadonlyArray<{ guests: number; infants: number }>,
-): number {
-	return items.reduce(
-		(total, item) => total + Math.max(item.guests - item.infants, 0),
-		0,
-	);
-}
-
-/**
- * Whether one more member may be accepted onto an order. The owner counts as an
- * active member (the booker occupies a slot), so a solo booking admits only the
- * booker and a full house rejects further redemptions.
- */
-export function canAcceptMember(
-	acceptedInviteCount: number,
-	capacity: number,
-	ownerOccupiesSlot = true,
-): boolean {
-	return acceptedInviteCount + (ownerOccupiesSlot ? 1 : 0) < capacity;
-}
+// Order capacity is no longer counted: per-guest invites bind a specific booking
+// slot at invite time, so the finite slot count structurally caps how many people
+// can be invited or accepted. The old `orderMemberCapacity` / `canAcceptMember`
+// helpers were removed with that change.

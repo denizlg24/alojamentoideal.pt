@@ -19,7 +19,24 @@ export interface BookingGuestIdentityFields {
 	residenceCountry: string | null;
 }
 
+/**
+ * Who is responsible for filling a guest slot, from the owner's perspective.
+ * `unassigned` slots the owner fills; `member` slots were invited to (and are
+ * filled by) a specific person, so the owner sees them read-only. A member
+ * viewing their own slot always sees an `active` assignment (themselves).
+ */
+export type BookingGuestAssignment =
+	| { kind: "unassigned" }
+	| {
+			kind: "member";
+			email: string;
+			expiresAt: string | null;
+			memberId: string;
+			status: "invited" | "active";
+	  };
+
 export interface BookingGuestDetail {
+	assignment: BookingGuestAssignment;
 	fields: BookingGuestIdentityFields;
 	id: string;
 	identityStatus: BookingGuestIdentityStatus;

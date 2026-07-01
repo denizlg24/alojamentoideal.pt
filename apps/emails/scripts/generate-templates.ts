@@ -34,6 +34,12 @@ const templates: TemplateEntry[] = [
 		exportName: "orderConfirmation",
 	},
 	{
+		name: "order-pending-confirmation",
+		htmlFile: "order-pending-confirmation.html",
+		textFile: "order-pending-confirmation.txt",
+		exportName: "orderPendingConfirmation",
+	},
+	{
 		name: "order-could-not-confirm",
 		htmlFile: "order-could-not-confirm.html",
 		textFile: "order-could-not-confirm.txt",
@@ -44,6 +50,12 @@ const templates: TemplateEntry[] = [
 		htmlFile: "order-amount-mismatch-refund.html",
 		textFile: "order-amount-mismatch-refund.txt",
 		exportName: "orderAmountMismatchRefund",
+	},
+	{
+		name: "order-invite",
+		htmlFile: "order-invite.html",
+		textFile: "order-invite.txt",
+		exportName: "orderInvite",
 	},
 ];
 

@@ -7,7 +7,9 @@ import {
 } from "@/components/order/order-guests";
 import { OrderHubShell } from "@/components/order/order-hub-shell";
 import { OrderHubSkeleton } from "@/components/order/order-hub-skeleton";
+import { accountProfileRepository } from "@/lib/api/account";
 import { commerceService } from "@/lib/api/commerce";
+import { getCurrentUser } from "@/lib/auth/session";
 import { loadOrderForRequest } from "@/lib/order/load";
 
 export const metadata: Metadata = { title: "Guests · Your booking" };
@@ -24,6 +26,11 @@ async function OrderGuestsRoute({ params }: OrderGuestsPageProps) {
 	}
 
 	const service = commerceService();
+	const user = await getCurrentUser();
+	const canReuseAccountIdentity = user
+		? (await accountProfileRepository().getProfile(user.id)).identity.status ===
+			"verified"
+		: false;
 	const bookableItems = loaded.detail.items.filter(
 		(item): item is typeof item & { providerBooking: { id: string } } =>
 			item.providerBooking !== null,
@@ -59,6 +66,7 @@ async function OrderGuestsRoute({ params }: OrderGuestsPageProps) {
 		<OrderHubShell detail={loaded.detail}>
 			<OrderGuests
 				bookings={bookings}
+				canReuseAccountIdentity={canReuseAccountIdentity}
 				reference={reference}
 				role={loaded.detail.role}
 			/>

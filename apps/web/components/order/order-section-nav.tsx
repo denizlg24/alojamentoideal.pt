@@ -18,17 +18,16 @@ interface Section {
 export function OrderSectionNav({
 	reference,
 	showMessages,
-	showPeople,
 }: {
 	reference: string;
 	showMessages: boolean;
-	showPeople: boolean;
 }) {
 	const pathname = usePathname();
 	const root = `/order/${encodeURIComponent(reference)}`;
 
 	const sections: Section[] = [
 		{ href: root, key: "overview", label: "Overview" },
+		{ href: `${root}/stay`, key: "stay", label: "Stay" },
 		{ href: `${root}/guests`, key: "guests", label: "Guests" },
 	];
 	if (showMessages) {
@@ -37,9 +36,6 @@ export function OrderSectionNav({
 			key: "messages",
 			label: "Messages",
 		});
-	}
-	if (showPeople) {
-		sections.push({ href: `${root}/people`, key: "people", label: "People" });
 	}
 
 	return (

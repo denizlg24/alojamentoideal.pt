@@ -7,8 +7,8 @@ import {
 import { withApiRoute } from "@/lib/api/route";
 import { sendOrderInviteEmail } from "@/lib/email/order-invite";
 
-interface OrderMembersRouteContext {
-	params: Promise<{ reference: string }>;
+interface OrderGuestInviteRouteContext {
+	params: Promise<{ bookingId: string; guestId: string; reference: string }>;
 }
 
 function readEmail(body: unknown): string | null {
@@ -22,16 +22,15 @@ function readEmail(body: unknown): string | null {
 }
 
 /**
- * Invites a guest to an order (owner only). The owner is resolved through the
- * access spine (cart/user grant or the redeemed owner cookie); `inviteMember`
- * re-checks the `invite_members` permission and mints a 24h magic-link token,
- * which is emailed and never returned to the browser. Capacity is enforced when
- * the invite is accepted, not here, so the property's headcount is never leaked.
+ * Invites a person to fill a specific guest slot (owner only). The invite binds
+ * the slot at creation, so the owner no longer registers that guest and the
+ * invitee lands on exactly this slot. A 24h magic-link token is emailed and
+ * never returned to the browser.
  */
-export const POST = withApiRoute<OrderMembersRouteContext>(
-	{ name: "orders.members_invite", rateLimit: { bucket: "mutation" } },
+export const POST = withApiRoute<OrderGuestInviteRouteContext>(
+	{ name: "orders.guest_invite", rateLimit: { bucket: "mutation" } },
 	async (request: Request, context): Promise<Response> => {
-		const { reference } = await context.params;
+		const { bookingId, guestId, reference } = await context.params;
 		const email = readEmail(await readJson(request));
 		if (!email) {
 			return Response.json(
@@ -45,10 +44,14 @@ export const POST = withApiRoute<OrderMembersRouteContext>(
 			const service = commerceService();
 			const access = await service.resolveOrderAccess(reference, accessContext);
 			const detail = await service.readOrderDetail(access);
-			const accommodationTitle = detail.items[0]?.title ?? "your stay";
-			const invite = await service.inviteMember(
+			const accommodationTitle =
+				detail.items.find((item) => item.providerBooking?.id === bookingId)
+					?.title ??
+				detail.items[0]?.title ??
+				"your stay";
+			const invite = await service.inviteGuest(
 				access,
-				{ email },
+				{ bookingGuestId: guestId, email, providerBookingId: bookingId },
 				({ email: to, token }) =>
 					sendOrderInviteEmail({
 						accommodationTitle,

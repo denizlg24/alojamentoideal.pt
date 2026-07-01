@@ -56,6 +56,8 @@ export interface OrderDetailItem {
 	id: string;
 	imageUrl: string | null;
 	infants: number | null;
+	/** Provider (Hostify) listing id, for linking to the public catalog detail. Null for non-accommodation items. */
+	listingExternalId: string | null;
 	nights: number | null;
 	pets: number | null;
 	pricing: OrderItemPricing | null;
