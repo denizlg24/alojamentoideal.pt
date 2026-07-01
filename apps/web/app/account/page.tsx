@@ -7,8 +7,13 @@ import { SiteFooter } from "@/components/home/site-footer";
 import { SiteHeader } from "@/components/home/site-header";
 import { accountProfileRepository } from "@/lib/api/account";
 import { getCurrentUser } from "@/lib/auth/session";
+import { buildPrivatePageMetadata } from "@/lib/site/metadata";
 
-export const metadata: Metadata = { title: "Your account" };
+export const metadata: Metadata = buildPrivatePageMetadata({
+	title: "Your account",
+	description:
+		"Manage your Alojamento Ideal profile, saved guest details and account identity.",
+});
 
 async function AccountData() {
 	const user = await getCurrentUser();

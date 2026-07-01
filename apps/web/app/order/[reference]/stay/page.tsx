@@ -8,8 +8,13 @@ import { OrderStayDetails } from "@/components/order/order-stay-details";
 import { getCachedCatalogDetail } from "@/lib/catalog/cache";
 import { getListingCatalogScope } from "@/lib/catalog/listing-route";
 import { loadOrderForRequest } from "@/lib/order/load";
+import { buildPrivatePageMetadata } from "@/lib/site/metadata";
 
-export const metadata: Metadata = { title: "Stay · Your booking" };
+export const metadata: Metadata = buildPrivatePageMetadata({
+	title: "Stay · Your booking",
+	description:
+		"Review stay details, photos and practical information for your Alojamento Ideal booking.",
+});
 
 interface OrderStayPageProps {
 	params: Promise<{ reference: string }>;

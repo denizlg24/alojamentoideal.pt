@@ -6,9 +6,14 @@ import { OrderHubShell } from "@/components/order/order-hub-shell";
 import { OrderHubSkeleton } from "@/components/order/order-hub-skeleton";
 import { OrderOverview } from "@/components/order/order-overview";
 import { loadOrderForRequest } from "@/lib/order/load";
+import { buildPrivatePageMetadata } from "@/lib/site/metadata";
 import { redeemOrderAccess } from "./actions";
 
-export const metadata: Metadata = { title: "Your booking" };
+export const metadata: Metadata = buildPrivatePageMetadata({
+	title: "Your booking",
+	description:
+		"View the private reservation hub for your Alojamento Ideal booking.",
+});
 
 interface OrderPageProps {
 	params: Promise<{ reference: string }>;

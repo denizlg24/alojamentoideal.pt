@@ -23,6 +23,10 @@ import {
 	getListingCatalogScope,
 } from "@/lib/catalog/listing-route";
 import { getCachedListingReviews } from "@/lib/catalog/reviews";
+import {
+	buildPageMetadata,
+	truncateMetaDescription,
+} from "@/lib/site/metadata";
 
 interface ListingPageProps {
 	params: Promise<{ id: string }>;
@@ -43,19 +47,28 @@ export async function generateMetadata({
 		"en",
 	);
 	if (!listing) {
-		return { title: "Listing not found" };
+		return {
+			title: "Listing not found",
+			robots: { follow: true, index: false },
+		};
 	}
 
-	const description = listing.description.slice(0, 160);
-	return {
-		description,
-		openGraph: {
-			description,
-			images: listing.coverPhoto ? [listing.coverPhoto.url] : undefined,
-			title: listing.title,
-		},
+	const description = truncateMetaDescription(
+		listing.description,
+		"Explore this Alojamento Ideal apartment with modern comforts, local character and direct guest support.",
+	);
+	return buildPageMetadata({
 		title: listing.title,
-	};
+		description,
+		path: `/homes/${id}`,
+		image: listing.coverPhoto?.url,
+		keywords: [
+			listing.title,
+			listing.location.city,
+			listing.location.country,
+			"Alojamento Ideal home",
+		].filter((keyword): keyword is string => Boolean(keyword)),
+	});
 }
 
 function capacityParts(listing: CatalogListingDetailDto): string[] {

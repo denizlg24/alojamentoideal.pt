@@ -3,6 +3,7 @@ import type { Metadata, Viewport } from "next";
 import { Bricolage_Grotesque, Hanken_Grotesk } from "next/font/google";
 import { AuthDialogProvider } from "@/components/auth/auth-dialog-provider";
 import { siteConfig } from "@/lib/site/config";
+import { defaultOpenGraphImage } from "@/lib/site/metadata";
 
 const fontSans = Hanken_Grotesk({
 	subsets: ["latin"],
@@ -25,6 +26,16 @@ export const metadata: Metadata = {
 	description: siteConfig.description,
 	keywords: [...siteConfig.keywords],
 	applicationName: siteConfig.name,
+	authors: [{ name: siteConfig.name, url: siteConfig.url }],
+	category: "travel",
+	creator: siteConfig.name,
+	publisher: siteConfig.name,
+	referrer: "origin-when-cross-origin",
+	formatDetection: {
+		address: false,
+		email: false,
+		telephone: false,
+	},
 	alternates: { canonical: "/" },
 	openGraph: {
 		type: "website",
@@ -33,11 +44,13 @@ export const metadata: Metadata = {
 		description: siteConfig.description,
 		url: siteConfig.url,
 		locale: "en",
+		images: [defaultOpenGraphImage],
 	},
 	twitter: {
 		card: "summary_large_image",
 		title: siteConfig.title,
 		description: siteConfig.description,
+		images: [defaultOpenGraphImage],
 	},
 	icons: {
 		icon: [
@@ -48,7 +61,17 @@ export const metadata: Metadata = {
 			{ url: "/apple-touch-icon.png", sizes: "180x180", type: "image/png" },
 		],
 	},
-	robots: { index: true, follow: true },
+	robots: {
+		index: true,
+		follow: true,
+		googleBot: {
+			index: true,
+			follow: true,
+			"max-video-preview": -1,
+			"max-image-preview": "large",
+			"max-snippet": -1,
+		},
+	},
 };
 
 export const viewport: Viewport = {

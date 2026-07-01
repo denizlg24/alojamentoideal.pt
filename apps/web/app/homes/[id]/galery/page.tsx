@@ -12,6 +12,7 @@ import {
 	generateListingStaticParams,
 	getListingCatalogScope,
 } from "@/lib/catalog/listing-route";
+import { buildPageMetadata } from "@/lib/site/metadata";
 
 interface ListingGalleryPageProps {
 	params: Promise<{ id: string }>;
@@ -31,18 +32,19 @@ export async function generateMetadata({
 		"en",
 	);
 	if (!listing) {
-		return { title: "Listing photos not found" };
+		return {
+			title: "Listing photos not found",
+			robots: { follow: true, index: false },
+		};
 	}
 
 	const title = `${listing.title} photos`;
-	return {
-		description: `Browse ${listing.photos.length} photos of ${listing.title}.`,
-		openGraph: {
-			images: listing.coverPhoto ? [listing.coverPhoto.url] : undefined,
-			title,
-		},
+	return buildPageMetadata({
 		title,
-	};
+		description: `Browse ${listing.photos.length} photos of ${listing.title}.`,
+		path: `/homes/${id}/galery`,
+		image: listing.coverPhoto?.url,
+	});
 }
 
 function locationLabel(location: CatalogLocationDto): string | null {

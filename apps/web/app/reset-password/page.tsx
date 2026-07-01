@@ -2,8 +2,12 @@ import type { Metadata } from "next";
 import { Suspense } from "react";
 import { AuthCard } from "@/components/auth/auth-card";
 import { ResetPasswordForm } from "@/components/auth/reset-password-form";
+import { buildPrivatePageMetadata } from "@/lib/site/metadata";
 
-export const metadata: Metadata = { title: "Choose a new password" };
+export const metadata: Metadata = buildPrivatePageMetadata({
+	title: "Choose a new password",
+	description: "Set a new password for your Alojamento Ideal account.",
+});
 
 type SearchParams = Record<string, string | string[] | undefined>;
 

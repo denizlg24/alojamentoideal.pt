@@ -1,24 +1,53 @@
-# Order Page & Completion Flow (Roadmap M6+)
+# Order Page & Completion Flow (Roadmap M6+, implemented)
 
 ## Context
 
-M5 (the reserve-first reservation saga) is implemented and green. A guest can now
-pay and have a durable Hostify hold confirmed. What is missing is everything that
-happens *after* the booking exists: the guest has no place to manage their stay.
+This document started as the M6+ implementation plan. As of **2026-07-01**, the
+customer-facing reservation flow is implemented: `/booking/complete` handles
+post-payment status, and `/order/[reference]` is the durable booking hub for
+overview, stay details, owner messaging, guest registration, Stripe Identity and
+guest-slot invitations.
 
-This plan covers two deliverables:
+The historical B0-B4/F0-F4 plan is kept below because it explains the contract
+boundaries and implementation decisions. Treat the status snapshot in this
+section as authoritative when it conflicts with older "left" notes lower in the
+document.
 
-1. **Improve the post-payment status page** (`/booking/complete`, plus the
-   `unavailable`/failed surface). This is the unfinished **Part G** of the saga
-   plan (`provider-reservation-saga.md`).
-2. **Build `/order/[reference]`** — the durable, guest-facing order hub that
-   handles: live host chat (Hostify inbox), guest registration data (Stripe
-   Identity, structured Hostkit-ready), and inviting other people to join the
-   booking.
+## Current implementation status (2026-07-01)
 
-It is large, so it is split into **Backend (B0-B4)** and **Frontend (F0-F4)**
-stages, each sub-chunked so multiple agents can work in parallel. Read the
-**Parallelization** section last — it maps stages to agents and dependencies.
+**Done**
+
+- `/booking/complete` polls the server-verified checkout order endpoint, separates
+  `held-unpaid`, `paid-confirming`, `confirmed`, `refunded` and `cancelled`, and
+  links paid or confirmed bookings into the order hub.
+- `/order/[reference]` redeems owner/member magic links, sets the scoped member
+  cookie, and renders an SSR hub shell with section navigation.
+- Overview shows booking status, stay dates, payment method, owner-only pricing,
+  contact details, price breakdown and management links.
+- Stay details render the booked home's photos, amenities, house guide and map
+  inside the private order context.
+- Messages are owner-only, backed by Hostify conversation projection, Pusher
+  private-channel auth, optimistic sends and retry for failed messages.
+- Guest registration covers owner-managed slots, member-owned slots, guest invite,
+  resend/revoke, manual identity entry, signed-in account identity reuse and
+  guest-scoped Stripe Identity.
+- Backend APIs exist for order detail, access redemption, conversations/messages,
+  message retry, guest read/update, guest identity session, guest invite,
+  residency save, account identity reuse, member resend and member revoke.
+- Migrations through `0027_watery_gertrude_yorkes.sql` are present, including
+  order payment-method display fields and pending-confirmation email retry fields.
+
+**Still operational, not page-build blockers**
+
+- Live Hostify validation remains needed for reservation-to-thread lookup,
+  message sender classification, duplicate import behavior and far-future
+  confirm-settle behavior.
+- Live Pusher verification remains needed with production credentials and browser
+  subscription checks.
+- Live Stripe Identity verification remains needed for guest/order sessions and
+  webhook delivery.
+- No Hostkit SIBA submission connector exists yet. The app collects and verifies
+  Hostkit-ready guest data only.
 
 > A separate, already-shipped change (this same work session) added the
 > `HOSTIFY_BOOKINGS_ENABLED` dev-safety flag (default on, opt-out) that runs the
@@ -51,14 +80,16 @@ stages, each sub-chunked so multiple agents can work in parallel. Read the
 
 ## Verified contracts (checked against current code)
 
-- **Order access today** (`service.ts` `readOrderStatus`/`getOrderContact`):
+- **Order access** (`service.ts` `readOrderStatus`/`readOrderDetail`):
   authorized by `isOrderAccessGranted({ cartToken, userId }, owner)` where
   `owner: CartOwner = { cartToken, userId }`. Two grant paths exist (anonymous
-  cart cookie, or matching signed-in `userId`). **We add a third: a validated
-  member access token.**
-- **Order read model**: `readOrderStatus(publicReference, owner)` returns
-  `{ bookingStatus, amountPaidMinor, totalMinor, currency, orderId, stripePaymentIntentId, publicReference }`.
-  A fuller `readOrderDetail` does not exist yet.
+  cart cookie, or matching signed-in `userId`), plus the implemented third path:
+  a validated member access token from the scoped order cookie.
+- **Order read model**: `readOrderStatus(publicReference, owner)` returns the
+  checkout status shape with `paymentStatus`, `bookingStatus`,
+  `provisioningSubState`, totals and `orderUrl`. `readOrderDetail(access)` returns
+  the full hub aggregate with role-filtered pricing, contact, members,
+  conversations and guest-progress data.
 - **`order_contacts.email` is required** — every order has a contact email to send
   the owner magic-link to. `orderTable.userId` may be null (anonymous checkout).
 - **`bookingGuest` table already exists** (`schema.ts:~1122`) with `userId?`,
@@ -66,12 +97,10 @@ stages, each sub-chunked so multiple agents can work in parallel. Read the
   `stripeVerificationReportId`, `identityStatus`
   (`missing|provided|processing|requires_input|verified|canceled`), encrypted
   snapshot columns, `purgeAfter`. Guest-data persistence is mostly modelled.
-- **Stripe Identity exists but is account-scoped**:
-  `createIdentityVerificationSession({ userId, returnUrl })` in
-  `integrations/stripe/identity.ts`; `POST /api/account/identity-session` requires
-  `getServerUser`; the identity webhook attributes the report to an account
-  identity document. **B3 needs an order/guest-scoped variant that does not
-  require a signed-in user** (keyed to a `bookingGuest` + member token).
+- **Stripe Identity supports account and booking-guest scopes**: account identity
+  sessions still require a signed-in user; order guest sessions are keyed to a
+  `bookingGuest` and authorized by order access, so invited guests do not need an
+  account.
 - **Encryption**: `packages/core/src/account/identity-encryption.ts`
   (`ACCOUNT_IDENTITY_ENCRYPTION_KEY`) is the reusable envelope-encryption helper.
 - **Hostify inbox client** (`integrations/hostify/client.ts:162`): `inbox.list(query)
@@ -102,11 +131,11 @@ stages, each sub-chunked so multiple agents can work in parallel. Read the
 pay -> /booking/complete?ref=AI-...        (transient, polls status; existing)
             |  confirmation email contains
             v  /order/AI-...?token=<owner-token>
-        /order/[reference]                  (durable hub; NEW)
+        /order/[reference]                  (durable hub)
             ├─ Overview   (status, dates, property, price)
-            ├─ Messages   (Hostify inbox, realtime)
-            ├─ Guests     (identity capture + Stripe Identity)
-            └─ People     (invite/manage members)
+            ├─ Messages   (owner-only Hostify inbox, realtime)
+            ├─ Stay       (photos, amenities, guide, map)
+            └─ Guests     (identity capture, Stripe Identity, guest invites)
 ```
 
 **Access token model (the spine — B0):**
@@ -130,10 +159,9 @@ pay -> /booking/complete?ref=AI-...        (transient, polls status; existing)
 
 ### B0 — Order access spine + detail read model  *(blocks B1, B2, B3, F1)*
 
-> **Status: backend done; live-DB verification + frontend (F1) remain.** The full
-> access spine (schema, tokens, resolve/redeem, the detail aggregate, and both
-> routes) is landed and typechecks; only integration-level verification against a
-> live DB and the F1 UI are outstanding.
+> **Status: implemented.** The access spine, detail aggregate, access routes and
+> F1 overview UI are landed. Live-DB verification of edge cases remains an
+> operational hardening item.
 >
 > **Done**
 > - `order_members` table + migration `0020_married_prism.sql` (partial-unique
@@ -172,13 +200,11 @@ pay -> /booking/complete?ref=AI-...        (transient, polls status; existing)
 >   rollup (`order-access.test.ts`, `order-detail.test.ts`); db/core/web
 >   typecheck clean.
 >
-> **Left**
+> **Operational verification left**
 > - Integration-level verification of the access matrix against a live DB (the
 >   resolve/redeem/detail paths are exercised only by typecheck + pure unit tests
 >   so far): token redeem idempotency, revoked/expired → 404, owner auto-resolve,
 >   member field hiding.
-> - Conversation refs in `readOrderDetail` are deferred to B2 (the
->   `conversations` table does not exist yet); the provisioning sub-state is B4.
 > - **Review hardening:** member cookies are scoped by order reference so redeeming
 >   a second order no longer overwrites the first; the access API no longer accepts
 >   raw tokens in the query string.
@@ -217,8 +243,10 @@ auto-resolves from cart/user without a token; sensitive fields hidden from
 
 ### B1 — Membership & invitations  *(depends B0; pairs with F4)*
 
-> **Status: backend done; live-DB verification + frontend (F4) remain.** No
-> migration was needed (B0's `order_members` already carries `expires_at`,
+> **Status: implemented.** Backend membership routes are landed, and the frontend
+> invitation/resend/revoke workflow now lives in the Guests section instead of a
+> separate People page. The existing B0 `order_members` table already carries
+> `expires_at`,
 > `invited_by_member_id`, and the status/role checks). Deviations from the bullets
 > below, all deliberate:
 >
@@ -264,9 +292,9 @@ auto-resolves from cart/user without a token; sensitive fields hidden from
 >   order-member inviter relationship is order-scoped; fallback invite HTML emits
 >   a real clickable link.
 >
-> **Left**: live-DB verification of capacity races, the new unique index, revoke-
-> kills-access mid-session, resend rotation, and owner auto-resolve; the F4 invites
-> UI.
+> **Operational verification left**: live-DB verification of capacity races, the
+> unique index, revoke-kills-access mid-session, resend rotation and owner
+> auto-resolve.
 
 - **Owner provisioning**: on the `pending -> confirmed` transition (in the saga
   success path / webhook), create the `owner` member from `order_contacts.email`
@@ -286,10 +314,10 @@ re-invite rotates the token; member cap enforced.
 
 ### B2 — Conversations + messages + realtime  *(depends B0; pairs with F2)*
 
-> **Status: backend done; live-DB/provider verification + frontend (F2) remain.**
-> The durable conversation projection, outbound message route, reconciliation cron
-> and Pusher auth/publisher seam are landed. Hostify webhook ingestion is still
-> intentionally deferred until Hostify confirms the signature and payload contract.
+> **Status: implemented.** The durable conversation projection, outbound message
+> route, reconciliation cron, Pusher auth/publisher seam and owner chat UI are
+> landed. Hostify webhook ingestion is still intentionally deferred until Hostify
+> confirms the signature and payload contract.
 > Backend commits: `4565850 feat: add order conversation backend core` and
 > `5fbc89f feat: wire order conversation routes`.
 >
@@ -343,7 +371,7 @@ re-invite rotates the token; member cap enforced.
 >   subscription flow.
 > - Hostify `message_new` webhook route once the signature, event id, and payload
 >   shape are confirmed.
-> - F2 chat UI.
+> - Browser/Pusher subscription verification with real credentials.
 
 Schema:
 
@@ -396,10 +424,8 @@ rejects non-members; outbound failure is retryable; preview/unread update.
 
 ### B3 — Guest registration + Stripe Identity (collect + verify; Hostkit deferred)  *(depends B0; pairs with F3)*
 
-> **Status: backend done; live Stripe/API verification + frontend (F3) remain.**
-> The order/guest-scoped identity capture backend is landed in
-> `0777799 feat(orders): add guest completion backend` and the follow-up review
-> fixes in this pass.
+> **Status: implemented.** The order/guest-scoped identity capture backend and
+> guest registration UI are landed. Live Stripe/API verification remains.
 >
 > **Done**
 > - `booking_guests.order_member_id` landed in migration
@@ -433,7 +459,6 @@ rejects non-members; outbound failure is retryable; preview/unread update.
 > - Live DB verification of member-owned guest slot claiming and cross-order FK
 >   enforcement.
 > - Hostkit SIBA connector/cron remains deferred by A1.
-> - F3 guest-data / identity UI.
 
 - Guest service + routes scoped to a `provider_booking` within an order, authorized
   via `OrderAccessContext`: a `member` fills *their own* guest slot; the `owner`
@@ -461,7 +486,7 @@ set per retention policy.
 
 ### B4 — Completion status read enhancements  *(depends B0; small; feeds F0/F1)*
 
-> **Status: backend done; frontend (F0/F1) remains.**
+> **Status: implemented.**
 >
 > **Done**
 > - `readOrderStatus` and `readOrderDetail` now surface
@@ -474,7 +499,8 @@ set per retention policy.
 > - Tests cover provisioning sub-state mapping and conversation availability.
 >
 > **Left**
-> - F0 completion copy/state handling and F1 overview UI wiring.
+> - No known page-build items. Continue to verify the rare provider-confirmation
+>   delay states against live Hostify data.
 
 - Extend `readOrderStatus`/`readOrderDetail` to surface the provisioning sub-state
   (`held-unpaid | paid-confirming | confirmed | refunded | cancelled`),
@@ -490,7 +516,7 @@ set per retention policy.
 > Avoid heavy cards and borders, for popovers, dialogs, always think of UX on mobile first. Copy style per
 > `AGENTS.md` (no host/marketplace language, no em dashes).
 
-### F0 — Completion page + unavailable/failed surface  *(independent; can start now; finishes the M5 Part G gap)*
+### F0 — Completion page + unavailable/failed surface  *(done)*
 
 - `booking-complete-view.tsx`: distinct copy for `held-unpaid`/`paid-confirming`
   ("Payment received, finalizing your booking"), `confirmed` ("Booking
@@ -498,33 +524,36 @@ set per retention policy.
   couldn't confirm"). Keep polling/revalidate so the few-second provisioning delay
   resolves without a manual refresh.
 - Handle the saga's `reservation_unavailable` (409) / transient (503) responses
-  from the payment-intent route in the checkout UI (the other open Part G item):
+  from the hold-reservation route in the checkout UI:
   surface "these dates are no longer available" before any charge.
 - Decide `/booking/failed`: recommend it stays a **state** of the complete view,
   with a thin `/booking/failed` alias only if the pre-charge `unavailable` case
   needs its own URL.
 
-### F1 — `/order/[reference]` shell + overview + auth  *(depends B0)*
+### F1 — `/order/[reference]` shell + overview + auth  *(done)*
 
 - Server component; resolve access via cookie or redeem `?token`; forbidden/expired
-  states. Section nav: Overview / Messages / Guests / People (People only for
-  owner). Overview renders status, dates, property, price (price owner-only).
+  states. Section nav: Overview / Messages / Stay / Guests, with Messages
+  owner-only. Overview renders status, dates, property, payment method, contact,
+  price breakdown and owner-only pricing.
 
-### F2 — Live chat UI  *(depends B2)*
+### F2 — Live chat UI  *(done)*
 
 - Thread view + composer; subscribe to the Pusher private channel via a
   `use-realtime` hook; optimistic send reusing the `use-pending-messages.ts`
   pattern; unread markers; failed-send retry.
 
-### F3 — Guest-data / identity UI  *(depends B3)*
+### F3 — Guest-data / identity UI  *(done)*
 
 - Per-guest identity form; launch Stripe Identity modal (reuse the account identity
   client); status badges from `identityStatus`; role-gated ("your details" for a
   member, "all guests" for the owner).
 
-### F4 — Invite / members UI  *(depends B1)*
+### F4 — Invite / members UI  *(done inside Guests)*
 
-- Invite-by-email form (owner); members list with pending/active; resend/revoke.
+- Invite-by-email form is attached to each guest slot in the Guests section. Owner
+  can invite a guest to fill their own details, resend pending invites, cancel
+  invites and remove assigned guests. There is no separate People page.
 
 ---
 

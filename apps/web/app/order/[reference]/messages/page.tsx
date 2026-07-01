@@ -11,8 +11,12 @@ import { OrderHubSkeleton } from "@/components/order/order-hub-skeleton";
 import { OrderMessages } from "@/components/order/order-messages";
 import { commerceService } from "@/lib/api/commerce";
 import { loadOrderForRequest } from "@/lib/order/load";
+import { buildPrivatePageMetadata } from "@/lib/site/metadata";
 
-export const metadata: Metadata = { title: "Messages · Your booking" };
+export const metadata: Metadata = buildPrivatePageMetadata({
+	title: "Messages · Your booking",
+	description: "Message the Alojamento Ideal team about a private booking.",
+});
 
 interface OrderMessagesPageProps {
 	params: Promise<{ reference: string }>;

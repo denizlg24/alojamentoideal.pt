@@ -11,8 +11,13 @@ import { accountProfileRepository } from "@/lib/api/account";
 import { commerceService } from "@/lib/api/commerce";
 import { getCurrentUser } from "@/lib/auth/session";
 import { loadOrderForRequest } from "@/lib/order/load";
+import { buildPrivatePageMetadata } from "@/lib/site/metadata";
 
-export const metadata: Metadata = { title: "Guests · Your booking" };
+export const metadata: Metadata = buildPrivatePageMetadata({
+	title: "Guests · Your booking",
+	description:
+		"Add and verify guest registration details for your Alojamento Ideal booking.",
+});
 
 interface OrderGuestsPageProps {
 	params: Promise<{ reference: string }>;
