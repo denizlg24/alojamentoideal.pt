@@ -10,6 +10,10 @@ import { HOSTIFY_AMENITY_CATALOG } from "./amenity-catalog";
 import { publicAmenityGroupForInput } from "./amenity-groups";
 import { AMENITY_ICON_SET, pickAmenityIcon } from "./amenity-icons";
 import { sanitizeProviderPayload } from "./hash";
+import {
+	LISTING_DESCRIPTION_SECTIONS,
+	type LocalizedDescriptionSections,
+} from "./localization";
 import { versionedHash } from "./sync-version";
 
 export interface HostifyListingSections {
@@ -60,6 +64,7 @@ export interface ListingCacheProjection {
 	processedFallback: {
 		amenities: ProcessedAmenity[];
 		description: LocalizedText;
+		descriptionSections: LocalizedDescriptionSections;
 		guide: LocalizedText;
 		model: null;
 		title: LocalizedText;
@@ -88,6 +93,8 @@ export function buildListingCacheProjection(
 		listing,
 		translations,
 	);
+	const descriptionSections =
+		extractDescriptionSectionSources(descriptionContent);
 	// Hostify's dedicated `guest_guide` endpoint is unpopulated on this account;
 	// the real house-guide content lives as optional fields on the `description`
 	// sibling (house rules, directions, notes/parking) plus the check-in schedule
@@ -97,6 +104,7 @@ export function buildListingCacheProjection(
 	const normalized: AccommodationListingNormalizedContent = {
 		amenities,
 		description,
+		descriptionSections,
 		guide: guideText,
 		listing,
 		title,
@@ -147,6 +155,10 @@ export function buildListingCacheProjection(
 		processedFallback: {
 			amenities: toProcessedAmenities(amenities),
 			description: localizedDescriptionFallback(description, translations),
+			descriptionSections: localizedDescriptionSectionsFallback(
+				descriptionSections,
+				translations,
+			),
 			guide: repeatLocalized(guideText),
 			model: null,
 			title: repeatLocalized(title),
@@ -228,6 +240,43 @@ function localizedDescriptionFallback(
 	return localized;
 }
 
+function localizedDescriptionSectionsFallback(
+	sections: Record<string, string>,
+	translations: unknown[],
+): LocalizedDescriptionSections {
+	return Object.fromEntries(
+		LISTING_DESCRIPTION_SECTIONS.map(({ key }) => {
+			const localized = repeatLocalized(sections[key]);
+			for (const locale of ["en", "es", "pt"] as const) {
+				localized[locale] =
+					readTranslatedDescriptionField(translations, locale, key) ??
+					localized[locale];
+			}
+			return [key, localized];
+		}),
+	) as LocalizedDescriptionSections;
+}
+
+function extractDescriptionSectionSources(
+	description: Record<string, unknown>,
+): Record<string, string> {
+	return Object.fromEntries(
+		LISTING_DESCRIPTION_SECTIONS.map(({ key }) => [
+			key,
+			readDescriptionSectionField(description, key) ?? "",
+		]),
+	);
+}
+
+function readDescriptionSectionField(
+	record: Record<string, unknown>,
+	key: string,
+): string | null {
+	return (
+		flattenGuideText(record[key]) ?? flattenGuideText(record[`${key}_rtf`])
+	);
+}
+
 function readDescriptionText(record: Record<string, unknown>): string | null {
 	return (
 		readString(record, "summary") ??
@@ -251,6 +300,30 @@ function readTranslatedDescription(
 		}
 
 		const text = readDescriptionText(translation);
+		if (text) {
+			return text;
+		}
+	}
+
+	return null;
+}
+
+function readTranslatedDescriptionField(
+	translations: unknown[],
+	locale: keyof LocalizedText,
+	key: string,
+): string | null {
+	for (const translation of translations) {
+		if (!isRecord(translation)) {
+			continue;
+		}
+
+		const language = readString(translation, "language");
+		if (normalizeLanguage(language) !== locale) {
+			continue;
+		}
+
+		const text = readDescriptionSectionField(translation, key);
 		if (text) {
 			return text;
 		}

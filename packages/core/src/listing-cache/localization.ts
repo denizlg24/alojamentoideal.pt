@@ -5,12 +5,13 @@
  * and OpenAI call in one place guarantees the sync is never weaker than the
  * script: any improvement here applies to both.
  *
- * Contract: translate/complete the lead description and house guide into en /
- * pt-PT / es-ES. Never invent host-provided facts. The guide is only translated
- * from what the source provides (empty sections and trailing headings are
- * stripped). The description is marketing copy and may be composed from verified
- * public attributes (`facts`) when the source is missing. The title is a proper
- * name and is intentionally NOT localized here (callers keep it verbatim).
+ * Contract: translate/complete the lead description, public description
+ * sections, and house guide into en / pt-PT / es-ES. Never invent
+ * host-provided facts. The guide and sections are only translated from what the
+ * source provides (empty guide sections and trailing headings are stripped).
+ * The description is marketing copy and may be composed from verified public
+ * attributes (`facts`) when the source is missing. The title is a proper name
+ * and is intentionally NOT localized here (callers keep it verbatim).
  */
 import type { LocalizedText } from "@workspace/db";
 import { z } from "zod";
@@ -21,6 +22,23 @@ const REQUEST_TIMEOUT_MS = 60_000;
 const MAX_ATTEMPTS = 3;
 
 const LOCALES = ["en", "pt", "es"] as const;
+
+export const LISTING_DESCRIPTION_SECTIONS = [
+	{ key: "space", label: "The space" },
+	{ key: "access", label: "Guest access" },
+	{ key: "interaction", label: "During your stay" },
+	{ key: "neighborhood_overview", label: "The neighborhood" },
+	{ key: "transit", label: "Getting around" },
+	{ key: "notes", label: "Other things to note" },
+] as const;
+
+export type ListingDescriptionSectionKey =
+	(typeof LISTING_DESCRIPTION_SECTIONS)[number]["key"];
+
+export type LocalizedDescriptionSections = Record<
+	ListingDescriptionSectionKey,
+	LocalizedText
+>;
 
 /** Human-facing locale intent baked into the prompt (keys stay en/es/pt). */
 const LOCALE_LABELS: Record<(typeof LOCALES)[number], string> = {
@@ -36,7 +54,7 @@ export const LISTING_LOCALIZATION_SYSTEM_PROMPT = [
 	"Canidelo). Positioning: stays that feel like home: comfort, modern design,",
 	"local charm, direct guest-focused hospitality.",
 	"",
-	"You return two fields, each localized into three locales:",
+	"You return three fields, each localized into three locales:",
 	"  en = English, pt = European Portuguese (pt-PT), es = Spanish (Spain).",
 	"",
 	"description (marketing copy):",
@@ -46,6 +64,12 @@ export const LISTING_LOCALIZATION_SYSTEM_PROMPT = [
 	"  (2 to 4 sentences) in each locale using ONLY the attributes in `facts`",
 	"  (location, property type, bedrooms/beds/bathrooms, capacity, amenities).",
 	"  This is the only field you may write from scratch, and only from `facts`.",
+	"",
+	"descriptionSections (listing detail sections):",
+	"- Translate ONLY the section body text present in `source.descriptionSections`.",
+	"- Preserve meaning and practical details. Do not add facts.",
+	"- For a section with empty source text, return an empty string in all three",
+	"  locales.",
 	"",
 	"guide (practical guest information):",
 	"- ONLY translate what is present in `source.guide`. It depends on",
@@ -80,12 +104,15 @@ export interface ListingLocalizationFacts {
 /** Already-localized listings used to prime the house voice (few-shot). */
 export interface ListingLocalizationExemplar {
 	description: LocalizedText;
+	descriptionSections?: Partial<LocalizedDescriptionSections>;
 	guide: LocalizedText;
 }
 
 export interface ListingLocalizationRequest {
 	/** Source lead description (may be empty). */
 	description: string;
+	/** Source public detail-section bodies keyed by Hostify description field. */
+	descriptionSections?: Partial<Record<ListingDescriptionSectionKey, string>>;
 	exemplars?: ListingLocalizationExemplar[];
 	facts: ListingLocalizationFacts;
 	/** Source house guide, already flattened to text (may be empty). */
@@ -97,6 +124,7 @@ export interface ListingLocalizationRequest {
 /** The localized prose the model returns. The title is not localized here. */
 export interface LocalizedListingProse {
 	description: LocalizedText;
+	descriptionSections: LocalizedDescriptionSections;
 	guide: LocalizedText;
 }
 
@@ -115,6 +143,14 @@ const localizedTextSchema = z.object({
 
 const listingProseSchema = z.object({
 	description: localizedTextSchema,
+	descriptionSections: z.object({
+		access: localizedTextSchema,
+		interaction: localizedTextSchema,
+		neighborhood_overview: localizedTextSchema,
+		notes: localizedTextSchema,
+		space: localizedTextSchema,
+		transit: localizedTextSchema,
+	}),
 	guide: localizedTextSchema,
 });
 
@@ -133,9 +169,29 @@ const listingProseJsonSchema = {
 	additionalProperties: false,
 	properties: {
 		description: localizedTextJsonSchema,
+		descriptionSections: {
+			additionalProperties: false,
+			properties: {
+				access: localizedTextJsonSchema,
+				interaction: localizedTextJsonSchema,
+				neighborhood_overview: localizedTextJsonSchema,
+				notes: localizedTextJsonSchema,
+				space: localizedTextJsonSchema,
+				transit: localizedTextJsonSchema,
+			},
+			required: [
+				"access",
+				"interaction",
+				"neighborhood_overview",
+				"notes",
+				"space",
+				"transit",
+			],
+			type: "object",
+		},
 		guide: localizedTextJsonSchema,
 	},
-	required: ["description", "guide"],
+	required: ["description", "descriptionSections", "guide"],
 	type: "object",
 } as const;
 
@@ -150,6 +206,9 @@ export function buildListingLocalizationBody(
 		facts: request.facts,
 		source: {
 			description: request.description,
+			descriptionSections: normalizeDescriptionSections(
+				request.descriptionSections,
+			),
 			guide: request.guide,
 		},
 		// Hostify's own translations, when present, are the most faithful basis.
@@ -251,6 +310,7 @@ export async function requestListingLocalization(
 			const parsed = listingProseSchema.parse(JSON.parse(outputText));
 			return {
 				description: parsed.description,
+				descriptionSections: parsed.descriptionSections,
 				guide: cleanGuideLocalized(parsed.guide),
 			};
 		} catch (error) {
@@ -269,6 +329,26 @@ export async function requestListingLocalization(
 	throw lastError instanceof Error
 		? lastError
 		: new Error("OpenAI request failed");
+}
+
+export function emptyLocalizedDescriptionSections(): LocalizedDescriptionSections {
+	return Object.fromEntries(
+		LISTING_DESCRIPTION_SECTIONS.map(({ key }) => [
+			key,
+			{ en: "", es: "", pt: "" },
+		]),
+	) as LocalizedDescriptionSections;
+}
+
+function normalizeDescriptionSections(
+	sections: Partial<Record<ListingDescriptionSectionKey, string>> | undefined,
+): Record<ListingDescriptionSectionKey, string> {
+	return Object.fromEntries(
+		LISTING_DESCRIPTION_SECTIONS.map(({ key }) => [
+			key,
+			sections?.[key]?.trim() ?? "",
+		]),
+	) as Record<ListingDescriptionSectionKey, string>;
 }
 
 function isRetryableStatus(status: number): boolean {

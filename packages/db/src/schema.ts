@@ -67,6 +67,7 @@ export interface ProcessedAmenity {
 export interface AccommodationListingProcessedContent {
 	amenities: ProcessedAmenity[];
 	description: LocalizedText;
+	descriptionSections?: Record<string, LocalizedText>;
 	guide: LocalizedText;
 	model: string | null;
 	title: LocalizedText;
@@ -75,6 +76,7 @@ export interface AccommodationListingProcessedContent {
 export interface AccommodationListingNormalizedContent {
 	amenities: unknown[];
 	description: string | null;
+	descriptionSections?: Record<string, string>;
 	guide: unknown;
 	listing: Record<string, unknown>;
 	title: string | null;

@@ -178,7 +178,7 @@ async function ListingContent({
 							{listing.capacity.bedrooms && (
 								<span className="flex items-center gap-1.5">
 									<DoorOpen className="size-4" /> {listing.capacity.bedrooms}{" "}
-									bedrooms
+									{listing.capacity.bedrooms === 1 ? "bedroom" : "bedrooms"}
 								</span>
 							)}
 							{listing.capacity.beds && (

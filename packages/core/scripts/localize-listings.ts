@@ -27,11 +27,12 @@
  *   bun run packages/core/scripts/localize-listings.ts --no-llm        # selection only, free
  *   bun run packages/core/scripts/localize-listings.ts --verify-endpoint
  *   bun run packages/core/scripts/localize-listings.ts --listing 123 --limit 1
+ *   bun run packages/core/scripts/localize-listings.ts --from-report report.json
  *   bun run packages/core/scripts/localize-listings.ts --apply
  *   bun run packages/core/scripts/localize-listings.ts --apply --push-hostify
  *
- * Required env: DATABASE_URL, OPENAI_API_KEY (except for --no-llm),
- * HOSTIFY_API_KEY (only for --push-hostify --apply).
+ * Required env: DATABASE_URL, OPENAI_API_KEY (except for --no-llm or
+ * --from-report), HOSTIFY_API_KEY (only for --push-hostify --apply).
  * Optional env: OPENAI_LISTING_MODEL (default "gpt-5.5").
  *
  * Flags:
@@ -47,27 +48,36 @@
  *   --no-exemplars       Skip style-priming with existing well-written listings.
  *   --concurrency N      Parallel OpenAI calls (default 3).
  *   --model <id>         Override OPENAI_LISTING_MODEL.
+ *   --from-report <path> Apply proposed content from a JSON report instead of
+ *                        calling the LLM. Rows with proposed:null are skipped.
  *   --verify-endpoint    Make one throwaway OpenAI call on a synthetic sample,
  *                        print the request + parsed response shape, and exit.
  */
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import type { HostifyClient } from "@workspace/core/integrations/hostify";
+import type {
+	HostifyClient,
+	HostifyTranslationInput,
+} from "@workspace/core/integrations/hostify";
 import { createHostifyClientFromEnv } from "@workspace/core/integrations/hostify";
 import {
 	buildListingLocalizationBody,
+	emptyLocalizedDescriptionSections,
 	guideToText,
+	LISTING_DESCRIPTION_SECTIONS,
 	LISTING_LOCALIZATION_MODEL_DEFAULT,
 	type ListingLocalizationExemplar,
 	type ListingLocalizationFacts,
 	type ListingLocalizationRequest,
+	type LocalizedDescriptionSections,
 	type LocalizedListingProse,
 	requestListingLocalization,
 } from "@workspace/core/listing-cache";
 import {
 	type AccommodationListingNormalizedContent,
 	type AccommodationListingProcessedContent,
+	type AccommodationListingRawContent,
 	accommodationListing,
 	getDb,
 	getPool,
@@ -102,9 +112,11 @@ interface Args {
 	concurrency: number;
 	exemplars: boolean;
 	force: boolean;
+	fromReport: string | null;
 	limit: number;
 	listings: string[];
 	model: string;
+	modelExplicit: boolean;
 	noLlm: boolean;
 	onlyMissing: boolean;
 	pushHostify: boolean;
@@ -125,11 +137,44 @@ interface ListingRow {
 	processed: AccommodationListingProcessedContent | null;
 	processingStatus: string;
 	propertyType: string | null;
+	raw: AccommodationListingRawContent;
 	sourceHash: string;
+}
+
+async function loadListingRows(externalIds?: string[]): Promise<ListingRow[]> {
+	if (externalIds && externalIds.length === 0) {
+		return [];
+	}
+
+	const db = getDb();
+	const baseQuery = db
+		.select({
+			bathrooms: accommodationListing.bathrooms,
+			bedrooms: accommodationListing.bedrooms,
+			beds: accommodationListing.beds,
+			city: accommodationListing.city,
+			country: accommodationListing.country,
+			externalId: accommodationListing.externalId,
+			id: accommodationListing.id,
+			name: accommodationListing.name,
+			normalized: accommodationListing.normalized,
+			personCapacity: accommodationListing.personCapacity,
+			processed: accommodationListing.processed,
+			processingStatus: accommodationListing.processingStatus,
+			propertyType: accommodationListing.propertyType,
+			raw: accommodationListing.raw,
+			sourceHash: accommodationListing.sourceHash,
+		})
+		.from(accommodationListing);
+
+	return (await (externalIds
+		? baseQuery.where(inArray(accommodationListing.externalId, externalIds))
+		: baseQuery)) as ListingRow[];
 }
 
 interface SourceContent {
 	description: string;
+	descriptionSections: Record<keyof LocalizedDescriptionSections, string>;
 	guide: string;
 	title: string;
 }
@@ -137,6 +182,7 @@ interface SourceContent {
 /** The localized content persisted to `processed` (adds the passthrough title). */
 interface FinalContent {
 	description: LocalizedText;
+	descriptionSections?: LocalizedDescriptionSections;
 	guide: LocalizedText;
 	title: LocalizedText;
 }
@@ -151,10 +197,12 @@ function parseArgs(argv: string[]): Args {
 		concurrency: 3,
 		exemplars: true,
 		force: false,
+		fromReport: null,
 		limit: Number.POSITIVE_INFINITY,
 		listings: [],
 		model:
 			process.env.OPENAI_LISTING_MODEL ?? LISTING_LOCALIZATION_MODEL_DEFAULT,
+		modelExplicit: false,
 		noLlm: false,
 		onlyMissing: false,
 		pushHostify: false,
@@ -197,6 +245,9 @@ function parseArgs(argv: string[]): Args {
 			case "--listing":
 				args.listings.push(next());
 				break;
+			case "--from-report":
+				args.fromReport = next();
+				break;
 			case "--limit":
 				args.limit = parsePositiveInt(arg, next());
 				break;
@@ -205,6 +256,7 @@ function parseArgs(argv: string[]): Args {
 				break;
 			case "--model":
 				args.model = next();
+				args.modelExplicit = true;
 				break;
 			default:
 				throw new Error(`Unknown argument: ${arg}`);
@@ -229,9 +281,55 @@ function parsePositiveInt(flag: string, raw: string): number {
 function sourceOf(row: ListingRow): SourceContent {
 	return {
 		description: (row.normalized.description ?? "").trim(),
+		descriptionSections: descriptionSectionsSourceOf(row),
 		guide: (guideToText(row.normalized.guide) ?? "").trim(),
 		title: (row.normalized.title ?? row.name ?? "").trim(),
 	};
+}
+
+function descriptionSectionsSourceOf(
+	row: ListingRow,
+): Record<keyof LocalizedDescriptionSections, string> {
+	const normalized = row.normalized.descriptionSections ?? {};
+	const rawDescription = isRecord(row.raw.description)
+		? row.raw.description
+		: {};
+
+	return Object.fromEntries(
+		LISTING_DESCRIPTION_SECTIONS.map(({ key }) => [
+			key,
+			(
+				normalized[key] ??
+				flattenSourceText(rawDescription[key]) ??
+				flattenSourceText(rawDescription[`${key}_rtf`]) ??
+				""
+			).trim(),
+		]),
+	) as Record<keyof LocalizedDescriptionSections, string>;
+}
+
+function flattenSourceText(value: unknown): string | null {
+	if (typeof value === "string") {
+		const trimmed = value.trim();
+		return trimmed.length > 0 ? trimmed : null;
+	}
+	if (typeof value === "number" || typeof value === "boolean") {
+		return String(value);
+	}
+	if (Array.isArray(value)) {
+		const parts = value
+			.map(flattenSourceText)
+			.filter((part): part is string => part !== null);
+		return parts.length > 0 ? parts.join("\n") : null;
+	}
+	if (isRecord(value)) {
+		const parts = Object.entries(value)
+			.filter(([key]) => key !== "success")
+			.map(([, nested]) => flattenSourceText(nested))
+			.filter((part): part is string => part !== null);
+		return parts.length > 0 ? parts.join("\n") : null;
+	}
+	return null;
 }
 
 function factsOf(row: ListingRow): ListingLocalizationFacts {
@@ -288,6 +386,19 @@ function processedField(
 		return { en: "", es: "", pt: "" };
 	}
 	return processed[field];
+}
+
+function processedDescriptionSections(
+	processed: AccommodationListingProcessedContent | null,
+): LocalizedDescriptionSections {
+	const sections = emptyLocalizedDescriptionSections();
+	for (const { key } of LISTING_DESCRIPTION_SECTIONS) {
+		const value = processed?.descriptionSections?.[key];
+		if (value) {
+			sections[key] = value;
+		}
+	}
+	return sections;
 }
 
 /**
@@ -437,6 +548,31 @@ function selectCandidate(row: ListingRow, args: Args): Candidate | null {
 		}
 	}
 
+	const descriptionSections = processedDescriptionSections(row.processed);
+	for (const { key } of LISTING_DESCRIPTION_SECTIONS) {
+		const localized = descriptionSections[key];
+		const sourceText = source.descriptionSections[key];
+
+		if (
+			sourceText.length > 0 &&
+			LOCALES.some((locale) => localized[locale].trim() === "")
+		) {
+			reasons.push(`empty-locale:descriptionSections.${key}`);
+		}
+		if (isUntranslated(localized) && sourceText.length > 0) {
+			reasons.push(`untranslated:descriptionSections.${key}`);
+		}
+
+		for (const locale of LOCALES) {
+			const detected = detectLanguage(localized[locale]);
+			if (detected && detected !== locale) {
+				wrongLanguageReasons.push(
+					`wrong-language:descriptionSections.${key}.${locale}=${detected}`,
+				);
+			}
+		}
+	}
+
 	if (!args.onlyMissing) {
 		reasons.push(...wrongLanguageReasons);
 	}
@@ -471,6 +607,7 @@ function finalize(
 ): FinalContent {
 	return {
 		description: prose.description,
+		descriptionSections: prose.descriptionSections,
 		guide: prose.guide,
 		title: passthroughTitle(source, row.processed),
 	};
@@ -500,6 +637,7 @@ function collectExemplars(rows: ListingRow[]): ListingLocalizationExemplar[] {
 		if (!allPopulated) continue;
 		exemplars.push({
 			description: processed.description,
+			descriptionSections: processedDescriptionSections(processed),
 			guide: processed.guide,
 		});
 	}
@@ -510,25 +648,41 @@ function collectExemplars(rows: ListingRow[]): ListingLocalizationExemplar[] {
 // Hostify write-back (descriptions only)
 // ---------------------------------------------------------------------------
 
-interface HostifyTranslationPush {
-	description: string;
-	language: string;
-	name?: string;
-}
-
 /** Localized descriptions to push to Hostify, one per non-empty locale. */
 function hostifyTranslationInputs(
 	final: FinalContent,
-): HostifyTranslationPush[] {
-	const inputs: HostifyTranslationPush[] = [];
+): HostifyTranslationInput[] {
+	const inputs: HostifyTranslationInput[] = [];
 	for (const locale of LOCALES) {
 		const description = final.description[locale].trim();
 		if (!description) continue;
 		const name = final.title[locale].trim();
+		const sections = final.descriptionSections;
 		inputs.push({
-			description,
-			language: HOSTIFY_LANGUAGE[locale],
+			lang: HOSTIFY_LANGUAGE[locale],
 			...(name ? { name } : {}),
+			...(sections?.access[locale].trim()
+				? { access: sections.access[locale].trim() }
+				: {}),
+			...(sections?.interaction[locale].trim()
+				? { interaction: sections.interaction[locale].trim() }
+				: {}),
+			...(sections?.neighborhood_overview[locale].trim()
+				? {
+						neighborhood_overview:
+							sections.neighborhood_overview[locale].trim(),
+					}
+				: {}),
+			...(sections?.notes[locale].trim()
+				? { notes: sections.notes[locale].trim() }
+				: {}),
+			...(sections?.space[locale].trim()
+				? { space: sections.space[locale].trim() }
+				: {}),
+			summary: description,
+			...(sections?.transit[locale].trim()
+				? { transit: sections.transit[locale].trim() }
+				: {}),
 		});
 	}
 	return inputs;
@@ -550,14 +704,178 @@ interface ProcessedListing {
 	reasons: string[];
 }
 
+interface ReportProposedListing {
+	externalId: string;
+	name: string | null;
+	proposed: FinalContent;
+	reasons: string[];
+}
+
+interface LocalizationReport {
+	model: string | null;
+	results: ReportProposedListing[];
+}
+
+function readReport(path: string): LocalizationReport {
+	let parsed: unknown;
+	try {
+		parsed = JSON.parse(readFileSync(path, "utf8"));
+	} catch (error) {
+		const message = error instanceof Error ? error.message : String(error);
+		throw new Error(`Failed to read report "${path}": ${message}`);
+	}
+
+	if (!isRecord(parsed)) {
+		throw new Error("Report must be a JSON object");
+	}
+
+	const rawModel = parsed.model;
+	if (
+		rawModel !== undefined &&
+		rawModel !== null &&
+		typeof rawModel !== "string"
+	) {
+		throw new Error("Report model must be a string when present");
+	}
+
+	if (!Array.isArray(parsed.results)) {
+		throw new Error("Report results must be an array");
+	}
+
+	const results: ReportProposedListing[] = [];
+	for (const [index, rawEntry] of parsed.results.entries()) {
+		const entryPath = `results[${index}]`;
+		if (!isRecord(rawEntry)) {
+			throw new Error(`${entryPath} must be an object`);
+		}
+
+		const rawProposed = rawEntry.proposed;
+		if (rawProposed === null) {
+			continue;
+		}
+		if (rawProposed === undefined) {
+			throw new Error(
+				`${entryPath}.proposed must be a FinalContent object or null`,
+			);
+		}
+
+		results.push({
+			externalId: readString(rawEntry, "externalId", `${entryPath}.externalId`),
+			name: readOptionalString(rawEntry.name, `${entryPath}.name`),
+			proposed: readFinalContent(rawProposed, `${entryPath}.proposed`),
+			reasons: readReasons(rawEntry.reasons),
+		});
+	}
+
+	const model =
+		typeof rawModel === "string" && rawModel.trim() ? rawModel.trim() : null;
+
+	return { model, results };
+}
+
+function isRecord(value: unknown): value is Record<PropertyKey, unknown> {
+	return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function readString(
+	record: Record<PropertyKey, unknown>,
+	key: string,
+	path: string,
+): string {
+	const value = record[key];
+	if (typeof value !== "string") {
+		throw new Error(`${path} must be a string`);
+	}
+	return value;
+}
+
+function readOptionalString(value: unknown, path: string): string | null {
+	if (value === undefined || value === null) {
+		return null;
+	}
+	if (typeof value !== "string") {
+		throw new Error(`${path} must be a string or null when present`);
+	}
+	return value;
+}
+
+function readReasons(value: unknown): string[] {
+	if (
+		!Array.isArray(value) ||
+		!value.every((reason): reason is string => typeof reason === "string")
+	) {
+		return ["from-report"];
+	}
+	return value.length > 0 ? value : ["from-report"];
+}
+
+function readFinalContent(value: unknown, path: string): FinalContent {
+	if (!isRecord(value)) {
+		throw new Error(`${path} must be an object`);
+	}
+	return {
+		description: readLocalizedText(value.description, `${path}.description`),
+		descriptionSections: readDescriptionSectionsOptional(
+			value.descriptionSections,
+			`${path}.descriptionSections`,
+		),
+		guide: readLocalizedText(value.guide, `${path}.guide`),
+		title: readLocalizedText(value.title, `${path}.title`),
+	};
+}
+
+function readDescriptionSectionsOptional(
+	value: unknown,
+	path: string,
+): LocalizedDescriptionSections | undefined {
+	if (value === undefined) {
+		return undefined;
+	}
+	if (!isRecord(value)) {
+		throw new Error(`${path} must be an object`);
+	}
+	const sections = emptyLocalizedDescriptionSections();
+	for (const { key } of LISTING_DESCRIPTION_SECTIONS) {
+		sections[key] = readLocalizedText(value[key], `${path}.${key}`);
+	}
+	return sections;
+}
+
+function readLocalizedText(value: unknown, path: string): LocalizedText {
+	if (!isRecord(value)) {
+		throw new Error(`${path} must be an object`);
+	}
+	return {
+		en: readString(value, "en", `${path}.en`),
+		es: readString(value, "es", `${path}.es`),
+		pt: readString(value, "pt", `${path}.pt`),
+	};
+}
+
 function contentChanged(
 	current: AccommodationListingProcessedContent | null,
 	next: FinalContent,
 ): boolean {
 	if (!current) return true;
-	return FINAL_FIELDS.some((field) =>
+	if (
+		FINAL_FIELDS.some((field) =>
+			LOCALES.some(
+				(locale) => (current[field]?.[locale] ?? "") !== next[field][locale],
+			),
+		)
+	) {
+		return true;
+	}
+
+	const currentSections = processedDescriptionSections(current);
+	if (!next.descriptionSections) {
+		return false;
+	}
+	return LISTING_DESCRIPTION_SECTIONS.some(({ key }) =>
 		LOCALES.some(
-			(locale) => (current[field]?.[locale] ?? "") !== next[field][locale],
+			(locale) =>
+				(currentSections[key][locale] ?? "") !==
+				next.descriptionSections[key][locale],
 		),
 	);
 }
@@ -594,6 +912,8 @@ async function applyResult(
 	const nextProcessed: AccommodationListingProcessedContent = {
 		amenities: row.processed?.amenities ?? [],
 		description: final.description,
+		descriptionSections:
+			final.descriptionSections ?? row.processed?.descriptionSections,
 		guide: final.guide,
 		model,
 		title: final.title,
@@ -635,6 +955,20 @@ function printDiff(
 			);
 		}
 	}
+	const beforeSections = processedDescriptionSections(row.processed);
+	const finalSections =
+		final.descriptionSections ?? processedDescriptionSections(row.processed);
+	for (const { key, label } of LISTING_DESCRIPTION_SECTIONS) {
+		const sourceText = source.descriptionSections[key];
+		if (!sourceText) continue;
+		console.log(`  descriptionSections.${key} (${label}):`);
+		console.log(`    source(${sourceText.length}c): ${preview(sourceText)}`);
+		for (const locale of LOCALES) {
+			console.log(
+				`    ${locale}: "${preview(beforeSections[key][locale])}"  ->  "${preview(finalSections[key][locale])}"`,
+			);
+		}
+	}
 	console.log(`  title (kept, not translated): ${preview(final.title.en)}`);
 }
 
@@ -650,6 +984,10 @@ function preview(value: string, max = 90): string {
 async function verifyEndpoint(apiKey: string, model: string): Promise<void> {
 	const request: ListingLocalizationRequest = {
 		description: "",
+		descriptionSections: {
+			access: "Guests have access to the whole apartment.",
+			space: "A bright studio with a compact kitchen and seating area.",
+		},
 		facts: {
 			amenities: ["Wifi", "Kitchen", "Air conditioning"],
 			bathrooms: 1,
@@ -676,6 +1014,116 @@ async function verifyEndpoint(apiKey: string, model: string): Promise<void> {
 	console.log(JSON.stringify(parsed, null, 2));
 }
 
+async function applyFromReport(
+	args: Args,
+	hostifyClient: HostifyClient | null,
+): Promise<void> {
+	if (!args.fromReport) {
+		throw new Error("--from-report path is required");
+	}
+
+	const report = readReport(args.fromReport);
+	const model = args.modelExplicit ? args.model : (report.model ?? args.model);
+	const effectiveArgs: Args = { ...args, model };
+
+	console.log(
+		`Loaded ${report.results.length} proposed listing(s) from ${args.fromReport}.`,
+	);
+
+	const externalIds = [
+		...new Set(report.results.map((result) => result.externalId)),
+	];
+	const rows = await loadListingRows(externalIds);
+	const rowsByExternalId = new Map(rows.map((row) => [row.externalId, row]));
+
+	const hostifyMode = args.pushHostify
+		? args.apply
+			? " + PUSH HOSTIFY"
+			: " + push-hostify (dry run: not pushed)"
+		: "";
+	console.log(
+		`Matched ${rows.length}/${externalIds.length} listing(s) in database. ` +
+			`Mode: ${args.apply ? "APPLY (writes)" : "DRY RUN (no writes)"} + --from-report${hostifyMode}.`,
+	);
+
+	const results: ProcessedListing[] = [];
+	for (const entry of report.results) {
+		const row = rowsByExternalId.get(entry.externalId);
+		if (!row) {
+			const message = "Listing not found in database";
+			console.error(`  x ${entry.externalId}: ${message}`);
+			results.push({
+				applied: false,
+				changed: false,
+				error: message,
+				externalId: entry.externalId,
+				hostifyError: null,
+				hostifyPushed: false,
+				name: entry.name,
+				proposed: entry.proposed,
+				reasons: entry.reasons,
+			});
+			continue;
+		}
+
+		try {
+			const final = entry.proposed;
+			const changed = contentChanged(row.processed, final);
+
+			printDiff(row, sourceOf(row), final);
+
+			let applied = false;
+			if (args.apply && changed) {
+				await applyResult(row, final, model);
+				applied = true;
+			}
+
+			const { hostifyError, hostifyPushed } = await maybePushHostify(
+				hostifyClient,
+				effectiveArgs,
+				row,
+				final,
+			);
+
+			results.push({
+				applied,
+				changed,
+				error: null,
+				externalId: row.externalId,
+				hostifyError,
+				hostifyPushed,
+				name: row.name,
+				proposed: final,
+				reasons: entry.reasons,
+			});
+		} catch (error) {
+			const message = error instanceof Error ? error.message : String(error);
+			console.error(`  x ${entry.externalId}: ${message}`);
+			results.push({
+				applied: false,
+				changed: false,
+				error: message,
+				externalId: entry.externalId,
+				hostifyError: null,
+				hostifyPushed: false,
+				name: row.name,
+				proposed: entry.proposed,
+				reasons: entry.reasons,
+			});
+		}
+	}
+
+	const applied = results.filter((result) => result.applied).length;
+	const changed = results.filter((result) => result.changed).length;
+	const failed = results.filter((result) => result.error).length;
+	const pushed = results.filter((result) => result.hostifyPushed).length;
+	console.log(
+		`\nDone. ${changed} changed, ${applied} written, ${pushed} pushed to Hostify, ${failed} failed.` +
+			(args.apply ? "" : " (dry run: nothing written; re-run with --apply)"),
+	);
+	writeReport(effectiveArgs, results);
+}
+
 // ---------------------------------------------------------------------------
 // Main
 // ---------------------------------------------------------------------------
@@ -691,39 +1139,24 @@ async function main(): Promise<void> {
 		return;
 	}
 
+	// The Hostify client is only needed when actually writing back.
+	const hostifyClient: HostifyClient | null =
+		args.pushHostify && args.apply ? createHostifyClientFromEnv() : null;
+
+	if (args.fromReport) {
+		await applyFromReport(args, hostifyClient);
+		return;
+	}
+
 	if (!args.noLlm && !apiKey) {
 		throw new Error(
 			"OPENAI_API_KEY is required (or pass --no-llm for selection only)",
 		);
 	}
 
-	// The Hostify client is only needed when actually writing back.
-	const hostifyClient: HostifyClient | null =
-		args.pushHostify && args.apply ? createHostifyClientFromEnv() : null;
-
-	const db = getDb();
-	const baseQuery = db
-		.select({
-			bathrooms: accommodationListing.bathrooms,
-			bedrooms: accommodationListing.bedrooms,
-			beds: accommodationListing.beds,
-			city: accommodationListing.city,
-			country: accommodationListing.country,
-			externalId: accommodationListing.externalId,
-			id: accommodationListing.id,
-			name: accommodationListing.name,
-			normalized: accommodationListing.normalized,
-			personCapacity: accommodationListing.personCapacity,
-			processed: accommodationListing.processed,
-			processingStatus: accommodationListing.processingStatus,
-			propertyType: accommodationListing.propertyType,
-			sourceHash: accommodationListing.sourceHash,
-		})
-		.from(accommodationListing);
-
-	const rows = (await (args.listings.length > 0
-		? baseQuery.where(inArray(accommodationListing.externalId, args.listings))
-		: baseQuery)) as ListingRow[];
+	const rows = await loadListingRows(
+		args.listings.length > 0 ? args.listings : undefined,
+	);
 
 	console.log(`Loaded ${rows.length} listing(s).`);
 
@@ -783,6 +1216,7 @@ async function main(): Promise<void> {
 					{ apiKey: apiKey as string, model: args.model },
 					{
 						description: source.description,
+						descriptionSections: source.descriptionSections,
 						exemplars,
 						facts,
 						guide: source.guide,
@@ -864,13 +1298,13 @@ async function maybePushHostify(
 
 	if (!args.apply || !client) {
 		console.log(
-			`    would push to Hostify: ${translations.map((t) => t.language).join(", ")}`,
+			`    would push to Hostify: ${translations.map((t) => t.lang).join(", ")}`,
 		);
 		return { hostifyError: null, hostifyPushed: false };
 	}
 
 	try {
-		await client.listings.createTranslations(row.externalId, { translations });
+		await client.listings.updateTranslations(row.externalId, translations);
 		return { hostifyError: null, hostifyPushed: true };
 	} catch (error) {
 		const message = error instanceof Error ? error.message : String(error);
@@ -890,6 +1324,7 @@ function writeReport(args: Args, results: ProcessedListing[]): void {
 		JSON.stringify(
 			{
 				applied: args.apply,
+				...(args.fromReport ? { fromReport: args.fromReport } : {}),
 				generatedAt: new Date().toISOString(),
 				model: args.model,
 				pushHostify: args.pushHostify,

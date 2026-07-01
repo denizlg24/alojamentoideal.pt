@@ -86,6 +86,7 @@ class OpenAIListingContentProcessor implements ListingContentProcessor {
 				{ apiKey: this.#apiKey, model: this.#model },
 				{
 					description: input.normalized.description ?? "",
+					descriptionSections: input.normalized.descriptionSections ?? {},
 					facts: input.facts,
 					guide: guideToText(input.normalized.guide) ?? "",
 					translations: input.normalized.translations,
@@ -100,6 +101,7 @@ class OpenAIListingContentProcessor implements ListingContentProcessor {
 				content: {
 					amenities: input.fallback.amenities,
 					description: prose.description,
+					descriptionSections: prose.descriptionSections,
 					guide: prose.guide,
 					model: this.#model,
 					title: input.fallback.title,
