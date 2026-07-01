@@ -8,16 +8,16 @@ export const GET = withApiRoute(
 	async (request: Request): Promise<Response> => {
 		const config = getAccommodationsConfig();
 
-		// if (!config.cronSecret) {
-		// 	return Response.json(
-		// 		{ error: "Cron secret is not configured" },
-		// 		{ status: 503 },
-		// 	);
-		// }
+		if (!config.cronSecret) {
+			return Response.json(
+				{ error: "Cron secret is not configured" },
+				{ status: 503 },
+			);
+		}
 
-		// if (!isAuthorizedCronRequest(request, config.cronSecret)) {
-		// 	return Response.json({ error: "Unauthorized" }, { status: 401 });
-		// }
+		if (!isAuthorizedCronRequest(request, config.cronSecret)) {
+			return Response.json({ error: "Unauthorized" }, { status: 401 });
+		}
 
 		const summary = await commerceService().reconcileConversations();
 		return Response.json({ data: summary, success: true });

@@ -2,6 +2,7 @@ import {
 	buildOrderConfirmationEmail as buildBrandedOrderConfirmationEmail,
 	type EmailMessage,
 	getEmailSender,
+	type OrderConfirmationEmailInput,
 } from "@workspace/auth";
 import {
 	generateMemberToken,
@@ -101,14 +102,18 @@ function formatPaymentMethod(method: OrderConfirmationFacts["paymentMethod"]): {
 	return { label: titleCasePaymentPart(method.type) || "Online payment" };
 }
 
-export function buildOrderConfirmationEmail(
+/**
+ * Maps the durable order facts to the transport-layer email input, formatting
+ * money, dates and the payment method for display. Shared by the confirmation
+ * and pending-notice emails so both render identical booking details.
+ */
+export function toOrderEmailInput(
 	facts: OrderConfirmationFacts,
 	manageUrl: string,
-): EmailMessage {
-	const amount = formatAmount(facts.amountPaidMinor, facts.currency);
+): OrderConfirmationEmailInput {
 	const paymentMethod = formatPaymentMethod(facts.paymentMethod);
 
-	return buildBrandedOrderConfirmationEmail({
+	return {
 		accommodationImage: facts.accommodationImage ?? FALLBACK_IMAGE_URL,
 		accommodationTitle: facts.accommodationTitle,
 		billingAddress: formatBillingAddress(facts.billingAddress),
@@ -122,8 +127,17 @@ export function buildOrderConfirmationEmail(
 		manageUrl,
 		orderNumber: facts.publicReference,
 		paymentMethod: paymentMethod.label,
-		totalPrice: amount,
-	});
+		totalPrice: formatAmount(facts.amountPaidMinor, facts.currency),
+	};
+}
+
+export function buildOrderConfirmationEmail(
+	facts: OrderConfirmationFacts,
+	manageUrl: string,
+): EmailMessage {
+	return buildBrandedOrderConfirmationEmail(
+		toOrderEmailInput(facts, manageUrl),
+	);
 }
 
 /**

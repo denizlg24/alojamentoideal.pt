@@ -540,6 +540,7 @@ type PersistHoldPlacedResult = "already_linked" | "conflict" | "persisted";
 interface ReconcileHandlers {
 	onCompensated?: (facts: OrderCompensationFacts) => Promise<void>;
 	onConfirmed?: (facts: OrderConfirmationFacts) => Promise<void>;
+	onPendingNotice?: (facts: OrderConfirmationFacts) => Promise<void>;
 }
 
 interface CartJoinedRow {
@@ -4832,7 +4833,10 @@ export class CommerceService {
 		// cron exactly like a transient confirm, but is deliberately kept out of the
 		// `sawPermanent` path above so it can never trigger a refund on a live hold.
 		if (sawTransient || sawNotSettled) {
-			return { outcome: "pending_retry" };
+			return {
+				outcome: "pending_retry",
+				pending: this.#buildConfirmationFacts(context),
+			};
 		}
 
 		const now = new Date();
@@ -5120,6 +5124,48 @@ export class CommerceService {
 			);
 	}
 
+	/**
+	 * Atomically claims the pending-notice email for an order, returning `true`
+	 * only to the caller that wins the claim. Reuses the finalization claim window
+	 * so a crash mid-send is retried by a later reconciler pass. Independent of the
+	 * `finalizationEmail*` slot because the notice precedes (not replaces) the
+	 * confirmation email for the same order.
+	 */
+	async claimPendingNoticeEmail(orderId: string): Promise<boolean> {
+		const now = new Date();
+		const claimExpiresAt = new Date(
+			now.getTime() + FINALIZATION_EMAIL_CLAIM_MS,
+		);
+		const [updated] = await this.#db
+			.update(orderTable)
+			.set({
+				pendingNoticeEmailNextAttemptAt: claimExpiresAt,
+				updatedAt: now,
+			})
+			.where(
+				and(
+					eq(orderTable.id, orderId),
+					isNull(orderTable.pendingNoticeEmailSentAt),
+					lte(orderTable.pendingNoticeEmailNextAttemptAt, now),
+				),
+			)
+			.returning({ id: orderTable.id });
+		return Boolean(updated);
+	}
+
+	async markPendingNoticeEmailSent(orderId: string): Promise<void> {
+		const now = new Date();
+		await this.#db
+			.update(orderTable)
+			.set({ pendingNoticeEmailSentAt: now, updatedAt: now })
+			.where(
+				and(
+					eq(orderTable.id, orderId),
+					isNull(orderTable.pendingNoticeEmailSentAt),
+				),
+			);
+	}
+
 	async claimFinalizationEmail(
 		orderId: string,
 		kind: OrderFinalizationEmailKind,
@@ -5230,6 +5276,7 @@ export class CommerceService {
 			now?: Date;
 			onCompensated?: (facts: OrderCompensationFacts) => Promise<void>;
 			onConfirmed?: (facts: OrderConfirmationFacts) => Promise<void>;
+			onPendingNotice?: (facts: OrderConfirmationFacts) => Promise<void>;
 		} = {},
 	): Promise<ReconcileReservationsSummary> {
 		const now = options.now ?? new Date();
@@ -5237,6 +5284,7 @@ export class CommerceService {
 		const handlers = {
 			onCompensated: options.onCompensated,
 			onConfirmed: options.onConfirmed,
+			onPendingNotice: options.onPendingNotice,
 		};
 		const summary: ReconcileReservationsSummary = {
 			cancelled: 0,
@@ -5565,6 +5613,37 @@ export class CommerceService {
 			await this.#dispatchCompensationEmail(result.compensation, handlers);
 		} else if (result.outcome === "pending_retry") {
 			summary.rescheduled += 1;
+			await this.#dispatchPendingNoticeEmail(result.pending, handlers);
+		}
+	}
+
+	/**
+	 * Sends the "payment received, finalizing your booking" courtesy email while an
+	 * order sits `pending` awaiting hold confirmation. Deduped by its own
+	 * `pendingNoticeEmail*` slot so a re-delivered webhook and this reconciler pass
+	 * never double-send. Best-effort: a send failure leaves the claim to lapse for
+	 * a later retry and never blocks the authoritative confirmation email.
+	 */
+	async #dispatchPendingNoticeEmail(
+		facts: OrderConfirmationFacts,
+		handlers: ReconcileHandlers,
+	): Promise<void> {
+		if (!facts.email || !handlers.onPendingNotice) {
+			return;
+		}
+		if (!(await this.claimPendingNoticeEmail(facts.orderId))) {
+			return;
+		}
+		try {
+			await handlers.onPendingNotice(facts);
+		} catch {
+			return;
+		}
+		try {
+			await this.markPendingNoticeEmailSent(facts.orderId);
+		} catch {
+			// The email went out; failing to record it only risks a rare duplicate
+			// on the next pass, which is acceptable for a courtesy notice.
 		}
 	}
 

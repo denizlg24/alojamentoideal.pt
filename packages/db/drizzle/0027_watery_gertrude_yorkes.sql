@@ -1,0 +1,2 @@
+ALTER TABLE "orders" ADD COLUMN "pending_notice_email_next_attempt_at" timestamp with time zone DEFAULT now() NOT NULL;--> statement-breakpoint
+ALTER TABLE "orders" ADD COLUMN "pending_notice_email_sent_at" timestamp with time zone;

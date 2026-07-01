@@ -24,6 +24,7 @@ import {
 	sendOrderAmountMismatchRefundEmail,
 	sendOrderCompensationEmail,
 } from "@/lib/email/order-could-not-confirm";
+import { sendOrderPendingConfirmationEmail } from "@/lib/email/order-pending";
 
 function stripeSessionLogId(sessionId: string): string {
 	return hashIdentifier(`stripe-identity:${sessionId}`);
@@ -204,13 +205,58 @@ async function finalizeReservation(
 				{ extra: { orderId, paymentIntentId }, level: "error" },
 			);
 			return;
-		default:
-			// pending_retry / not_applicable: the reconciler cron will finish it.
+		case "pending_retry":
+			// The hold has not settled yet: the reconciler cron will confirm it. Send
+			// the "payment received, finalizing" courtesy email so the guest is not
+			// left in silence while it settles.
+			await sendPendingNoticeEmail(service, result.pending);
 			logger.info("Reservation confirmation deferred to reconciler", {
 				orderId,
 				outcome: result.outcome,
 			});
 			return;
+		default:
+			// not_applicable: nothing to finalize (already settled, or never paid).
+			logger.info("Reservation confirmation deferred to reconciler", {
+				orderId,
+				outcome: result.outcome,
+			});
+			return;
+	}
+}
+
+/**
+ * Sends the pending-confirmation courtesy email, deduped via the order's
+ * `pendingNoticeEmail*` slot so a re-delivered webhook (which re-runs this path
+ * while the order is still pending) never double-sends. Best-effort: a failure is
+ * logged and left for the reconciler to retry, never surfaced to Stripe.
+ */
+async function sendPendingNoticeEmail(
+	service: ReturnType<typeof commerceService>,
+	facts: OrderConfirmationFacts,
+): Promise<void> {
+	if (!facts.email) {
+		return;
+	}
+	if (!(await service.claimPendingNoticeEmail(facts.orderId))) {
+		return;
+	}
+	try {
+		await sendOrderPendingConfirmationEmail(facts);
+	} catch (error) {
+		logger.warn("Failed to send pending-confirmation email", {
+			error: error instanceof Error ? error.message : String(error),
+			publicReference: facts.publicReference,
+		});
+		return;
+	}
+	try {
+		await service.markPendingNoticeEmailSent(facts.orderId);
+	} catch (error) {
+		logger.warn("Pending-confirmation email sent, but marking it sent failed", {
+			error: error instanceof Error ? error.message : String(error),
+			publicReference: facts.publicReference,
+		});
 	}
 }
 

@@ -112,6 +112,8 @@ interface EmailTemplates {
 	passwordResetText?: string;
 	orderConfirmationHtml?: string;
 	orderConfirmationText?: string;
+	orderPendingConfirmationHtml?: string;
+	orderPendingConfirmationText?: string;
 	orderCouldNotConfirmHtml?: string;
 	orderCouldNotConfirmText?: string;
 	orderAmountMismatchRefundHtml?: string;
@@ -288,6 +290,88 @@ export function buildOrderConfirmationEmail(
 		subject: `Booking confirmed at ${input.accommodationTitle}`,
 		text: `Booking confirmed at ${input.accommodationTitle}!\n\nReservation code: ${input.orderNumber}\n\nCheck-in: ${input.checkIn}\nCheck-out: ${input.checkOut}\nGuests: ${input.guests}\n\nTotal: ${input.totalPrice}\nPayment: ${input.paymentMethod}${cardInfo}\n\nManage: ${input.manageUrl}`,
 	};
+}
+
+/**
+ * Builds the "payment received, we're finalizing your booking" email sent while
+ * an order sits paid but not yet confirmed (the provider hold has not settled).
+ * Carries the same booking details as the confirmation email plus a link to the
+ * order page so the guest can track status. Text-first today; the branded HTML
+ * template can drop in later via `orderPendingConfirmationHtml` without touching
+ * any call site.
+ */
+export function buildOrderPendingConfirmationEmail(
+	input: OrderConfirmationEmailInput,
+): EmailMessage {
+	const safeTitleForSubject = safeSubjectPart(input.accommodationTitle);
+	const cardInfo = input.cardLastFour ? ` ending in ${input.cardLastFour}` : "";
+	const subject = `Payment received for ${safeTitleForSubject}: finalizing your booking`;
+
+	if (TEMPLATES.orderPendingConfirmationHtml) {
+		const html = applyPlaceholders(TEMPLATES.orderPendingConfirmationHtml, {
+			APP_NAME,
+			ORDER_NUMBER: escapeHtml(input.orderNumber),
+			ACCOMMODATION_TITLE: escapeHtml(input.accommodationTitle),
+			ACCOMMODATION_IMAGE: escapeHtml(input.accommodationImage),
+			CHECK_IN: escapeHtml(input.checkIn),
+			CHECK_OUT: escapeHtml(input.checkOut),
+			GUESTS: escapeHtml(input.guests),
+			TOTAL_PRICE: escapeHtml(input.totalPrice),
+			PAYMENT_METHOD: escapeHtml(input.paymentMethod),
+			CARD_LAST_FOUR: escapeHtml(cardInfo),
+			CONTACT_EMAIL: escapeHtml(input.contactEmail),
+			CONTACT_PHONE: escapeHtml(input.contactPhone),
+			BILLING_ADDRESS: escapeHtml(input.billingAddress),
+			MANAGE_URL: escapeHtml(input.manageUrl),
+			CURRENT_YEAR,
+		});
+		const text = TEMPLATES.orderPendingConfirmationText
+			? applyPlaceholders(TEMPLATES.orderPendingConfirmationText, {
+					APP_NAME,
+					ORDER_NUMBER: input.orderNumber,
+					ACCOMMODATION_TITLE: input.accommodationTitle,
+					ACCOMMODATION_IMAGE: input.accommodationImage,
+					CHECK_IN: input.checkIn,
+					CHECK_OUT: input.checkOut,
+					GUESTS: input.guests,
+					TOTAL_PRICE: input.totalPrice,
+					PAYMENT_METHOD: input.paymentMethod,
+					CARD_LAST_FOUR: cardInfo,
+					CONTACT_EMAIL: input.contactEmail,
+					CONTACT_PHONE: input.contactPhone,
+					BILLING_ADDRESS: input.billingAddress,
+					MANAGE_URL: input.manageUrl,
+					CURRENT_YEAR,
+				})
+			: orderPendingConfirmationFallbackText(input, cardInfo);
+		return { html, subject, text };
+	}
+
+	const text = orderPendingConfirmationFallbackText(input, cardInfo);
+	return { html: plainCompensationHtml(text), subject, text };
+}
+
+function orderPendingConfirmationFallbackText(
+	input: OrderConfirmationEmailInput,
+	cardInfo: string,
+): string {
+	return [
+		`We've received your payment for ${input.accommodationTitle}.`,
+		"",
+		`Reservation code: ${input.orderNumber}`,
+		"",
+		"We're finalizing your booking now and will email you a full confirmation as soon as it's secured. You can track its status any time here:",
+		input.manageUrl,
+		"",
+		`Check-in: ${input.checkIn}`,
+		`Check-out: ${input.checkOut}`,
+		`Guests: ${input.guests}`,
+		"",
+		`Total paid: ${input.totalPrice}`,
+		`Payment: ${input.paymentMethod}${cardInfo}`,
+		"",
+		`The ${APP_NAME} team`,
+	].join("\n");
 }
 
 export interface OrderCompensationEmailInput {

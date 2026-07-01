@@ -880,6 +880,14 @@ export const order = pgTable(
 		finalizationEmailSentAt: timestampWithTimezone(
 			"finalization_email_sent_at",
 		),
+		pendingNoticeEmailNextAttemptAt: timestampWithTimezone(
+			"pending_notice_email_next_attempt_at",
+		)
+			.notNull()
+			.defaultNow(),
+		pendingNoticeEmailSentAt: timestampWithTimezone(
+			"pending_notice_email_sent_at",
+		),
 		publicReference: text("public_reference").notNull(),
 		status: text("status").notNull().default("draft"),
 		refundCompletedAt: timestampWithTimezone("refund_completed_at"),

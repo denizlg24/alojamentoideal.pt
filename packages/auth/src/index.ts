@@ -10,6 +10,7 @@ export {
 	buildOrderConfirmationEmail,
 	buildOrderCouldNotConfirmEmail,
 	buildOrderInviteEmail,
+	buildOrderPendingConfirmationEmail,
 	type EmailMessage,
 	type EmailSender,
 	escapeHtml,

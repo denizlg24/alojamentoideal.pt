@@ -229,14 +229,15 @@ export interface OrderCompensationFacts {
  * confirm failed permanently and the order was refunded (facts for the customer
  * email); `manual_recovery` means auto-refund is disabled and the order is
  * flagged for an operator; `pending_retry` means a transient failure left the
- * order `pending` for the reconciler cron; `not_applicable` means the order was
- * not in a confirmable state (e.g. already confirmed, or never paid).
+ * order `pending` for the reconciler cron and carries the booking facts for the
+ * "payment received, finalizing" courtesy email; `not_applicable` means the
+ * order was not in a confirmable state (e.g. already confirmed, or never paid).
  */
 export type ConfirmOrderReservationsResult =
 	| { confirmation: OrderConfirmationFacts; outcome: "confirmed" }
 	| { compensation: OrderCompensationFacts; outcome: "compensated" }
 	| { outcome: "manual_recovery" }
-	| { outcome: "pending_retry" }
+	| { outcome: "pending_retry"; pending: OrderConfirmationFacts }
 	| { outcome: "not_applicable" };
 
 /**
