@@ -27,7 +27,7 @@ function isConfirmationDelayed(detail: OrderDetail): boolean {
 function statusBody(detail: OrderDetail): ReactNode {
 	switch (detail.provisioningSubState) {
 		case "confirmed":
-			return "Your stay is confirmed. We've emailed your booking details and you can manage everything here.";
+			return "Your booking is confirmed. We've emailed your booking details and you can manage everything here.";
 		case "paid-confirming":
 			if (isConfirmationDelayed(detail)) {
 				return (
@@ -234,7 +234,9 @@ export function OrderOverview({ detail }: { detail: OrderDetail }) {
 			{body && <p className="text-sm leading-relaxed">{body}</p>}
 
 			<section className="flex flex-col gap-2">
-				<h2 className="font-heading font-medium text-base">Your stay</h2>
+				<h2 className="font-heading font-medium text-base">
+					{detail.items.length === 1 ? "Your stay" : "Your stays"}
+				</h2>
 				<dl className="divide-y divide-border/60">
 					{detail.items.map((item) => (
 						<div className="py-2 first:pt-0" key={item.id}>

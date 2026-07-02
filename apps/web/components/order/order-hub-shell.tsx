@@ -21,6 +21,27 @@ function staySummary(
 }
 
 /**
+ * Overall date envelope for a multi-stay order: earliest check-in to latest
+ * checkout. Individual stay dates live in the overview/stay sections.
+ */
+function multiStaySummary(items: OrderDetail["items"]): string | null {
+	const checkIns = items
+		.map((item) => item.checkIn)
+		.filter((value): value is string => value !== null)
+		.sort();
+	const checkOuts = items
+		.map((item) => item.checkOut)
+		.filter((value): value is string => value !== null)
+		.sort();
+	const first = checkIns[0];
+	const last = checkOuts.at(-1);
+	if (!first || !last) {
+		return null;
+	}
+	return `${items.length} homes · ${formatStayRangeLong(first, last)}`;
+}
+
+/**
  * Chrome shared by every order-hub section: the site header/footer, the booking
  * heading (property, dates, status), and the nested-route section nav. Section
  * pages render their own content as `children`.
@@ -33,8 +54,13 @@ export function OrderHubShell({
 	children: ReactNode;
 }) {
 	const item = detail.items[0];
-	const title = item?.title ?? "Your booking";
-	const summary = staySummary(item);
+	const multiStay = detail.items.length > 1;
+	const title = multiStay
+		? `Your ${detail.items.length} stays`
+		: (item?.title ?? "Your booking");
+	const summary = multiStay
+		? multiStaySummary(detail.items)
+		: staySummary(item);
 
 	return (
 		<div className="flex min-h-screen flex-col">
