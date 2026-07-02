@@ -3,6 +3,7 @@ export type CommerceErrorCode =
 	| "cart_changed"
 	| "cart_converted"
 	| "cart_expired"
+	| "cart_item_overlap"
 	| "cart_not_found"
 	| "cart_not_mutable"
 	| "conversation_message_not_found"

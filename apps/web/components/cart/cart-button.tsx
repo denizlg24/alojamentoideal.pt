@@ -59,11 +59,12 @@ export function CartButton({ opaque }: { opaque: boolean }) {
 		>
 			<Link
 				aria-label={`Cart, ${count} ${count === 1 ? "item" : "items"}`}
+				data-cart-button-target
 				href="/cart"
 			>
 				<ShoppingCart className="size-5" />
 				{count > 0 && (
-					<span className="-top-0.5 -right-0.5 absolute flex size-4 items-center justify-center rounded-full bg-primary font-semibold text-[10px] text-primary-foreground leading-none">
+					<span className="absolute -top-0.5 -right-0.5 flex size-4 items-center justify-center rounded-full bg-primary font-semibold text-[10px] text-primary-foreground leading-none">
 						{count > 9 ? "9+" : count}
 					</span>
 				)}

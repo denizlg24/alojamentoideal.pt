@@ -43,6 +43,8 @@ const FRIENDLY_MESSAGES: Record<string, string> = {
 	cart_converted:
 		"We are preparing your payment step. Please review your details to finish.",
 	cart_expired: "This booking session expired. Please start again from Homes.",
+	cart_item_overlap:
+		"This stay overlaps dates already in your cart. Please review your cart.",
 	cart_not_found: "We could not find this booking session.",
 	cart_not_mutable: "This booking can no longer be changed.",
 	dates_unavailable:

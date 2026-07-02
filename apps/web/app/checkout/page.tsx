@@ -1,5 +1,7 @@
 import type { Metadata } from "next";
-import { CheckoutController } from "@/components/checkout/checkout-controller";
+import { Suspense } from "react";
+import { CheckoutCartController } from "@/components/checkout/checkout-cart-controller";
+import { CheckoutFallback } from "@/components/checkout/checkout-fallback";
 import { CheckoutHeader } from "@/components/checkout/checkout-header";
 import { buildPrivatePageMetadata } from "@/lib/site/metadata";
 
@@ -19,7 +21,9 @@ export default function CheckoutPage() {
 		<div className="flex min-h-screen flex-col bg-muted/20">
 			<CheckoutHeader backHref="/cart" />
 			<main className="flex-1">
-				<CheckoutController seed={null} />
+				<Suspense fallback={<CheckoutFallback />}>
+					<CheckoutCartController />
+				</Suspense>
 			</main>
 		</div>
 	);

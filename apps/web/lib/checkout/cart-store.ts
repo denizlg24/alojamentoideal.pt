@@ -31,12 +31,16 @@ export interface CartChangedDetail {
 	itemCount: number;
 }
 
+interface LoadStoredCartOptions {
+	notify?: boolean;
+}
+
 function hasWindow(): boolean {
 	return typeof window !== "undefined";
 }
 
 export function activeItemCount(cart: CartDto | null): number {
-	if (!cart || cart.status !== "draft") {
+	if (cart?.status !== "draft") {
 		return 0;
 	}
 	return cart.items.filter((item) => item.status === "active").length;
@@ -87,6 +91,10 @@ export function readCachedItemCount(): number {
 	return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
 }
 
+export function readCartRouteKey(): string {
+	return `${readStoredCartId() ?? "empty"}:${readCachedItemCount()}`;
+}
+
 function writeCachedItemCount(count: number): void {
 	if (!hasWindow()) {
 		return;
@@ -121,18 +129,23 @@ export function notifyCartChanged(cart: CartDto | null): void {
  * cart clears the stored id and reports an empty cart rather than throwing:
  * every caller treats that as "start fresh".
  */
-export async function loadStoredCart(): Promise<CartDto | null> {
+export async function loadStoredCart(
+	options: LoadStoredCartOptions = {},
+): Promise<CartDto | null> {
 	const storedId = readStoredCartId();
 	if (!storedId) {
 		return null;
 	}
+	const shouldNotify = options.notify ?? true;
 	try {
 		const { cart } = await api.getCart(storedId);
 		if (cart.status !== "draft") {
 			clearStoredCart();
 			return null;
 		}
-		notifyCartChanged(cart);
+		if (shouldNotify) {
+			notifyCartChanged(cart);
+		}
 		return cart;
 	} catch {
 		clearStoredCart();

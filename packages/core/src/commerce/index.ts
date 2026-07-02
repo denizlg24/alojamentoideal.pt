@@ -11,5 +11,6 @@ export * from "./reservations";
 export * from "./schemas";
 export * from "./service";
 export * from "./state";
+export * from "./stay-overlap";
 export * from "./totals";
 export * from "./types";

@@ -133,6 +133,7 @@ import type {
 	UpdateCartItemBody,
 } from "./schemas";
 import { assertMutableCart, toCartStatus } from "./state";
+import { findOverlappingStay } from "./stay-overlap";
 import { computeDiscountMinor, sumCartTotals } from "./totals";
 import type {
 	CartDto,
@@ -3894,6 +3895,10 @@ export class CommerceService {
 			: null;
 		const itemId = existing?.id ?? crypto.randomUUID();
 
+		await this.#assertNoOverlappingCartStay(tx, cartId, snapshot, {
+			excludeItemId: itemId,
+		});
+
 		if (existing) {
 			await tx
 				.update(cartItemTable)
@@ -3941,6 +3946,10 @@ export class CommerceService {
 		if (item?.status !== "active") {
 			throw new CommerceError("item_not_found", "Cart item not found.", 404);
 		}
+
+		await this.#assertNoOverlappingCartStay(tx, cartId, snapshot, {
+			excludeItemId: itemId,
+		});
 
 		await this.#insertQuoteSnapshot(tx, snapshot);
 		await tx
@@ -4607,6 +4616,53 @@ export class CommerceService {
 			.limit(1);
 
 		return row ?? null;
+	}
+
+	async #assertNoOverlappingCartStay(
+		tx: Transaction,
+		cartId: string,
+		stay: NormalizedAccommodationQuoteSnapshot,
+		options: { excludeItemId?: string } = {},
+	): Promise<void> {
+		const rows = await tx
+			.select({
+				checkIn: accommodationQuoteSnapshotTable.checkIn,
+				checkOut: accommodationQuoteSnapshotTable.checkOut,
+				itemId: cartItemTable.id,
+				listingId: accommodationQuoteSnapshotTable.listingExternalId,
+			})
+			.from(cartItemTable)
+			.innerJoin(
+				accommodationQuoteSnapshotTable,
+				eq(cartItemTable.quoteSnapshotId, accommodationQuoteSnapshotTable.id),
+			)
+			.where(
+				and(
+					eq(cartItemTable.cartId, cartId),
+					eq(cartItemTable.status, "active"),
+					eq(
+						accommodationQuoteSnapshotTable.listingExternalId,
+						stay.listingExternalId,
+					),
+				),
+			);
+
+		const overlapping = findOverlappingStay(
+			rows.filter((row) => row.itemId !== options.excludeItemId),
+			{
+				checkIn: stay.checkIn,
+				checkOut: stay.checkOut,
+				listingId: stay.listingExternalId,
+			},
+		);
+
+		if (overlapping) {
+			throw new CommerceError(
+				"cart_item_overlap",
+				"This stay overlaps dates already in your cart.",
+				409,
+			);
+		}
 	}
 
 	async #nextCartPosition(tx: Transaction, cartId: string): Promise<number> {

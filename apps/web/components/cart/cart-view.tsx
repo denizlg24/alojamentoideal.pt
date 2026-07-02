@@ -73,7 +73,7 @@ function EmptyCart() {
 	);
 }
 
-function CartLoading() {
+export function CartLoading() {
 	return (
 		<div className="grid w-full grid-cols-1 gap-8 lg:grid-cols-[minmax(0,1fr)_minmax(320px,380px)]">
 			<div className="flex flex-col gap-4">

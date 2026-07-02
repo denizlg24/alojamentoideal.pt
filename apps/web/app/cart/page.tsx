@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { CartView } from "@/components/cart/cart-view";
+import { CartRouteView } from "@/components/cart/cart-route-view";
 import { SiteFooter } from "@/components/home/site-footer";
 import { SiteHeader } from "@/components/home/site-header";
 import { buildPrivatePageMetadata } from "@/lib/site/metadata";
@@ -19,7 +19,7 @@ export default function CartPage() {
 					<h1 className="font-heading font-semibold text-2xl leading-tight">
 						Your cart
 					</h1>
-					<CartView />
+					<CartRouteView />
 				</div>
 			</main>
 			<SiteFooter />
