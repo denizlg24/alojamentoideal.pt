@@ -4,6 +4,7 @@ import { commerceService } from "@/lib/api/commerce";
 import { withApiRoute } from "@/lib/api/route";
 import { sendOrderConfirmationEmail } from "@/lib/email/order-confirmation";
 import { sendOrderCompensationEmail } from "@/lib/email/order-could-not-confirm";
+import { sendOrderPendingConfirmationEmail } from "@/lib/email/order-pending";
 
 /**
  * Reconciler cron for the reservation saga (durability authority; the webhook is
@@ -32,6 +33,7 @@ export const GET = withApiRoute(
 		const summary = await commerceService().reconcileReservations({
 			onCompensated: sendOrderCompensationEmail,
 			onConfirmed: sendOrderConfirmationEmail,
+			onPendingNotice: sendOrderPendingConfirmationEmail,
 		});
 
 		return Response.json({ data: summary, success: true });

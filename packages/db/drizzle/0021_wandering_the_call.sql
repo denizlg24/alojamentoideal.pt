@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX "order_members_order_user_uidx" ON "order_members" USING btree ("order_id","user_id") WHERE "order_members"."user_id" is not null and "order_members"."status" <> 'revoked';

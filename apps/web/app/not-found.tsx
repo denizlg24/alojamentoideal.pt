@@ -9,6 +9,8 @@ import illustration from "@/public/404_illustration.svg";
 
 export const metadata: Metadata = {
 	title: "Page not found",
+	description:
+		"The page could not be found. Explore Alojamento Ideal homes along Portugal's North Coast instead.",
 	robots: { follow: true, index: false },
 };
 

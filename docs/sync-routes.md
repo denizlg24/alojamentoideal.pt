@@ -9,11 +9,17 @@ All routes use:
 
 - Method: `GET`
 - Auth header: `Authorization: Bearer $CRON_SECRET`
-- Secret source: `HOSTIFY_SYNC_CRON_SECRET` when set, otherwise `CRON_SECRET`
+- Alternate auth header: `x-cron-secret: $CRON_SECRET`
+- Secret source in code: `HOSTIFY_SYNC_CRON_SECRET` when set, otherwise
+  `CRON_SECRET`
 - Rate limit bucket: `cron`
+- Success response shape: `{ "success": true, "data": ... }`
 
 If the secret is missing, the route returns `503`. If the bearer token is
 missing or invalid, it returns `401`.
+
+Do not wire these with Vercel Cron Jobs for this project. Register them in the
+external scheduler that already calls the Hostify syncs.
 
 ## Routes to ping
 
@@ -22,7 +28,8 @@ missing or invalid, it returns `401`.
 | `/api/cron/hostify/listings` | Pulls Hostify listing changes into the local listing cache. | Every 15 minutes, or at least hourly. | Revalidates catalog list pages and each changed listing detail tag. |
 | `/api/cron/hostify/reviews` | Pulls Hostify review changes and rating aggregates. | Every 30 minutes to 1 hour. | Revalidates catalog list pages and each listing whose review aggregate changed. |
 | `/api/cron/hostify/pricing` | Advances the rolling nightly advisory price cache by one listing batch. | Every 15 minutes, or at least hourly. | Revalidates advisory pricing used by homes list filters and cards when nights changed. |
-| `/api/cron/commerce/reservations` | Confirms paid provider holds, refunds failed confirmations, retries finalization emails, and releases abandoned checkout holds. | Every 5 minutes. This is a release blocker for reserve-first checkout. | Do not wire this with Vercel Cron Jobs. Register it in the same external scheduler as the Hostify crons with `Authorization: Bearer $CRON_SECRET`. |
+| `/api/cron/commerce/reservations` | Confirms paid provider holds, sends pending-confirmation nudges, retries finalization emails, compensates/refunds failed confirmations, and releases abandoned checkout holds. | Every 5 minutes. This is a release blocker for reserve-first checkout. | Sends confirmation, pending and compensation emails through the route's email handlers. Keep this on the same external scheduler as the Hostify crons. |
+| `/api/cron/commerce/conversations` | Provisions order conversations for confirmed Hostify bookings and imports inbox messages into the local projection. | Every 1 to 5 minutes. | Publishes realtime updates when Pusher is configured; otherwise keeps the polling read model fresh. Keep this on the same external scheduler as the Hostify crons. |
 
 ## Example pings
 
@@ -42,12 +49,20 @@ curl -fsS \
 curl -fsS \
   -H "Authorization: Bearer $CRON_SECRET" \
   https://alojamentoideal.pt/api/cron/commerce/reservations
+
+curl -fsS \
+  -H "Authorization: Bearer $CRON_SECRET" \
+  https://alojamentoideal.pt/api/cron/commerce/conversations
 ```
 
 ## Notes
 
 - Listing, review and pricing syncs are incremental and use provider sync state
   in the database.
+- Commerce reservation reconciliation is the durability authority for reserve-first
+  checkout. The Stripe webhook is only the low-latency path.
+- Commerce conversation reconciliation is the durability authority for Hostify
+  inbox projection until a Hostify message webhook contract is confirmed.
 - Review and pricing syncs intentionally skip while the listing sync state is not
   `complete`. After a fresh database reset, keep pinging `/api/cron/hostify/listings`
   until it completes before expecting review or pricing data to fill in.

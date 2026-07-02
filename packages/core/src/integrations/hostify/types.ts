@@ -220,6 +220,20 @@ export interface HostifyReceiveReplyImageInput {
 	thread_id: HostifyId;
 }
 
+export interface HostifyApproveReservationInput {
+	reservation_id: HostifyId;
+}
+
+export interface HostifyDeclineReservationInput {
+	reservation_id: HostifyId;
+	reason_code?:
+		| "dates_not_available"
+		| "not_a_good_fit"
+		| "waiting_for_better_reservation"
+		| "not_comfortable";
+	message?: string;
+}
+
 export interface HostifyInquiryActionInput {
 	thread_id: HostifyId;
 }
@@ -331,15 +345,21 @@ export interface HostifySortPhotosInput {
 }
 
 export interface HostifyTranslationInput {
-	description?: string;
-	language: string;
+	access?: string;
+	directions?: string;
+	house_manual?: string;
+	house_rules?: string;
+	interaction?: string;
+	lang: string;
 	name?: string;
+	neighborhood_overview?: string;
 	notes?: string;
+	space?: string;
+	summary?: string;
+	transit?: string;
 }
 
-export interface HostifyTranslationsInput {
-	translations: readonly HostifyTranslationInput[];
-}
+export type HostifyTranslationsInput = readonly HostifyTranslationInput[];
 
 export interface HostifyDeleteTranslationsInput {
 	languages: readonly string[];
@@ -388,9 +408,9 @@ export interface HostifyProcessAmenitiesInput {
 	listing_id: HostifyId;
 }
 
-export interface HostifyProcessTranslationsInput
-	extends HostifyTranslationsInput {
+export interface HostifyProcessTranslationsInput {
 	listing_id: HostifyId;
+	translations: readonly HostifyTranslationInput[];
 }
 
 export interface HostifyProcessBookingRestrictionsInput {

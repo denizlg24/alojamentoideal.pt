@@ -4,6 +4,7 @@ export {
 	StripeConfigurationError,
 } from "./client";
 export {
+	createGuestIdentityVerificationSession,
 	createIdentityVerificationSession,
 	type IdentityVerificationResetOutcome,
 	type IdentityVerificationSnapshot,
@@ -16,6 +17,7 @@ export {
 	type PaymentIntentParams,
 	type PaymentIntentSnapshot,
 	retrievePaymentIntentSnapshot,
+	type StripePaymentMethodSummary,
 } from "./payment-intents";
 export {
 	createRefund,

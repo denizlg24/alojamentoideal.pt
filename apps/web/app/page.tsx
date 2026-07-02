@@ -7,6 +7,20 @@ import { HeroVideo } from "@/components/home/hero-video";
 import { SiteFooter } from "@/components/home/site-footer";
 import { SiteHeader } from "@/components/home/site-header";
 import { StaySearch } from "@/components/search/stay-search";
+import { buildPageMetadata } from "@/lib/site/metadata";
+
+export const metadata = buildPageMetadata({
+	title: "Find Your Ideal Stay",
+	description:
+		"Book cozy, modern Alojamento Ideal apartments in Porto, Póvoa de Varzim, Leça da Palmeira and Canidelo.",
+	path: "/",
+	keywords: [
+		"Porto apartments",
+		"Póvoa de Varzim stays",
+		"Leça da Palmeira apartments",
+		"Canidelo stays",
+	],
+});
 
 export default function Page() {
 	return (

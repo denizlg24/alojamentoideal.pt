@@ -1,3 +1,4 @@
+import { createHash, randomUUID } from "node:crypto";
 import type Stripe from "stripe";
 import type { VerifiedIdentityDocumentFields } from "../../account/types";
 
@@ -14,6 +15,46 @@ export interface IdentityVerificationSnapshot {
 	status: Stripe.Identity.VerificationSession["status"];
 }
 
+const STRIPE_IDENTITY_IDEMPOTENCY_PREFIX = "ai_idv";
+
+function digestIdempotencyParts(parts: readonly string[]): string {
+	const hash = createHash("sha256");
+	for (const part of parts) {
+		hash.update(part);
+		hash.update("\0");
+	}
+	return hash.digest("base64url");
+}
+
+function attemptIdempotencyToken(token: string | undefined): string {
+	const normalized = token?.trim();
+	return normalized ? normalized : randomUUID();
+}
+
+function accountIdentityIdempotencyKey(params: {
+	attemptToken?: string;
+	userId: string;
+}): string {
+	return `${STRIPE_IDENTITY_IDEMPOTENCY_PREFIX}:account:${digestIdempotencyParts(
+		["account", params.userId, attemptIdempotencyToken(params.attemptToken)],
+	)}`;
+}
+
+function guestIdentityIdempotencyKey(params: {
+	attemptToken?: string;
+	bookingGuestId: string;
+	orderId: string;
+	providerBookingId: string;
+}): string {
+	return `${STRIPE_IDENTITY_IDEMPOTENCY_PREFIX}:guest:${digestIdempotencyParts([
+		"guest",
+		params.bookingGuestId,
+		params.orderId,
+		params.providerBookingId,
+		attemptIdempotencyToken(params.attemptToken),
+	])}`;
+}
+
 function snapshot(
 	session: Stripe.Identity.VerificationSession,
 ): IdentityVerificationSnapshot {
@@ -26,22 +67,68 @@ function snapshot(
 }
 
 /**
- * Creates a document VerificationSession for a guest. `metadata.userId` is the
+ * Creates a document VerificationSession for a signed-in user. `metadata.userId` is the
  * link the webhook reads to attribute the outcome back to the account identity
- * document row. A matching selfie is required so a stolen document alone cannot
- * verify.
+ * document row.
  */
 export async function createIdentityVerificationSession(
 	stripe: Stripe,
-	params: { userId: string; returnUrl?: string },
+	params: { idempotencyKey?: string; userId: string; returnUrl?: string },
 ): Promise<IdentityVerificationSnapshot> {
-	const session = await stripe.identity.verificationSessions.create({
-		type: "document",
-		client_reference_id: params.userId,
-		metadata: { userId: params.userId },
-		options: { document: { require_matching_selfie: true } },
-		...(params.returnUrl ? { return_url: params.returnUrl } : {}),
-	});
+	const session = await stripe.identity.verificationSessions.create(
+		{
+			type: "document",
+			client_reference_id: params.userId,
+			metadata: { userId: params.userId },
+			options: { document: { require_matching_selfie: false } },
+			...(params.returnUrl ? { return_url: params.returnUrl } : {}),
+		},
+		{
+			idempotencyKey: accountIdentityIdempotencyKey({
+				attemptToken: params.idempotencyKey,
+				userId: params.userId,
+			}),
+		},
+	);
+	return snapshot(session);
+}
+
+/**
+ * Creates a document VerificationSession for an order guest. This is intentionally
+ * attributed to `bookingGuest.id`, not a signed-in account, so magic-link order
+ * access can complete verification without requiring registration.
+ */
+export async function createGuestIdentityVerificationSession(
+	stripe: Stripe,
+	params: {
+		bookingGuestId: string;
+		idempotencyKey?: string;
+		orderId: string;
+		providerBookingId: string;
+		returnUrl?: string;
+	},
+): Promise<IdentityVerificationSnapshot> {
+	const session = await stripe.identity.verificationSessions.create(
+		{
+			type: "document",
+			client_reference_id: params.bookingGuestId,
+			metadata: {
+				bookingGuestId: params.bookingGuestId,
+				orderId: params.orderId,
+				providerBookingId: params.providerBookingId,
+			},
+			options: { document: { require_matching_selfie: false } },
+			...(params.returnUrl ? { return_url: params.returnUrl } : {}),
+		},
+		{
+			idempotencyKey: guestIdentityIdempotencyKey({
+				attemptToken: params.idempotencyKey,
+				bookingGuestId: params.bookingGuestId,
+				orderId: params.orderId,
+				providerBookingId: params.providerBookingId,
+			}),
+		},
+	);
 	return snapshot(session);
 }
 

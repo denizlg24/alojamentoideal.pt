@@ -425,6 +425,37 @@ targeted `biome check` on the files touched for this backend pass. Frontend
 8. **Compensation refunds `amountPaidMinor`** from Postgres (our source of truth),
    not the Hostify transaction amount the legacy read back.
 
+## Confirm-settle hardening (2026-06-30)
+
+Hostify can return `accepted` on the confirm PUT while silently leaving a
+reservation `pending` (observed for accepts far in the future). The old
+`confirmHold` trusted the PUT echo and reported `ok`, so the order was marked
+`confirmed` and the confirmation email fired while the real hold stayed `pending`
+(and could later auto-deny) - a silent false confirm. Fixed:
+
+- **Gateway `confirmHold` re-reads after the PUT and classifies against the live
+  status, never the echo** (`reservations.ts`): `accepted` → `ok`;
+  `denied`/`cancelled_*`/`no_show` → `permanent` (dead hold → compensation, the
+  correct refund case); anything still `pending` → a new **`not_settled`** result.
+  The same re-read runs in the `catch` path, so a PUT that throws but whose hold
+  is alive returns `not_settled`, never a `transient` that could escalate to a
+  refund. A PII-safe `logger.warn` fires on every PUT-said-accepted-but-still-pending
+  read (the far-future diagnostic). `not_settled` is a confirm-only member of a new
+  `MutateHoldResult`; cancel keeps the narrower `SettledMutateResult`.
+- **Service never refunds a `not_settled` hold** (`service.ts`):
+  `#recordConfirmNotSettled` keeps the booking `pending`, retries on the standard
+  backoff, then drops to a daily nudge and sets `needsRecovery` past
+  `CONFIRM_SETTLE_GRACE_ATTEMPTS` (6) with a one-time `reservation_confirm_stuck`
+  Sentry warning. `confirmOrderReservations` folds `not_settled` into
+  `pending_retry`, never `compensateOrder`. The reconciler's `pending` selection is
+  widened to keep nudging holds flagged `needsRecovery` when
+  `lastErrorCode = 'confirm_not_settled'`, so the daily retry survives the operator
+  flag. No migration - the existing `provider_bookings` columns carry the state.
+
+Remaining: validate the far-future-accept behavior against a live Hostify response
+(the `logger.warn` quantifies how often it actually happens) and decide whether the
+daily-nudge cadence/grace needs tuning once real data lands.
+
 ### Open / remaining
 
 - **Part G (frontend).** `readOrderStatus` already returns the new

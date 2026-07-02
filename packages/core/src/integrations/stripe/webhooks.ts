@@ -83,6 +83,8 @@ export interface StripePaymentFailed {
 /** A Stripe Identity VerificationSession lifecycle transition. */
 export interface StripeIdentityUpdated {
 	type: "identity_updated";
+	/** Order guest this session belongs to when verification came from `/order`. */
+	bookingGuestId: string | null;
 	sessionId: string;
 	/** Account this session belongs to, read from session metadata. */
 	userId: string | null;
@@ -112,6 +114,7 @@ function identityEvent(
 	const eventTime = new Date(event.created * 1000).toISOString();
 	return {
 		type: "identity_updated",
+		bookingGuestId: session.metadata?.bookingGuestId ?? null,
 		sessionId: session.id,
 		userId: session.metadata?.userId ?? null,
 		status,

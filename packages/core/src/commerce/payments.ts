@@ -1,4 +1,8 @@
 import type { OrderBillingAddressSnapshot } from "@workspace/db";
+import type {
+	OrderConversationAvailability,
+	OrderGuestProgress,
+} from "./order-detail";
 
 /**
  * Checkout payment types shared between the PaymentIntent route, the order
@@ -16,6 +20,13 @@ export type OrderBookingStatus =
 	| "failed"
 	| "pending";
 
+export type OrderProvisioningSubState =
+	| "cancelled"
+	| "confirmed"
+	| "held-unpaid"
+	| "paid-confirming"
+	| "refunded";
+
 /**
  * Normalized payment status surfaced to the client. Maps the subset of Stripe
  * PaymentIntent statuses we care about plus an `unknown` fallback for orders
@@ -28,6 +39,13 @@ export type CheckoutPaymentStatus =
 	| "requires_payment_method"
 	| "succeeded"
 	| "unknown";
+
+/** Non-sensitive display summary of the payment method used for an order. */
+export interface OrderPaymentMethodSummary {
+	brand: string | null;
+	last4: string | null;
+	type: string;
+}
 
 /** Successful PaymentIntent creation/refresh for a payable draft order. */
 export interface CreatePaymentIntentResponse {
@@ -89,8 +107,11 @@ export interface PayableOrder {
 export interface OrderStatusRecord {
 	amountPaidMinor: number;
 	bookingStatus: OrderBookingStatus;
+	conversationAvailability: OrderConversationAvailability;
 	currency: string;
+	guestProgress: OrderGuestProgress;
 	orderId: string;
+	provisioningSubState: OrderProvisioningSubState;
 	publicReference: string;
 	stripePaymentIntentId: string | null;
 	totalMinor: number;
@@ -101,9 +122,13 @@ export interface OrderStatusResponse {
 	amountMinor: number;
 	amountPaidMinor: number;
 	bookingStatus: OrderBookingStatus;
+	conversationAvailability: OrderConversationAvailability;
 	currency: string;
+	guestProgress: OrderGuestProgress;
 	orderId: string;
+	orderUrl: string;
 	paymentStatus: CheckoutPaymentStatus;
+	provisioningSubState: OrderProvisioningSubState;
 	publicReference: string;
 }
 
@@ -135,6 +160,7 @@ export interface OrderConfirmationFacts {
 	guests: number;
 	name: string;
 	orderId: string;
+	paymentMethod: OrderPaymentMethodSummary | null;
 	publicReference: string;
 }
 
@@ -142,6 +168,7 @@ export interface OrderConfirmationFacts {
 export interface PaymentAmount {
 	amountMinor: number;
 	currency: string;
+	paymentMethod?: OrderPaymentMethodSummary | null;
 }
 
 /**
@@ -202,14 +229,15 @@ export interface OrderCompensationFacts {
  * confirm failed permanently and the order was refunded (facts for the customer
  * email); `manual_recovery` means auto-refund is disabled and the order is
  * flagged for an operator; `pending_retry` means a transient failure left the
- * order `pending` for the reconciler cron; `not_applicable` means the order was
- * not in a confirmable state (e.g. already confirmed, or never paid).
+ * order `pending` for the reconciler cron and carries the booking facts for the
+ * "payment received, finalizing" courtesy email; `not_applicable` means the
+ * order was not in a confirmable state (e.g. already confirmed, or never paid).
  */
 export type ConfirmOrderReservationsResult =
 	| { confirmation: OrderConfirmationFacts; outcome: "confirmed" }
 	| { compensation: OrderCompensationFacts; outcome: "compensated" }
 	| { outcome: "manual_recovery" }
-	| { outcome: "pending_retry" }
+	| { outcome: "pending_retry"; pending: OrderConfirmationFacts }
 	| { outcome: "not_applicable" };
 
 /**
@@ -240,6 +268,7 @@ export type CompensateOrderResult =
 export interface PaymentIntentLiveStatus {
 	amountMinor: number;
 	currency: string;
+	paymentMethod?: OrderPaymentMethodSummary | null;
 	status: CheckoutPaymentStatus;
 }
 
@@ -285,6 +314,30 @@ export function toOrderBookingStatus(value: string): OrderBookingStatus {
 	return ORDER_BOOKING_STATUSES.has(value as OrderBookingStatus)
 		? (value as OrderBookingStatus)
 		: "draft";
+}
+
+export function toOrderProvisioningSubState({
+	amountPaidMinor,
+	amountRefundedMinor,
+	bookingStatus,
+}: {
+	amountPaidMinor: number;
+	amountRefundedMinor: number;
+	bookingStatus: OrderBookingStatus;
+}): OrderProvisioningSubState {
+	if (bookingStatus === "confirmed") {
+		return "confirmed";
+	}
+	if (amountRefundedMinor > 0) {
+		return "refunded";
+	}
+	if (bookingStatus === "cancelled") {
+		return "cancelled";
+	}
+	if (amountPaidMinor > 0) {
+		return "paid-confirming";
+	}
+	return "held-unpaid";
 }
 
 /**

@@ -6,6 +6,7 @@ import type {
 } from "@workspace/db";
 import { hostifyPropertyTypeLabel } from "../hostify-property-types";
 import { publicAmenityGroupForInput } from "../listing-cache/amenity-groups";
+import { LISTING_DESCRIPTION_SECTIONS } from "../listing-cache/localization";
 import type { CatalogLocale } from "./params";
 
 export interface CatalogAmenityDto {
@@ -190,7 +191,11 @@ export function toCatalogListingDetail(
 	return {
 		...toCatalogListingSummary(record, options),
 		description: lead,
-		descriptionSections: extractDescriptionSections(record.raw, lead),
+		descriptionSections: extractDescriptionSections(
+			record,
+			lead,
+			options.locale,
+		),
 		guide: pickLocalized(record.processed.guide, options.locale),
 		minNights: readRawListingNumber(record.raw, "min_nights") ?? 2,
 		nickname: record.nickname,
@@ -204,15 +209,6 @@ export function toCatalogListingDetail(
  * model). These map to public, labeled sections in render order. `summary` and
  * `description` feed the lead paragraph, so they are not repeated here.
  */
-const DESCRIPTION_SECTIONS: { key: string; label: string }[] = [
-	{ key: "space", label: "The space" },
-	{ key: "access", label: "Guest access" },
-	{ key: "interaction", label: "During your stay" },
-	{ key: "neighborhood_overview", label: "The neighborhood" },
-	{ key: "transit", label: "Getting around" },
-	{ key: "notes", label: "Other things to note" },
-];
-
 function readDescriptionRecord(
 	raw: AccommodationListingRawContent,
 ): Record<string, unknown> {
@@ -243,18 +239,29 @@ function pickDescriptionLead(
 }
 
 function extractDescriptionSections(
-	raw: AccommodationListingRawContent,
+	record: CatalogListingRecord,
 	lead: string,
+	locale: CatalogLocale,
 ): CatalogDescriptionSection[] {
-	const description = readDescriptionRecord(raw);
+	const description = readDescriptionRecord(record.raw);
+	const rawLead =
+		readString(description.summary) ??
+		readString(description.description) ??
+		readString(description.space);
+	const sections: CatalogDescriptionSection[] = [];
 
-	return DESCRIPTION_SECTIONS.map(({ key, label }) => {
-		const body = readString(description[key]);
+	for (const { key, label } of LISTING_DESCRIPTION_SECTIONS) {
+		const rawBody = readString(description[key]);
+		const body =
+			pickLocalized(record.processed.descriptionSections?.[key], locale) ||
+			rawBody;
 		// Skip anything already shown as the lead paragraph.
-		return body && body !== lead ? { body, key, label } : null;
-	}).filter(
-		(section): section is CatalogDescriptionSection => section !== null,
-	);
+		if (body && body !== lead && rawBody !== rawLead) {
+			sections.push({ body, key, label: label[locale] });
+		}
+	}
+
+	return sections;
 }
 
 function toFreshness(
@@ -363,8 +370,11 @@ function pickTitle(
 	);
 }
 
-function pickLocalized(text: LocalizedText, locale: CatalogLocale): string {
-	return (text[locale] || text.en || text.pt || text.es || "").trim();
+function pickLocalized(
+	text: LocalizedText | null | undefined,
+	locale: CatalogLocale,
+): string {
+	return (text?.[locale] || text?.en || text?.pt || text?.es || "").trim();
 }
 
 function roundDistance(value: number | null | undefined): number | null {

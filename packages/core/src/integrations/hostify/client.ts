@@ -161,12 +161,12 @@ export class HostifyClient {
 
 	readonly inbox = {
 		acceptReservation: (
-			input: T.HostifyInquiryActionInput,
+			input: T.HostifyApproveReservationInput,
 			context?: T.HostifyRequestContext,
 		) =>
 			this.mutate(
 				"POST",
-				"/reservations/accept",
+				`/reservations/accept`,
 				input,
 				hostifySuccessSchema,
 				context,
@@ -183,12 +183,12 @@ export class HostifyClient {
 				context,
 			),
 		declineReservation: (
-			input: T.HostifyInquiryActionInput,
+			input: T.HostifyDeclineReservationInput,
 			context?: T.HostifyRequestContext,
 		) =>
 			this.mutate(
 				"POST",
-				"/reservations/decline",
+				`/reservations/decline`,
 				input,
 				hostifySuccessSchema,
 				context,
@@ -686,7 +686,7 @@ export class HostifyClient {
 				"PUT",
 				`/reservations/${segment(id)}`,
 				input,
-				hostifySchemas.reservation,
+				hostifySchemas.reservationUpdate,
 				context,
 			),
 		updateCustomField: (
@@ -1185,7 +1185,16 @@ export class HostifyClient {
 			if (!result.success) {
 				throw new HostifyResponseValidationError(
 					"Hostify returned an unexpected response shape",
-					{ cause: result.error, requestId },
+					{
+						cause: result.error,
+						issues: result.error.issues.map((issue) => ({
+							code: issue.code,
+							message: issue.message,
+							path: issue.path.map(String).join(".") || "(root)",
+						})),
+						requestId,
+						responseShape: describeShape(payload),
+					},
 				);
 			}
 
@@ -1254,6 +1263,40 @@ function isFailureResponse(value: unknown): value is T.HostifyFailureResponse {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === "object" && value !== null;
+}
+
+/**
+ * Renders a PII-safe skeleton of a value: object keys mapped to their value
+ * types, recursively, with all leaf values replaced by their type name. Depth is
+ * bounded and arrays collapse to their first element's shape so a large or
+ * sensitive payload never enters logs verbatim. Used to capture the real Hostify
+ * response shape when it fails schema validation.
+ */
+function describeShape(value: unknown, depth = 2): string {
+	return JSON.stringify(shapeOf(value, depth));
+}
+
+function shapeOf(value: unknown, depth: number): unknown {
+	if (value === null) {
+		return "null";
+	}
+	if (Array.isArray(value)) {
+		return value.length === 0 || depth <= 0
+			? "array"
+			: [shapeOf(value[0], depth - 1)];
+	}
+	if (typeof value === "object") {
+		if (depth <= 0) {
+			return "object";
+		}
+		const shape: Record<string, unknown> = {};
+		const keys = Object.keys(value as Record<string, unknown>).slice(0, 50);
+		for (const key of keys) {
+			shape[key] = shapeOf((value as Record<string, unknown>)[key], depth - 1);
+		}
+		return shape;
+	}
+	return typeof value;
 }
 
 function providerError(value: unknown, apiKey: string): string | undefined {

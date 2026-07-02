@@ -122,6 +122,60 @@ describe("HostifyClient", () => {
 		);
 	});
 
+	it("parses the reservations.update envelope (update_data, not reservation)", async () => {
+		const client = new HostifyClient({
+			apiKey: API_KEY,
+			fetch: async () =>
+				Response.json({
+					env: "https://go-pmsapi.hostify.com/",
+					success: true,
+					update_data: { status: "accepted" },
+				}),
+			maxReadRetries: 0,
+		});
+
+		const response = await client.reservations.update(701, {
+			status: "accepted",
+		});
+		expect(response.update_data?.status).toBe("accepted");
+	});
+
+	it("writes listing translations using Hostify's array payload shape", async () => {
+		let capturedRequest: Request | undefined;
+		const client = new HostifyClient({
+			apiKey: API_KEY,
+			fetch: async (input, init) => {
+				capturedRequest = new Request(input, init);
+				return Response.json({ success: true });
+			},
+			maxReadRetries: 0,
+		});
+
+		await client.listings.updateTranslations(700008883, [
+			{
+				access: "Apartment access",
+				lang: "pt",
+				name: "Casa Jardim E",
+				space: "The space",
+				summary: "Localized summary",
+			},
+		]);
+
+		expect(capturedRequest?.method).toBe("PUT");
+		expect(new URL(capturedRequest?.url ?? "").pathname).toBe(
+			"/listings/translations/700008883",
+		);
+		expect(await capturedRequest?.json()).toEqual([
+			{
+				access: "Apartment access",
+				lang: "pt",
+				name: "Casa Jardim E",
+				space: "The space",
+				summary: "Localized summary",
+			},
+		]);
+	});
+
 	it("normalizes and redacts provider errors", async () => {
 		const client = new HostifyClient({
 			apiKey: API_KEY,

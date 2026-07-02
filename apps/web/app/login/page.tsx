@@ -7,8 +7,13 @@ import { AuthReturnLink } from "@/components/auth/auth-return-link";
 import { LoginForm } from "@/components/auth/login-form";
 import { safeNextPath, signedInRedirectTarget } from "@/lib/auth/redirect";
 import { getCurrentUser } from "@/lib/auth/session";
+import { buildPrivatePageMetadata } from "@/lib/site/metadata";
 
-export const metadata: Metadata = { title: "Log in" };
+export const metadata: Metadata = buildPrivatePageMetadata({
+	title: "Log in",
+	description:
+		"Log in to manage your Alojamento Ideal bookings and guest details.",
+});
 
 type SearchParams = Record<string, string | string[] | undefined>;
 

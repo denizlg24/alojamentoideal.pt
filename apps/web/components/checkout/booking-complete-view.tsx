@@ -51,22 +51,32 @@ function isTerminal(order: OrderStatusResponse): boolean {
  * Renders booking completion using the server-verified order status. Booking
  * lifecycle wins over raw payment status: a refunded order keeps a `succeeded`
  * PaymentIntent, so it must be read from `bookingStatus`, not payment state.
- * Payment received and booking confirmed stay distinct: payment can settle
- * before the Alojamento Ideal team finalizes the reservation.
+ * The provisioning sub-state then separates the two ways a booking ends after
+ * a charge (refunded vs unpaid cancellation) and the two in-flight states
+ * (payment received and finalizing vs still being held), so payment received
+ * and booking confirmed stay distinct: payment can settle before the Alojamento
+ * Ideal team finalizes the reservation.
  */
 function present(order: OrderStatusResponse): Presentation {
 	switch (order.bookingStatus) {
 		case "confirmed":
 			return {
-				body: "Your stay is confirmed. We've emailed your booking details.",
+				body: "Your stay is confirmed. We've emailed your booking details, and you can manage your reservation any time.",
 				tone: "success",
 				title: "Booking confirmed",
 			};
 		case "cancelled":
+			if (order.provisioningSubState === "refunded") {
+				return {
+					body: "We couldn't confirm this booking, so we cancelled it and refunded you in full. The refund is on its way back to your original payment method and can take a few business days to appear.",
+					tone: "info",
+					title: "Refunded in full",
+				};
+			}
 			return {
-				body: "We couldn't confirm this booking, so we cancelled it and refunded you in full. The refund is on its way back to your original payment method and can take a few business days to appear.",
-				tone: "info",
-				title: "Refunded in full",
+				body: "This booking was cancelled and you have not been charged. You can return to the home and try booking again.",
+				tone: "error",
+				title: "Booking not completed",
 			};
 		case "failed":
 			return {
@@ -76,6 +86,18 @@ function present(order: OrderStatusResponse): Presentation {
 			};
 		default:
 			break;
+	}
+
+	// Payment is recorded but the reservation is still being confirmed. Rather than
+	// hold the guest here polling for the flip to confirmed (which can take a while
+	// when the provider is slow to accept), present the pending result and send them
+	// to the booking page, where they can check back any time.
+	if (order.provisioningSubState === "paid-confirming") {
+		return {
+			body: "We've received your payment and your reservation is pending. We're confirming your booking and will email you once it's done. You can track it any time from your booking page.",
+			tone: "success",
+			title: "Payment received",
+		};
 	}
 
 	switch (order.paymentStatus) {
@@ -153,7 +175,12 @@ export function BookingCompleteView() {
 				}
 				setState({ order, status: "ready" });
 				attempts += 1;
-				if (!isTerminal(order) && attempts < MAX_POLLS) {
+				// Stop once payment has settled: a paid order is shown as "pending" and
+				// the guest is directed to the booking page rather than kept polling for
+				// the provider-side confirmation, which can lag.
+				const settled =
+					isTerminal(order) || order.provisioningSubState === "paid-confirming";
+				if (!settled && attempts < MAX_POLLS) {
 					timer = setTimeout(poll, POLL_INTERVAL_MS);
 				}
 			} catch (error) {
@@ -207,9 +234,15 @@ export function BookingCompleteView() {
 	const { order } = state;
 	const presentation = present(order);
 	const Icon = TONE_ICON[presentation.tone];
-	const isRefunded = order.bookingStatus === "cancelled";
+	const isRefunded = order.provisioningSubState === "refunded";
 	const amountLabel = isRefunded ? "Refunded" : "Total";
 	const amountValue = isRefunded ? order.amountPaidMinor : order.amountMinor;
+	// The order hub is reachable once the booking exists and money is involved:
+	// the booker is authorized as owner by the cart/session grant, so the relative
+	// orderUrl needs no token. A refunded/failed order has nothing left to manage.
+	const showManageCta =
+		order.bookingStatus === "confirmed" ||
+		order.provisioningSubState === "paid-confirming";
 
 	return (
 		<div className="mx-auto flex w-full max-w-md flex-col items-center gap-4 px-4 py-16 text-center">
@@ -232,14 +265,27 @@ export function BookingCompleteView() {
 				</div>
 			</div>
 
-			<div className="mt-2 flex gap-3">
-				<Button asChild>
-					<Link href="/homes">Browse more homes</Link>
-				</Button>
-				{presentation.tone === "error" && (
-					<Button asChild variant="outline">
-						<Link href="/">Return home</Link>
-					</Button>
+			<div className="mt-2 flex flex-wrap items-center justify-center gap-3">
+				{showManageCta ? (
+					<>
+						<Button asChild>
+							<Link href={order.orderUrl}>Manage your booking</Link>
+						</Button>
+						<Button asChild variant="outline">
+							<Link href="/homes">Browse more homes</Link>
+						</Button>
+					</>
+				) : (
+					<>
+						<Button asChild>
+							<Link href="/homes">Browse more homes</Link>
+						</Button>
+						{presentation.tone === "error" && (
+							<Button asChild variant="outline">
+								<Link href="/">Return home</Link>
+							</Button>
+						)}
+					</>
 				)}
 			</div>
 		</div>

@@ -7,24 +7,91 @@ import {
 	accommodationListing as accommodationListingTable,
 	accommodationQuoteSnapshot as accommodationQuoteSnapshotTable,
 	apiIdempotencyKey as apiIdempotencyKeyTable,
+	type BookingGuestIdentityStatus,
 	bookingGuest as bookingGuestTable,
 	cartItem as cartItemTable,
 	cart as cartTable,
+	conversationMessage as conversationMessageTable,
+	conversation as conversationTable,
 	type Database,
 	type OrderBillingAddressSnapshot,
+	type OrderMemberStatus,
 	orderContact as orderContactTable,
 	orderItemCharge as orderItemChargeTable,
 	orderItem as orderItemTable,
+	orderMember as orderMemberTable,
 	order as orderTable,
 	providerBooking as providerBookingTable,
 } from "@workspace/db";
-import { and, asc, eq, gt, inArray, isNull, lte, or, sql } from "drizzle-orm";
+import {
+	and,
+	asc,
+	desc,
+	eq,
+	gt,
+	inArray,
+	isNull,
+	lte,
+	or,
+	type SQL,
+	sql,
+} from "drizzle-orm";
 import { parseQuoteBody } from "../accommodations";
+import type {
+	GuestIdentityPrefill,
+	IdentityVerificationStatus,
+	VerifiedIdentityDocumentFields,
+} from "../account";
+import {
+	decryptIdentityField,
+	encryptIdentityField,
+} from "../account/identity-encryption";
 import type { RefundRequest, RefundResult } from "../integrations/stripe";
 import { trackEvent } from "../observability";
+import {
+	type ConversationMessageDto,
+	type ConversationSummary,
+	noopRealtimePublisher,
+	normalizeConversationPreview,
+	type ProviderConversationGateway,
+	type ProviderConversationMessage,
+	type RealtimePublisher,
+	type ReconcileConversationsSummary,
+	trimMessageBody,
+} from "./conversations";
 import { CommerceError, invalidRequest } from "./errors";
 import { hashIdempotencyRequest, idempotencyExpiresAt } from "./idempotency";
 import { housingFeeMinor, normalizeAccommodationQuoteSnapshot } from "./money";
+import {
+	generateMemberToken,
+	hashMemberToken,
+	isMemberTokenExpired,
+	memberInviteExpiresAt,
+	type OrderAccessContext,
+	type OrderPermission,
+	orderRoleCan,
+	type ResolvedOrder,
+	type ResolvedOrderAccess,
+} from "./order-access";
+import {
+	type OrderContactSummary,
+	type OrderDetail,
+	type OrderDetailCharge,
+	type OrderDetailItem,
+	type OrderDetailMember,
+	summarizeConversationAvailability,
+	summarizeGuestProgress,
+} from "./order-detail";
+import {
+	type BookingGuestAssignment,
+	type BookingGuestDetail,
+	type BookingGuestIdentityFields,
+	type BookingGuestIdentitySessionTarget,
+	type BookingGuestList,
+	type BookingGuestUpdateInput,
+	bookingGuestPurgeAfter,
+	identityStatusToBookingGuestStatus,
+} from "./order-guests";
 import {
 	allocateDiscountByHousingBase,
 	buildDiscountChargeRow,
@@ -42,6 +109,7 @@ import {
 	type OrderConfirmationFacts,
 	type OrderFinalizationEmailKind,
 	type OrderPaymentFailureInput,
+	type OrderPaymentMethodSummary,
 	type OrderStatusRecord,
 	type PayableOrder,
 	type PaymentAmount,
@@ -49,6 +117,7 @@ import {
 	type ReconcileReservationsSummary,
 	type RecordOrderPaymentFailureResult,
 	toOrderBookingStatus,
+	toOrderProvisioningSubState,
 } from "./payments";
 import {
 	buildHoldRequest,
@@ -90,6 +159,13 @@ const DEFAULT_PROPERTY_TIMEZONE = "Europe/Lisbon";
 const RESERVATION_RETRY_BASE_MS = 60 * 1000;
 const RESERVATION_RETRY_MAX_MS = 30 * 60 * 1000;
 const DEFAULT_MAX_RESERVATION_ATTEMPTS = 6;
+// A confirmed payment whose accept will not settle on the provider (e.g. Hostify
+// refuses to accept a far-future reservation and leaves it pending) is never
+// refunded: the hold is alive and the dates are held. After this many not-settled
+// reads the booking is flagged `needsRecovery` for an operator and the nudge
+// cadence drops to daily until the accept finally takes.
+const CONFIRM_SETTLE_GRACE_ATTEMPTS = 6;
+const RESERVATION_SETTLE_RETRY_MS = 24 * 60 * 60 * 1000;
 const DEFAULT_RESERVATION_SOURCE = "alojamentoideal";
 // Grace past `checkoutExpiresAt` before the cron releases an abandoned hold.
 const ABANDONED_HOLD_GRACE_MS = 5 * 60 * 1000;
@@ -102,6 +178,55 @@ const REFUND_STATE_UNKNOWN_FAILURE_DETAIL =
 const FINALIZATION_EMAIL_RETRY_BASE_MS = 5 * 60 * 1000;
 const FINALIZATION_EMAIL_RETRY_MAX_MS = 60 * 60 * 1000;
 const FINALIZATION_EMAIL_CLAIM_MS = 5 * 60 * 1000;
+const DEFAULT_CONVERSATION_MESSAGE_LIMIT = 100;
+const MAX_CONVERSATION_MESSAGE_LIMIT = 200;
+
+const conversationSummarySelection = {
+	externalThreadId: conversationTable.externalThreadId,
+	id: conversationTable.id,
+	lastMessageAt: conversationTable.lastMessageAt,
+	lastMessagePreview: conversationTable.lastMessagePreview,
+	providerBookingId: conversationTable.providerBookingId,
+	status: conversationTable.status,
+	unreadCount: conversationTable.unreadCount,
+};
+
+const conversationMessageSelection = {
+	body: conversationMessageTable.body,
+	conversationId: conversationMessageTable.conversationId,
+	deliveryStatus: conversationMessageTable.deliveryStatus,
+	externalMessageId: conversationMessageTable.externalMessageId,
+	id: conversationMessageTable.id,
+	isAutomatic: conversationMessageTable.isAutomatic,
+	readAt: conversationMessageTable.readAt,
+	senderMemberId: conversationMessageTable.senderMemberId,
+	senderType: conversationMessageTable.senderType,
+	sentAt: conversationMessageTable.sentAt,
+};
+
+const bookingGuestSelection = {
+	dateOfBirthEncrypted: bookingGuestTable.dateOfBirthEncrypted,
+	documentExpiresOnEncrypted: bookingGuestTable.documentExpiresOnEncrypted,
+	documentIssuingCountryEncrypted:
+		bookingGuestTable.documentIssuingCountryEncrypted,
+	documentNumberEncrypted: bookingGuestTable.documentNumberEncrypted,
+	documentTypeEncrypted: bookingGuestTable.documentTypeEncrypted,
+	firstNameEncrypted: bookingGuestTable.firstNameEncrypted,
+	id: bookingGuestTable.id,
+	identityStatus: bookingGuestTable.identityStatus,
+	lastNameEncrypted: bookingGuestTable.lastNameEncrypted,
+	nationalityEncrypted: bookingGuestTable.nationalityEncrypted,
+	orderId: bookingGuestTable.orderId,
+	orderMemberId: bookingGuestTable.orderMemberId,
+	position: bookingGuestTable.position,
+	providerBookingId: bookingGuestTable.providerBookingId,
+	purgeAfter: bookingGuestTable.purgeAfter,
+	residenceCountryEncrypted: bookingGuestTable.residenceCountryEncrypted,
+	stripeVerificationReportId: bookingGuestTable.stripeVerificationReportId,
+	stripeVerificationSessionId: bookingGuestTable.stripeVerificationSessionId,
+	submittedAt: bookingGuestTable.submittedAt,
+	userId: bookingGuestTable.userId,
+};
 
 type Transaction = Parameters<Parameters<Database["transaction"]>[0]>[0];
 type DbExecutor = Database | Transaction;
@@ -161,6 +286,12 @@ export interface CommerceServiceOptions {
 	resolveReservationGateway?: (
 		provider: string,
 	) => ProviderReservationGateway | undefined;
+	/** Resolves provider inbox/chat transport for order conversations. */
+	resolveConversationGateway?: (
+		provider: string,
+	) => ProviderConversationGateway | undefined;
+	/** Publishes conversation/message updates to browsers. Defaults to no-op. */
+	realtimePublisher?: RealtimePublisher;
 	/** Issues a Stripe refund during compensation; required for auto-refund (D4). */
 	refundPayment?: (request: RefundRequest) => Promise<RefundResult>;
 	/** Reads live PaymentIntent status for the reconciler (webhook-missed path). */
@@ -183,6 +314,185 @@ interface CreateCartInput {
 interface ActiveItemInput {
 	itemId: string;
 	quoteInput: CommerceQuoteInput;
+}
+
+interface IssueMemberTokenResult {
+	memberId: string;
+	token: string;
+}
+
+interface RedeemMemberTokenOptions {
+	/** Bind the redeeming visitor's account to the member when signed in. */
+	userId?: string | null;
+}
+
+/**
+ * Outcome of issuing or rotating an invite for a `member`. Carries the raw token
+ * (delivered once, by email) plus the persisted row's identity and lifetime so
+ * the caller can both send the magic-link and echo the new member back to the UI.
+ */
+interface InviteMemberResult {
+	email: string;
+	expiresAt: Date;
+	memberId: string;
+	token: string;
+}
+
+/**
+ * Delivers a freshly issued invite token (the web email transport). Invoked
+ * before the token is persisted so a delivery failure leaves no dangling or
+ * prematurely rotated row — the proportionate guarantee until a durable outbox
+ * exists.
+ */
+type InviteDelivery = (delivery: {
+	email: string;
+	token: string;
+}) => Promise<void>;
+
+/** Lightweight address shape check for invite recipients (defence, not parsing). */
+const EMAIL_ADDRESS_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+function decryptGuestField(value: Buffer | Uint8Array | null): string | null {
+	return value ? decryptIdentityField(value) : null;
+}
+
+function encryptGuestField(value: string | null): Buffer | null {
+	return value === null ? null : encryptIdentityField(value);
+}
+
+function encryptGuestFields(fields: BookingGuestIdentityFields) {
+	return {
+		dateOfBirthEncrypted: encryptGuestField(fields.dateOfBirth),
+		documentExpiresOnEncrypted: encryptGuestField(fields.documentExpiresOn),
+		documentIssuingCountryEncrypted: encryptGuestField(
+			fields.documentIssuingCountry,
+		),
+		documentNumberEncrypted: encryptGuestField(fields.documentNumber),
+		documentTypeEncrypted: encryptGuestField(fields.documentType),
+		firstNameEncrypted: encryptGuestField(fields.firstName),
+		lastNameEncrypted: encryptGuestField(fields.lastName),
+		nationalityEncrypted: encryptGuestField(fields.nationality),
+		residenceCountryEncrypted: encryptGuestField(fields.residenceCountry),
+	};
+}
+
+function encryptVerifiedGuestField(
+	value: string | null,
+	existing: Buffer | null,
+): Buffer | null {
+	return value === null ? existing : encryptIdentityField(value);
+}
+
+/**
+ * Classifies a guest slot for the owner's view from its bound member row (joined
+ * on `booking_guest.order_member_id`). A revoked or absent binding reads as
+ * `unassigned` — a slot the owner fills — so a cancelled invite reverts cleanly.
+ */
+function toGuestAssignment(
+	member: {
+		email: string;
+		expiresAt: Date | null;
+		id: string;
+		status: OrderMemberStatus;
+	} | null,
+): BookingGuestAssignment {
+	if (!member || member.status === "revoked") {
+		return { kind: "unassigned" };
+	}
+	return {
+		email: member.email,
+		expiresAt: member.expiresAt ? member.expiresAt.toISOString() : null,
+		kind: "member",
+		memberId: member.id,
+		status: member.status === "active" ? "active" : "invited",
+	};
+}
+
+function bookingGuestDto(
+	row: {
+		dateOfBirthEncrypted: Buffer | null;
+		documentExpiresOnEncrypted: Buffer | null;
+		documentIssuingCountryEncrypted: Buffer | null;
+		documentNumberEncrypted: Buffer | null;
+		documentTypeEncrypted: Buffer | null;
+		firstNameEncrypted: Buffer | null;
+		id: string;
+		identityStatus: BookingGuestIdentityStatus;
+		lastNameEncrypted: Buffer | null;
+		nationalityEncrypted: Buffer | null;
+		orderMemberId: string | null;
+		position: number;
+		purgeAfter: Date | null;
+		residenceCountryEncrypted: Buffer | null;
+		submittedAt: Date | null;
+	},
+	assignment: BookingGuestAssignment = { kind: "unassigned" },
+): BookingGuestDetail {
+	return {
+		assignment,
+		fields: {
+			dateOfBirth: decryptGuestField(row.dateOfBirthEncrypted),
+			documentExpiresOn: decryptGuestField(row.documentExpiresOnEncrypted),
+			documentIssuingCountry: decryptGuestField(
+				row.documentIssuingCountryEncrypted,
+			),
+			documentNumber: decryptGuestField(row.documentNumberEncrypted),
+			documentType: decryptGuestField(row.documentTypeEncrypted),
+			firstName: decryptGuestField(row.firstNameEncrypted),
+			lastName: decryptGuestField(row.lastNameEncrypted),
+			nationality: decryptGuestField(row.nationalityEncrypted),
+			residenceCountry: decryptGuestField(row.residenceCountryEncrypted),
+		},
+		id: row.id,
+		identityStatus: row.identityStatus,
+		orderMemberId: row.orderMemberId,
+		position: row.position,
+		purgeAfter: row.purgeAfter ? row.purgeAfter.toISOString() : null,
+		submittedAt: row.submittedAt ? row.submittedAt.toISOString() : null,
+	};
+}
+
+function parseWebhookTimestamp(value: string | null): Date | null {
+	if (!value) {
+		return null;
+	}
+	const date = new Date(value);
+	return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function nonEmptyPaymentPart(value: string | null | undefined): string | null {
+	const trimmed = value?.trim();
+	return trimmed ? trimmed : null;
+}
+
+function normalizePaymentMethodSummary(
+	paymentMethod: OrderPaymentMethodSummary | null | undefined,
+): OrderPaymentMethodSummary | null {
+	const type = nonEmptyPaymentPart(paymentMethod?.type);
+	if (!type) {
+		return null;
+	}
+	return {
+		brand: nonEmptyPaymentPart(paymentMethod?.brand),
+		last4: nonEmptyPaymentPart(paymentMethod?.last4),
+		type,
+	};
+}
+
+function paymentMethodFromOrderRow(row: {
+	stripePaymentMethodBrand: string | null;
+	stripePaymentMethodLast4: string | null;
+	stripePaymentMethodType: string | null;
+}): OrderPaymentMethodSummary | null {
+	const type = nonEmptyPaymentPart(row.stripePaymentMethodType);
+	if (!type) {
+		return null;
+	}
+	return {
+		brand: nonEmptyPaymentPart(row.stripePaymentMethodBrand),
+		last4: nonEmptyPaymentPart(row.stripePaymentMethodLast4),
+		type,
+	};
 }
 
 interface RevalidatedSnapshot {
@@ -239,6 +549,9 @@ interface SagaContext {
 		refundRequestedAt: Date | null;
 		status: string;
 		stripePaymentIntentId: string | null;
+		stripePaymentMethodBrand: string | null;
+		stripePaymentMethodLast4: string | null;
+		stripePaymentMethodType: string | null;
 		stripeRefundId: string | null;
 		stripeRefundIdempotencyKey: string | null;
 	};
@@ -249,13 +562,14 @@ type HoldItemResult =
 	| "transient"
 	| "permanent"
 	| { unavailable: string };
-type MutateItemResult = "ok" | "transient" | "permanent";
+type MutateItemResult = "ok" | "transient" | "permanent" | "not_settled";
 type PersistHoldPlacedResult = "already_linked" | "conflict" | "persisted";
 
 /** Email side-effects the reconciler delegates back to the app (transport seam). */
 interface ReconcileHandlers {
 	onCompensated?: (facts: OrderCompensationFacts) => Promise<void>;
 	onConfirmed?: (facts: OrderConfirmationFacts) => Promise<void>;
+	onPendingNotice?: (facts: OrderConfirmationFacts) => Promise<void>;
 }
 
 interface CartJoinedRow {
@@ -303,7 +617,9 @@ export class CommerceService {
 	readonly #quoteAccommodation: CommerceServiceOptions["quoteAccommodation"];
 	readonly #quoteTtlSeconds: number;
 	readonly #resolveDiscount: CommerceServiceOptions["resolveDiscount"];
+	readonly #resolveConversationGateway: CommerceServiceOptions["resolveConversationGateway"];
 	readonly #resolveReservationGateway: CommerceServiceOptions["resolveReservationGateway"];
+	readonly #realtimePublisher: RealtimePublisher;
 	readonly #refundPayment: CommerceServiceOptions["refundPayment"];
 	readonly #retrievePaymentIntent: CommerceServiceOptions["retrievePaymentIntent"];
 	readonly #autoRefundOnFailure: boolean;
@@ -318,7 +634,10 @@ export class CommerceService {
 		this.#quoteAccommodation = options.quoteAccommodation;
 		this.#quoteTtlSeconds = options.quoteTtlSeconds;
 		this.#resolveDiscount = options.resolveDiscount;
+		this.#resolveConversationGateway = options.resolveConversationGateway;
 		this.#resolveReservationGateway = options.resolveReservationGateway;
+		this.#realtimePublisher =
+			options.realtimePublisher ?? noopRealtimePublisher;
 		this.#refundPayment = options.refundPayment;
 		this.#retrievePaymentIntent = options.retrievePaymentIntent;
 		this.#autoRefundOnFailure = options.autoRefundOnFailure ?? true;
@@ -631,6 +950,16 @@ export class CommerceService {
 		payment: PaymentAmount,
 	): Promise<MarkOrderPaidResult> {
 		return this.#db.transaction(async (tx) => {
+			const paymentMethod = normalizePaymentMethodSummary(
+				payment.paymentMethod,
+			);
+			const paymentMethodFields = paymentMethod
+				? {
+						stripePaymentMethodBrand: paymentMethod.brand,
+						stripePaymentMethodLast4: paymentMethod.last4,
+						stripePaymentMethodType: paymentMethod.type,
+					}
+				: {};
 			const [order] = await tx
 				.select({
 					currency: orderTable.currency,
@@ -657,6 +986,7 @@ export class CommerceService {
 						amountPaidMinor: payment.amountMinor,
 						failureCode: "amount_mismatch",
 						status: "pending",
+						...paymentMethodFields,
 						updatedAt: new Date(),
 					})
 					.where(
@@ -684,6 +1014,7 @@ export class CommerceService {
 				.set({
 					amountPaidMinor: payment.amountMinor,
 					status: "pending",
+					...paymentMethodFields,
 					updatedAt: new Date(),
 				})
 				.where(
@@ -758,6 +1089,7 @@ export class CommerceService {
 		const [row] = await this.#db
 			.select({
 				amountPaidMinor: orderTable.amountPaidMinor,
+				amountRefundedMinor: orderTable.amountRefundedMinor,
 				cartToken: cartTable.cartToken,
 				currency: orderTable.currency,
 				id: orderTable.id,
@@ -782,15 +1114,2459 @@ export class CommerceService {
 			throw new CommerceError("order_not_found", "Order not found.", 404);
 		}
 
+		const [guestRows, conversationRows] = await Promise.all([
+			this.#db
+				.select({
+					identityStatus: bookingGuestTable.identityStatus,
+				})
+				.from(bookingGuestTable)
+				.innerJoin(
+					providerBookingTable,
+					eq(providerBookingTable.id, bookingGuestTable.providerBookingId),
+				)
+				.where(eq(providerBookingTable.orderId, row.id)),
+			this.#db
+				.select({
+					externalThreadId: conversationTable.externalThreadId,
+					status: conversationTable.status,
+				})
+				.from(conversationTable)
+				.where(eq(conversationTable.orderId, row.id)),
+		]);
+		const bookingStatus = toOrderBookingStatus(row.status);
+
 		return {
 			amountPaidMinor: row.amountPaidMinor,
-			bookingStatus: toOrderBookingStatus(row.status),
+			bookingStatus,
+			conversationAvailability:
+				summarizeConversationAvailability(conversationRows),
 			currency: row.currency,
+			guestProgress: summarizeGuestProgress(
+				guestRows.map((guest) => guest.identityStatus),
+			),
 			orderId: row.id,
+			provisioningSubState: toOrderProvisioningSubState({
+				amountPaidMinor: row.amountPaidMinor,
+				amountRefundedMinor: row.amountRefundedMinor,
+				bookingStatus,
+			}),
 			publicReference: row.publicReference,
 			stripePaymentIntentId: row.stripePaymentIntentId,
 			totalMinor: row.totalMinor,
 		};
+	}
+
+	/**
+	 * Resolves who is acting on an order and what they may do — the spine every
+	 * `/order/[reference]` route authorizes through. A member is authorized by the
+	 * hashed booking-access token from their redeemed cookie, while the original
+	 * cart-cookie / signed-in-user grants still resolve the
+	 * `owner` without a token. A revoked, expired, or unknown token falls through
+	 * to the owner grant; if neither path authorizes, the order reports as not
+	 * found so its existence stays unenumerable.
+	 */
+	async resolveOrderAccess(
+		reference: string,
+		ctx: OrderAccessContext,
+	): Promise<ResolvedOrderAccess> {
+		const order = await this.#readResolvedOrder(this.#db, reference);
+		if (!order) {
+			throw new CommerceError("order_not_found", "Order not found.", 404);
+		}
+
+		if (ctx.memberToken) {
+			const [member] = await this.#db
+				.select()
+				.from(orderMemberTable)
+				.where(
+					and(
+						eq(orderMemberTable.orderId, order.id),
+						eq(
+							orderMemberTable.accessTokenHash,
+							hashMemberToken(ctx.memberToken),
+						),
+					),
+				)
+				.limit(1);
+			if (
+				member &&
+				member.status === "active" &&
+				!isMemberTokenExpired(member, new Date())
+			) {
+				return { member, order, role: member.role };
+			}
+		}
+
+		if (
+			isOrderAccessGranted(
+				{ cartToken: order.cartToken, userId: order.userId },
+				{ cartToken: ctx.cartToken, userId: ctx.userId },
+			)
+		) {
+			const [owner] = await this.#db
+				.select()
+				.from(orderMemberTable)
+				.where(
+					and(
+						eq(orderMemberTable.orderId, order.id),
+						eq(orderMemberTable.role, "owner"),
+					),
+				)
+				.limit(1);
+			return { member: owner ?? null, order, role: "owner" };
+		}
+
+		throw new CommerceError("order_not_found", "Order not found.", 404);
+	}
+
+	/**
+	 * Redeems a raw booking-access token against an order: validates its hash,
+	 * flips `invited -> active`, binds `user_id` when the visitor is signed in, and
+	 * stamps `last_seen_at`. Idempotent — re-redeeming an already-active token
+	 * returns the same member. Revoked/expired/unknown tokens report not found.
+	 */
+	async redeemMemberToken(
+		reference: string,
+		rawToken: string,
+		options: RedeemMemberTokenOptions = {},
+	): Promise<ResolvedOrderAccess> {
+		return this.#db.transaction(async (tx) => {
+			const order = await this.#readResolvedOrder(tx, reference);
+			if (!order) {
+				throw new CommerceError("order_not_found", "Order not found.", 404);
+			}
+
+			const [member] = await tx
+				.select()
+				.from(orderMemberTable)
+				.where(
+					and(
+						eq(orderMemberTable.orderId, order.id),
+						eq(orderMemberTable.accessTokenHash, hashMemberToken(rawToken)),
+					),
+				)
+				.limit(1)
+				.for("update");
+
+			const now = new Date();
+			if (
+				!member ||
+				member.status === "revoked" ||
+				isMemberTokenExpired(member, now)
+			) {
+				throw new CommerceError("order_not_found", "Order not found.", 404);
+			}
+
+			// Capacity is structural now: a per-guest invite already reserves one
+			// booking slot at invite time, so acceptance cannot overflow the house and
+			// needs no counting. Only gate the invited -> active transition; a re-redeem
+			// of an already-active token is idempotent. Still reject a signed-in account
+			// that already holds another active membership on this order, so one person
+			// never ends up bound to two slots.
+			if (member.status !== "active") {
+				const duplicateMatchers = [eq(orderMemberTable.email, member.email)];
+				if (options.userId) {
+					duplicateMatchers.push(eq(orderMemberTable.userId, options.userId));
+				}
+				const [duplicate] = await tx
+					.select({ id: orderMemberTable.id })
+					.from(orderMemberTable)
+					.where(
+						and(
+							eq(orderMemberTable.orderId, order.id),
+							eq(orderMemberTable.status, "active"),
+							sql`${orderMemberTable.id} <> ${member.id}`,
+							or(...duplicateMatchers),
+						),
+					)
+					.limit(1);
+				if (duplicate) {
+					throw new CommerceError(
+						"order_member_exists",
+						"That guest already has access to this booking.",
+						409,
+					);
+				}
+			}
+
+			const resolvedUserId =
+				options.userId && !member.userId ? options.userId : member.userId;
+			const [updated] = await tx
+				.update(orderMemberTable)
+				.set({
+					acceptedAt: member.acceptedAt ?? now,
+					expiresAt: null,
+					lastSeenAt: now,
+					status: "active",
+					userId: resolvedUserId,
+				})
+				.where(eq(orderMemberTable.id, member.id))
+				.returning();
+
+			// Stamp the redeeming account onto the slot this invite reserved, so the
+			// account-reuse prefill and audit trail know whose slot it is.
+			if (resolvedUserId) {
+				await tx
+					.update(bookingGuestTable)
+					.set({ updatedAt: now, userId: resolvedUserId })
+					.where(
+						and(
+							eq(bookingGuestTable.orderId, order.id),
+							eq(bookingGuestTable.orderMemberId, member.id),
+							isNull(bookingGuestTable.userId),
+						),
+					);
+			}
+
+			return { member: updated ?? member, order, role: member.role };
+		});
+	}
+
+	async issueOwnerAccessToken(
+		orderId: string,
+		email: string,
+	): Promise<IssueMemberTokenResult> {
+		return this.#persistOwnerAccessToken(orderId, email, generateMemberToken());
+	}
+
+	/**
+	 * Activates a caller-generated owner token after its email was accepted by the
+	 * transport. This keeps confirmation-email retries resend-safe: a failed send
+	 * leaves no rotated-but-undelivered owner link in the database.
+	 */
+	async activateOwnerAccessToken(
+		orderId: string,
+		email: string,
+		token: string,
+	): Promise<IssueMemberTokenResult> {
+		if (token.trim().length === 0) {
+			throw invalidRequest("Owner access token is required.", [
+				{ message: "Owner access token is required.", path: "token" },
+			]);
+		}
+		return this.#persistOwnerAccessToken(orderId, email, token);
+	}
+
+	/**
+	 * Provisions (or rotates) the order's `owner` member and persists the supplied
+	 * token hash. Idempotent: the partial-unique owner index caps an order at one
+	 * owner, so a re-run rotates the existing row's token rather than inserting a
+	 * second. Binds the booker's account when the order has one.
+	 */
+	async #persistOwnerAccessToken(
+		orderId: string,
+		email: string,
+		token: string,
+	): Promise<IssueMemberTokenResult> {
+		return this.#db.transaction(async (tx) => {
+			// Lock the order row first so concurrent first-time provisioners serialize:
+			// the loser waits, then observes the owner the winner inserted and rotates
+			// it, rather than racing into the partial-unique owner violation.
+			const [orderRow] = await tx
+				.select({ userId: orderTable.userId })
+				.from(orderTable)
+				.where(eq(orderTable.id, orderId))
+				.limit(1)
+				.for("update");
+			if (!orderRow) {
+				throw new CommerceError("order_not_found", "Order not found.", 404);
+			}
+			const userId = orderRow.userId ?? null;
+			const [existing] = await tx
+				.select()
+				.from(orderMemberTable)
+				.where(
+					and(
+						eq(orderMemberTable.orderId, orderId),
+						eq(orderMemberTable.role, "owner"),
+					),
+				)
+				.limit(1);
+
+			const now = new Date();
+			if (existing) {
+				await tx
+					.update(orderMemberTable)
+					.set({
+						accessTokenHash: hashMemberToken(token),
+						acceptedAt: existing.acceptedAt ?? now,
+						email: email.trim().toLowerCase(),
+						expiresAt: null,
+						status: "active",
+						userId: existing.userId ?? userId,
+					})
+					.where(eq(orderMemberTable.id, existing.id));
+				return { memberId: existing.id, token };
+			}
+
+			const memberId = crypto.randomUUID();
+			await tx.insert(orderMemberTable).values({
+				acceptedAt: now,
+				accessTokenHash: hashMemberToken(token),
+				createdAt: now,
+				email: email.trim().toLowerCase(),
+				id: memberId,
+				orderId,
+				role: "owner",
+				status: "active",
+				userId,
+			});
+			return { memberId, token };
+		});
+	}
+
+	/**
+	 * Invites a guest to an order (owner only). Mints an `invited` member with a
+	 * 24h token returned once for the magic-link email. Invitations are unbounded
+	 * and short-lived; capacity is enforced at acceptance, not here. Rejects a
+	 * recipient who already holds active access so a duplicate invite cannot shadow
+	 * a real member.
+	 */
+	async inviteGuest(
+		access: ResolvedOrderAccess,
+		input: { bookingGuestId: string; email: string; providerBookingId: string },
+		deliver: InviteDelivery,
+	): Promise<InviteMemberResult> {
+		this.#assertOrderPermission(access, "invite_members");
+		const email = input.email.trim().toLowerCase();
+		if (!EMAIL_ADDRESS_PATTERN.test(email)) {
+			throw invalidRequest("A valid email address is required.", [
+				{ message: "Enter a valid email address.", path: "email" },
+			]);
+		}
+		await this.#loadProviderBookingForAccess(access, input.providerBookingId);
+
+		// The invite binds this specific slot, so first read who (if anyone) already
+		// holds it, then guard against the same person landing on two slots.
+		const slot = await this.#loadBookingGuestForAccess(
+			input.providerBookingId,
+			input.bookingGuestId,
+		);
+		const currentMember = slot.orderMemberId
+			? await this.#loadOrderMember(access.order.id, slot.orderMemberId)
+			: null;
+		if (currentMember?.status === "active") {
+			throw new CommerceError(
+				"order_member_exists",
+				"That guest slot is already filled. Remove the current guest first.",
+				409,
+			);
+		}
+
+		const [emailMember] = await this.#db
+			.select({ id: orderMemberTable.id, status: orderMemberTable.status })
+			.from(orderMemberTable)
+			.where(
+				and(
+					eq(orderMemberTable.orderId, access.order.id),
+					eq(orderMemberTable.email, email),
+					inArray(orderMemberTable.status, ["active", "invited"]),
+				),
+			)
+			.limit(1);
+		if (emailMember && emailMember.id !== currentMember?.id) {
+			throw new CommerceError(
+				"order_member_exists",
+				emailMember.status === "active"
+					? "That guest already has access to this booking."
+					: "That guest is already invited to this booking.",
+				409,
+			);
+		}
+
+		// Reuse this slot's still-pending invite row (rotating its token, and its
+		// email if the owner reassigned the slot) rather than stacking rows.
+		const reuseMemberId =
+			currentMember?.status === "invited" ? currentMember.id : null;
+		const memberId = reuseMemberId ?? crypto.randomUUID();
+		const token = generateMemberToken();
+		const expiresAt = memberInviteExpiresAt();
+
+		// Deliver before persisting: a mail-provider failure then leaves no dangling
+		// invite and does not rotate a reused row's live token, so the caller gets a
+		// clean error and a safe retry.
+		await deliver({ email, token });
+
+		await this.#db.transaction(async (tx) => {
+			const [locked] = await tx
+				.select(bookingGuestSelection)
+				.from(bookingGuestTable)
+				.where(
+					and(
+						eq(bookingGuestTable.id, input.bookingGuestId),
+						eq(bookingGuestTable.providerBookingId, input.providerBookingId),
+					),
+				)
+				.limit(1)
+				.for("update");
+			if (!locked) {
+				throw new CommerceError(
+					"booking_guest_not_found",
+					"Guest not found.",
+					404,
+				);
+			}
+
+			if (reuseMemberId) {
+				await tx
+					.update(orderMemberTable)
+					.set({
+						acceptedAt: null,
+						accessTokenHash: hashMemberToken(token),
+						email,
+						expiresAt,
+						lastSeenAt: null,
+						status: "invited",
+						userId: null,
+					})
+					.where(eq(orderMemberTable.id, reuseMemberId));
+			} else {
+				await tx.insert(orderMemberTable).values({
+					accessTokenHash: hashMemberToken(token),
+					createdAt: new Date(),
+					email,
+					expiresAt,
+					id: memberId,
+					invitedByMemberId: access.member?.id ?? null,
+					orderId: access.order.id,
+					role: "member",
+					status: "invited",
+				});
+				await tx
+					.update(bookingGuestTable)
+					.set({ orderMemberId: memberId, updatedAt: new Date() })
+					.where(eq(bookingGuestTable.id, input.bookingGuestId));
+			}
+		});
+
+		trackEvent({
+			metadata: {
+				bookingGuestId: input.bookingGuestId,
+				memberId,
+				orderId: access.order.id,
+			},
+			name: "order_member_invited",
+			provider: this.#provider,
+			type: "integration",
+		});
+		return { email, expiresAt, memberId, token };
+	}
+
+	/**
+	 * Revokes a member's access (owner only) and frees the guest slot they held so
+	 * the owner can fill it or re-invite. The owner cannot be revoked. Idempotent:
+	 * re-revoking an already-revoked member is a no-op.
+	 *
+	 * Slot cleanup depends on how far the member got: an `active` member may have
+	 * entered or verified their own identity, so their slot is wiped back to empty
+	 * (their PII must not linger on a slot the owner reclaims). A still-`invited`
+	 * member never touched the slot, so cancelling only unbinds it, preserving any
+	 * details the owner had pre-filled before inviting.
+	 */
+	async revokeMember(
+		access: ResolvedOrderAccess,
+		memberId: string,
+	): Promise<void> {
+		this.#assertOrderPermission(access, "manage_members");
+		const member = await this.#loadOrderMember(access.order.id, memberId);
+		if (member.role === "owner") {
+			throw new CommerceError(
+				"order_member_immutable",
+				"The booker cannot be removed from the order.",
+				409,
+			);
+		}
+		if (member.status === "revoked") {
+			return;
+		}
+
+		const wipeSlotData = member.status === "active";
+		const now = new Date();
+		await this.#db.transaction(async (tx) => {
+			await tx
+				.update(orderMemberTable)
+				.set({ status: "revoked" })
+				.where(eq(orderMemberTable.id, member.id));
+
+			const slotReset: Partial<typeof bookingGuestTable.$inferInsert> =
+				wipeSlotData
+					? {
+							dateOfBirthEncrypted: null,
+							documentExpiresOnEncrypted: null,
+							documentIssuingCountryEncrypted: null,
+							documentNumberEncrypted: null,
+							documentTypeEncrypted: null,
+							firstNameEncrypted: null,
+							identityStatus: "missing",
+							lastNameEncrypted: null,
+							nationalityEncrypted: null,
+							orderMemberId: null,
+							purgeAfter: null,
+							residenceCountryEncrypted: null,
+							stripeVerificationReportId: null,
+							stripeVerificationSessionId: null,
+							submittedAt: null,
+							updatedAt: now,
+							userId: null,
+							userIdentityDocumentId: null,
+						}
+					: { orderMemberId: null, updatedAt: now };
+
+			await tx
+				.update(bookingGuestTable)
+				.set(slotReset)
+				.where(
+					and(
+						eq(bookingGuestTable.orderId, access.order.id),
+						eq(bookingGuestTable.orderMemberId, member.id),
+					),
+				);
+		});
+
+		trackEvent({
+			metadata: { memberId, orderId: access.order.id },
+			name: "order_member_revoked",
+			provider: this.#provider,
+			type: "integration",
+		});
+	}
+
+	/**
+	 * Re-arms an invite (owner only): rotates the token, resets the 24h window, and
+	 * returns `invited`. Re-invites a previously revoked member too. An already
+	 * accepted member has nothing to resend; the owner's link lives in the
+	 * confirmation email, so neither can be resent here.
+	 */
+	async resendMemberInvite(
+		access: ResolvedOrderAccess,
+		memberId: string,
+		deliver: InviteDelivery,
+	): Promise<InviteMemberResult> {
+		this.#assertOrderPermission(access, "manage_members");
+		const member = await this.#loadOrderMember(access.order.id, memberId);
+		if (member.role === "owner") {
+			throw new CommerceError(
+				"order_member_immutable",
+				"The booker's access link is sent with the confirmation email.",
+				409,
+			);
+		}
+		if (member.status === "active") {
+			throw new CommerceError(
+				"order_member_exists",
+				"That guest has already accepted the invitation.",
+				409,
+			);
+		}
+
+		const token = generateMemberToken();
+		const expiresAt = memberInviteExpiresAt();
+
+		// Deliver first: if the mail provider fails, the member's current token is
+		// left untouched (the old link keeps working) and the caller can retry,
+		// rather than being stranded with a rotated-but-unsent link.
+		await deliver({ email: member.email, token });
+
+		// Re-arm from scratch: clear any acceptance/binding a previously revoked or
+		// expired member carried, so the next redemption records a fresh acceptance.
+		await this.#db
+			.update(orderMemberTable)
+			.set({
+				acceptedAt: null,
+				accessTokenHash: hashMemberToken(token),
+				expiresAt,
+				lastSeenAt: null,
+				status: "invited",
+				userId: null,
+			})
+			.where(eq(orderMemberTable.id, member.id));
+		trackEvent({
+			metadata: { memberId, orderId: access.order.id },
+			name: "order_member_invite_resent",
+			provider: this.#provider,
+			type: "integration",
+		});
+		return { email: member.email, expiresAt, memberId: member.id, token };
+	}
+
+	/** Loads a member row scoped to an order, throwing 404 when it is not present. */
+	async #loadOrderMember(orderId: string, memberId: string) {
+		const [member] = await this.#db
+			.select()
+			.from(orderMemberTable)
+			.where(
+				and(
+					eq(orderMemberTable.id, memberId),
+					eq(orderMemberTable.orderId, orderId),
+				),
+			)
+			.limit(1);
+		if (!member) {
+			throw new CommerceError(
+				"order_member_not_found",
+				"That guest is not on this booking.",
+				404,
+			);
+		}
+		return member;
+	}
+
+	/** Throws 403 when a resolved role lacks the permission an operation requires. */
+	#assertOrderPermission(
+		access: ResolvedOrderAccess,
+		permission: OrderPermission,
+	): void {
+		if (!orderRoleCan(access.role, permission)) {
+			throw new CommerceError(
+				"order_access_denied",
+				"You do not have access to do that.",
+				403,
+			);
+		}
+	}
+
+	async readBookingGuests(
+		access: ResolvedOrderAccess,
+		providerBookingId: string,
+	): Promise<BookingGuestList> {
+		await this.#loadProviderBookingForAccess(access, providerBookingId);
+		const rows = await this.#readBookingGuestRowsWithMember(
+			this.#db,
+			providerBookingId,
+		);
+
+		if (access.role === "owner") {
+			this.#assertOrderPermission(access, "manage_all_guests");
+			return {
+				bookingId: providerBookingId,
+				guests: rows.map((row) =>
+					bookingGuestDto(
+						row,
+						toGuestAssignment(
+							row.orderMemberId && row.memberEmail
+								? {
+										email: row.memberEmail,
+										expiresAt: row.memberExpiresAt,
+										id: row.orderMemberId,
+										status: row.memberStatus ?? "invited",
+									}
+								: null,
+						),
+					),
+				),
+			};
+		}
+
+		this.#assertOrderPermission(access, "manage_own_guest");
+		const member = access.member;
+		if (!member) {
+			throw new CommerceError(
+				"order_access_denied",
+				"You do not have access to do that.",
+				403,
+			);
+		}
+
+		// Per-guest invites bind the slot at invite time, so a member only ever sees
+		// the slot they were invited to fill; there is no lazy claim of a free slot.
+		const owned = rows.find((row) => row.orderMemberId === member.id);
+		if (!owned) {
+			throw new CommerceError(
+				"order_full",
+				"No guest slot is available for this booking.",
+				409,
+			);
+		}
+
+		return {
+			bookingId: providerBookingId,
+			guests: [
+				bookingGuestDto(owned, {
+					email: member.email,
+					expiresAt: null,
+					kind: "member",
+					memberId: member.id,
+					status: "active",
+				}),
+			],
+		};
+	}
+
+	async updateBookingGuests(
+		access: ResolvedOrderAccess,
+		providerBookingId: string,
+		inputs: BookingGuestUpdateInput[],
+	): Promise<BookingGuestList> {
+		if (inputs.length === 0) {
+			throw invalidRequest("At least one guest is required.", [
+				{ message: "At least one guest is required.", path: "guests" },
+			]);
+		}
+
+		await this.#loadProviderBookingForAccess(access, providerBookingId);
+		const now = new Date();
+
+		if (access.role === "owner") {
+			this.#assertOrderPermission(access, "manage_all_guests");
+			await this.#db.transaction(async (tx) => {
+				const booking = await this.#loadProviderBookingForAccess(
+					access,
+					providerBookingId,
+					tx,
+				);
+				for (const [index, input] of inputs.entries()) {
+					if (!input.id) {
+						throw invalidRequest("Guest id is required.", [
+							{
+								message: "Guest id is required.",
+								path: `guests.${index}.id`,
+							},
+						]);
+					}
+					await this.#updateGuestIdentityFields(tx, {
+						guestId: input.id,
+						fields: input.fields,
+						now,
+						orderMemberId: undefined,
+						providerBookingId,
+						purgeAfter: bookingGuestPurgeAfter(booking.stayEndsAt, now),
+					});
+				}
+			});
+		} else {
+			this.#assertOrderPermission(access, "manage_own_guest");
+			const member = access.member;
+			if (!member) {
+				throw new CommerceError(
+					"order_access_denied",
+					"You do not have access to do that.",
+					403,
+				);
+			}
+			if (inputs.length !== 1) {
+				throw invalidRequest("Members can update one guest slot.", [
+					{
+						message: "Members can update one guest slot.",
+						path: "guests",
+					},
+				]);
+			}
+			const input = inputs[0];
+			if (!input) {
+				throw invalidRequest("A guest is required.", [
+					{ message: "A guest is required.", path: "guests" },
+				]);
+			}
+			await this.#db.transaction(async (tx) => {
+				const booking = await this.#loadProviderBookingForAccess(
+					access,
+					providerBookingId,
+					tx,
+				);
+				const target = await this.#loadMemberBoundGuest(tx, {
+					memberId: member.id,
+					providerBookingId,
+					requestedGuestId: input.id ?? null,
+				});
+				await this.#updateGuestIdentityFields(tx, {
+					guestId: target.id,
+					fields: input.fields,
+					now,
+					orderMemberId: member.id,
+					providerBookingId,
+					purgeAfter: bookingGuestPurgeAfter(booking.stayEndsAt, now),
+				});
+			});
+		}
+
+		trackEvent({
+			metadata: { orderId: access.order.id, providerBookingId },
+			name: "guest_identity_provided",
+			provider: this.#provider,
+			type: "integration",
+		});
+
+		return this.readBookingGuests(access, providerBookingId);
+	}
+
+	/**
+	 * Copies a signed-in caller's already-verified account identity into a guest
+	 * slot, skipping a fresh Stripe scan. The encrypted columns are an independent
+	 * legal snapshot (values are copied, not referenced); `userIdentityDocumentId`
+	 * records provenance. The owner may apply it to any slot they manage; a member
+	 * only to the slot they were invited to fill.
+	 */
+	async applyVerifiedAccountIdentityToGuest(
+		access: ResolvedOrderAccess,
+		providerBookingId: string,
+		guestId: string,
+		prefill: GuestIdentityPrefill,
+	): Promise<BookingGuestList> {
+		const booking = await this.#loadProviderBookingForAccess(
+			access,
+			providerBookingId,
+		);
+		const now = new Date();
+		const fields: BookingGuestIdentityFields = {
+			dateOfBirth: prefill.fields.dateOfBirth,
+			documentExpiresOn: prefill.fields.documentExpiresOn,
+			documentIssuingCountry: prefill.fields.documentIssuingCountry,
+			documentNumber: prefill.fields.documentNumber,
+			documentType: prefill.fields.documentType,
+			firstName: prefill.fields.firstName,
+			lastName: prefill.fields.lastName,
+			nationality: prefill.fields.nationality,
+			residenceCountry: prefill.residenceCountry,
+		};
+
+		if (access.role === "owner") {
+			this.#assertOrderPermission(access, "manage_all_guests");
+		} else {
+			this.#assertOrderPermission(access, "manage_own_guest");
+			if (!access.member) {
+				throw new CommerceError(
+					"order_access_denied",
+					"You do not have access to do that.",
+					403,
+				);
+			}
+		}
+
+		await this.#db.transaction(async (tx) => {
+			const member = access.member;
+			const target =
+				access.role === "owner" || !member
+					? await this.#lockBookingGuest(tx, providerBookingId, guestId)
+					: await this.#loadMemberBoundGuest(tx, {
+							memberId: member.id,
+							providerBookingId,
+							requestedGuestId: guestId,
+						});
+
+			await tx
+				.update(bookingGuestTable)
+				.set({
+					...encryptGuestFields(fields),
+					identityStatus: "verified",
+					purgeAfter: bookingGuestPurgeAfter(booking.stayEndsAt, now),
+					stripeVerificationReportId: prefill.fields.stripeVerificationReportId,
+					stripeVerificationSessionId: null,
+					submittedAt: now,
+					updatedAt: now,
+					userIdentityDocumentId: prefill.userIdentityDocumentId,
+				})
+				.where(eq(bookingGuestTable.id, target.id));
+		});
+
+		trackEvent({
+			metadata: { orderId: access.order.id, providerBookingId },
+			name: "guest_identity_verified",
+			provider: this.#provider,
+			type: "integration",
+		});
+
+		return this.readBookingGuests(access, providerBookingId);
+	}
+
+	/**
+	 * Writes only the two residency fields Stripe Identity never returns
+	 * (nationality, country of residence) without disturbing verification state.
+	 * This backs the "confirm residency" step after a verified scan or account
+	 * reuse, so completing those fields does not downgrade a verified slot the way
+	 * a full manual save (which resets to `provided`) would.
+	 */
+	async patchGuestResidency(
+		access: ResolvedOrderAccess,
+		providerBookingId: string,
+		guestId: string,
+		input: { nationality: string; residenceCountry: string },
+	): Promise<BookingGuestList> {
+		await this.#loadProviderBookingForAccess(access, providerBookingId);
+		const nationality = input.nationality.trim().toUpperCase();
+		const residenceCountry = input.residenceCountry.trim().toUpperCase();
+		const isCountry = (value: string) => /^[A-Z]{2}$/.test(value);
+		if (!isCountry(nationality) || !isCountry(residenceCountry)) {
+			throw invalidRequest("A valid two-letter country code is required.", [
+				...(isCountry(nationality)
+					? []
+					: [{ message: "Enter a 2-letter code.", path: "nationality" }]),
+				...(isCountry(residenceCountry)
+					? []
+					: [{ message: "Enter a 2-letter code.", path: "residenceCountry" }]),
+			]);
+		}
+
+		const now = new Date();
+		if (access.role === "owner") {
+			this.#assertOrderPermission(access, "manage_all_guests");
+		} else {
+			this.#assertOrderPermission(access, "manage_own_guest");
+			if (!access.member) {
+				throw new CommerceError(
+					"order_access_denied",
+					"You do not have access to do that.",
+					403,
+				);
+			}
+		}
+
+		await this.#db.transaction(async (tx) => {
+			const member = access.member;
+			const target =
+				access.role === "owner" || !member
+					? await this.#lockBookingGuest(tx, providerBookingId, guestId)
+					: await this.#loadMemberBoundGuest(tx, {
+							memberId: member.id,
+							providerBookingId,
+							requestedGuestId: guestId,
+						});
+			await tx
+				.update(bookingGuestTable)
+				.set({
+					nationalityEncrypted: encryptGuestField(nationality),
+					residenceCountryEncrypted: encryptGuestField(residenceCountry),
+					updatedAt: now,
+				})
+				.where(eq(bookingGuestTable.id, target.id));
+		});
+
+		return this.readBookingGuests(access, providerBookingId);
+	}
+
+	async prepareBookingGuestIdentitySession(
+		access: ResolvedOrderAccess,
+		providerBookingId: string,
+		guestId: string,
+	): Promise<BookingGuestIdentitySessionTarget> {
+		await this.#loadProviderBookingForAccess(access, providerBookingId);
+
+		if (access.role === "owner") {
+			this.#assertOrderPermission(access, "manage_all_guests");
+			await this.#loadBookingGuestForAccess(providerBookingId, guestId);
+			return {
+				bookingGuestId: guestId,
+				orderId: access.order.id,
+				providerBookingId,
+			};
+		}
+
+		this.#assertOrderPermission(access, "manage_own_guest");
+		const member = access.member;
+		if (!member) {
+			throw new CommerceError(
+				"order_access_denied",
+				"You do not have access to do that.",
+				403,
+			);
+		}
+
+		await this.#db.transaction(async (tx) => {
+			await this.#loadMemberBoundGuest(tx, {
+				memberId: member.id,
+				providerBookingId,
+				requestedGuestId: guestId,
+			});
+		});
+
+		return {
+			bookingGuestId: guestId,
+			orderId: access.order.id,
+			providerBookingId,
+		};
+	}
+
+	async linkBookingGuestIdentitySession(
+		guestId: string,
+		sessionId: string,
+		status: Exclude<IdentityVerificationStatus, "unstarted">,
+	): Promise<void> {
+		const now = new Date();
+		const [updated] = await this.#db
+			.update(bookingGuestTable)
+			.set({
+				identityStatus: identityStatusToBookingGuestStatus(status),
+				stripeVerificationSessionId: sessionId,
+				updatedAt: now,
+			})
+			.where(eq(bookingGuestTable.id, guestId))
+			.returning({ id: bookingGuestTable.id });
+		if (!updated) {
+			throw new CommerceError(
+				"booking_guest_not_found",
+				"Guest not found.",
+				404,
+			);
+		}
+	}
+
+	async applyBookingGuestIdentityStatus({
+		bookingGuestId,
+		sessionId,
+		status,
+		statusChangedAt,
+		verifiedFields,
+	}: {
+		bookingGuestId?: string | null;
+		sessionId: string;
+		status: Exclude<IdentityVerificationStatus, "unstarted">;
+		statusChangedAt: string | null;
+		verifiedFields?: VerifiedIdentityDocumentFields;
+	}): Promise<string | null> {
+		const findTarget = (where: SQL) =>
+			this.#db
+				.select({
+					...bookingGuestSelection,
+					stayEndsAt: providerBookingTable.stayEndsAt,
+				})
+				.from(bookingGuestTable)
+				.innerJoin(
+					providerBookingTable,
+					eq(providerBookingTable.id, bookingGuestTable.providerBookingId),
+				)
+				.where(where)
+				.limit(1);
+
+		const [linkedTarget] = await findTarget(
+			eq(bookingGuestTable.stripeVerificationSessionId, sessionId),
+		);
+		const [fallbackTarget] =
+			!linkedTarget && bookingGuestId
+				? await findTarget(eq(bookingGuestTable.id, bookingGuestId))
+				: [];
+		const existing = linkedTarget ?? fallbackTarget;
+
+		if (!existing) {
+			return null;
+		}
+
+		const nextStatus = identityStatusToBookingGuestStatus(status);
+		if (existing.identityStatus === "verified" && nextStatus !== "verified") {
+			return existing.id;
+		}
+
+		const now = new Date();
+		const statusAt = parseWebhookTimestamp(statusChangedAt) ?? now;
+		const set: Partial<typeof bookingGuestTable.$inferInsert> = {
+			identityStatus: nextStatus,
+			purgeAfter:
+				existing.purgeAfter ?? bookingGuestPurgeAfter(existing.stayEndsAt, now),
+			stripeVerificationSessionId:
+				existing.stripeVerificationSessionId ?? sessionId,
+			updatedAt: now,
+		};
+
+		if (
+			(nextStatus === "processing" || nextStatus === "verified") &&
+			!existing.submittedAt
+		) {
+			set.submittedAt = statusAt;
+		}
+
+		if (nextStatus === "verified") {
+			if (!verifiedFields) {
+				throw new Error("verified guest identity fields are required");
+			}
+			Object.assign(set, {
+				dateOfBirthEncrypted: encryptVerifiedGuestField(
+					verifiedFields.dateOfBirth,
+					existing.dateOfBirthEncrypted,
+				),
+				documentExpiresOnEncrypted: encryptVerifiedGuestField(
+					verifiedFields.documentExpiresOn,
+					existing.documentExpiresOnEncrypted,
+				),
+				documentIssuingCountryEncrypted: encryptVerifiedGuestField(
+					verifiedFields.documentIssuingCountry,
+					existing.documentIssuingCountryEncrypted,
+				),
+				documentNumberEncrypted: encryptVerifiedGuestField(
+					verifiedFields.documentNumber,
+					existing.documentNumberEncrypted,
+				),
+				documentTypeEncrypted: encryptVerifiedGuestField(
+					verifiedFields.documentType,
+					existing.documentTypeEncrypted,
+				),
+				firstNameEncrypted: encryptVerifiedGuestField(
+					verifiedFields.firstName,
+					existing.firstNameEncrypted,
+				),
+				lastNameEncrypted: encryptVerifiedGuestField(
+					verifiedFields.lastName,
+					existing.lastNameEncrypted,
+				),
+				nationalityEncrypted: encryptVerifiedGuestField(
+					verifiedFields.nationality,
+					existing.nationalityEncrypted,
+				),
+				stripeVerificationReportId: verifiedFields.stripeVerificationReportId,
+			});
+		}
+
+		await this.#db
+			.update(bookingGuestTable)
+			.set(set)
+			.where(eq(bookingGuestTable.id, existing.id));
+
+		if (nextStatus === "verified") {
+			trackEvent({
+				metadata: {
+					bookingGuestId: existing.id,
+					providerBookingId: existing.providerBookingId,
+				},
+				name: "guest_identity_verified",
+				provider: this.#provider,
+				type: "integration",
+			});
+		}
+
+		return existing.id;
+	}
+
+	async #loadProviderBookingForAccess(
+		access: ResolvedOrderAccess,
+		providerBookingId: string,
+		db: DbExecutor = this.#db,
+	): Promise<{ id: string; stayEndsAt: Date | null }> {
+		const [booking] = await db
+			.select({
+				id: providerBookingTable.id,
+				stayEndsAt: providerBookingTable.stayEndsAt,
+			})
+			.from(providerBookingTable)
+			.where(
+				and(
+					eq(providerBookingTable.id, providerBookingId),
+					eq(providerBookingTable.orderId, access.order.id),
+				),
+			)
+			.limit(1);
+		if (!booking) {
+			throw new CommerceError(
+				"booking_guest_not_found",
+				"Booking not found.",
+				404,
+			);
+		}
+		return booking;
+	}
+
+	/**
+	 * Guest rows joined to their bound member (if any), so the owner view can label
+	 * each slot as unassigned, invited, or filled by a specific person. The join is
+	 * left so unassigned slots (the common case) still come back.
+	 */
+	async #readBookingGuestRowsWithMember(
+		db: DbExecutor,
+		providerBookingId: string,
+	) {
+		return db
+			.select({
+				...bookingGuestSelection,
+				memberEmail: orderMemberTable.email,
+				memberExpiresAt: orderMemberTable.expiresAt,
+				memberStatus: orderMemberTable.status,
+			})
+			.from(bookingGuestTable)
+			.leftJoin(
+				orderMemberTable,
+				eq(orderMemberTable.id, bookingGuestTable.orderMemberId),
+			)
+			.where(eq(bookingGuestTable.providerBookingId, providerBookingId))
+			.orderBy(asc(bookingGuestTable.position));
+	}
+
+	async #loadBookingGuestForAccess(providerBookingId: string, guestId: string) {
+		const [guest] = await this.#db
+			.select(bookingGuestSelection)
+			.from(bookingGuestTable)
+			.where(
+				and(
+					eq(bookingGuestTable.id, guestId),
+					eq(bookingGuestTable.providerBookingId, providerBookingId),
+				),
+			)
+			.limit(1);
+		if (!guest) {
+			throw new CommerceError(
+				"booking_guest_not_found",
+				"Guest not found.",
+				404,
+			);
+		}
+		return guest;
+	}
+
+	/** Loads and locks a single guest slot by id within a booking (owner writes). */
+	async #lockBookingGuest(
+		tx: Transaction,
+		providerBookingId: string,
+		guestId: string,
+	) {
+		const [guest] = await tx
+			.select(bookingGuestSelection)
+			.from(bookingGuestTable)
+			.where(
+				and(
+					eq(bookingGuestTable.id, guestId),
+					eq(bookingGuestTable.providerBookingId, providerBookingId),
+				),
+			)
+			.limit(1)
+			.for("update");
+		if (!guest) {
+			throw new CommerceError(
+				"booking_guest_not_found",
+				"Guest not found.",
+				404,
+			);
+		}
+		return guest;
+	}
+
+	/**
+	 * Loads the single slot a member was invited to fill, locking it for the
+	 * enclosing write. Binding happens at invite time, so a member without a bound
+	 * slot has no business editing one (409); a request that names a different slot
+	 * is rejected (403). Replaces the earlier lazy first-free-slot claim.
+	 */
+	async #loadMemberBoundGuest(
+		tx: Transaction,
+		input: {
+			memberId: string;
+			providerBookingId: string;
+			requestedGuestId: string | null;
+		},
+	) {
+		const rows = await tx
+			.select(bookingGuestSelection)
+			.from(bookingGuestTable)
+			.where(eq(bookingGuestTable.providerBookingId, input.providerBookingId))
+			.orderBy(asc(bookingGuestTable.position))
+			.for("update");
+		const owned = rows.find((row) => row.orderMemberId === input.memberId);
+		if (!owned) {
+			throw new CommerceError(
+				"order_full",
+				"No guest slot is available for this booking.",
+				409,
+			);
+		}
+		if (input.requestedGuestId && input.requestedGuestId !== owned.id) {
+			throw new CommerceError(
+				"order_access_denied",
+				"You can only update your own guest details.",
+				403,
+			);
+		}
+		return owned;
+	}
+
+	async #updateGuestIdentityFields(
+		tx: Transaction,
+		input: {
+			fields: BookingGuestIdentityFields;
+			guestId: string;
+			now: Date;
+			orderMemberId: string | undefined;
+			providerBookingId: string;
+			purgeAfter: Date;
+		},
+	) {
+		const [existing] = await tx
+			.select(bookingGuestSelection)
+			.from(bookingGuestTable)
+			.where(
+				and(
+					eq(bookingGuestTable.id, input.guestId),
+					eq(bookingGuestTable.providerBookingId, input.providerBookingId),
+				),
+			)
+			.limit(1)
+			.for("update");
+		if (!existing) {
+			throw new CommerceError(
+				"booking_guest_not_found",
+				"Guest not found.",
+				404,
+			);
+		}
+		if (
+			input.orderMemberId !== undefined &&
+			existing.orderMemberId !== null &&
+			existing.orderMemberId !== input.orderMemberId
+		) {
+			throw new CommerceError(
+				"order_access_denied",
+				"You can only update your own guest details.",
+				403,
+			);
+		}
+
+		await tx
+			.update(bookingGuestTable)
+			.set({
+				...encryptGuestFields(input.fields),
+				identityStatus: "provided",
+				orderMemberId: input.orderMemberId ?? existing.orderMemberId,
+				purgeAfter: input.purgeAfter,
+				stripeVerificationReportId: null,
+				stripeVerificationSessionId: null,
+				submittedAt: input.now,
+				updatedAt: input.now,
+			})
+			.where(eq(bookingGuestTable.id, input.guestId));
+	}
+
+	async readOrderConversations(
+		access: ResolvedOrderAccess,
+	): Promise<ConversationSummary[]> {
+		this.#assertOrderPermission(access, "chat");
+		const rows = await this.#db
+			.select(conversationSummarySelection)
+			.from(conversationTable)
+			.where(eq(conversationTable.orderId, access.order.id))
+			.orderBy(
+				desc(conversationTable.lastMessageAt),
+				asc(conversationTable.id),
+			);
+		return rows.map((row) => this.#toConversationSummary(row));
+	}
+
+	async readConversationMessages(
+		access: ResolvedOrderAccess,
+		conversationId: string,
+		options: { limit?: number } = {},
+	): Promise<ConversationMessageDto[]> {
+		this.#assertOrderPermission(access, "chat");
+		await this.#loadConversationForAccess(access, conversationId);
+		const limit = Math.min(
+			Math.max(options.limit ?? DEFAULT_CONVERSATION_MESSAGE_LIMIT, 1),
+			MAX_CONVERSATION_MESSAGE_LIMIT,
+		);
+		const rows = await this.#db
+			.select(conversationMessageSelection)
+			.from(conversationMessageTable)
+			.where(eq(conversationMessageTable.conversationId, conversationId))
+			.orderBy(
+				desc(conversationMessageTable.sentAt),
+				desc(conversationMessageTable.id),
+			)
+			.limit(limit);
+		return rows.reverse().map((row) => this.#toMessageDto(row));
+	}
+
+	async sendConversationMessage(
+		access: ResolvedOrderAccess,
+		conversationId: string,
+		input: { body: string },
+		options: { excludeSocketId?: string | null } = {},
+	): Promise<ConversationMessageDto> {
+		this.#assertOrderPermission(access, "chat");
+		const excludeSocketId = options.excludeSocketId ?? null;
+		const body = trimMessageBody(input.body);
+		if (body.length === 0) {
+			throw invalidRequest("Message body is required.", [
+				{ message: "Message body is required.", path: "body" },
+			]);
+		}
+
+		const conversation = await this.#loadConversationForAccess(
+			access,
+			conversationId,
+		);
+		if (conversation.status === "archived" || !conversation.externalThreadId) {
+			throw new CommerceError(
+				"conversation_unavailable",
+				"This conversation is not ready yet.",
+				409,
+			);
+		}
+
+		const now = new Date();
+		const [inserted] = await this.#db
+			.insert(conversationMessageTable)
+			.values({
+				body,
+				conversationId,
+				createdAt: now,
+				deliveryStatus: "pending",
+				id: crypto.randomUUID(),
+				isAutomatic: false,
+				orderId: access.order.id,
+				senderMemberId: access.member?.id ?? null,
+				senderType: "guest",
+				sentAt: now,
+				updatedAt: now,
+			})
+			.returning(conversationMessageSelection);
+		if (!inserted) {
+			throw new CommerceError(
+				"conversation_unavailable",
+				"Could not create the message.",
+				503,
+			);
+		}
+
+		const pending = this.#toMessageDto(inserted);
+		await this.#publishMessageCreatedSafe(
+			access.order.id,
+			conversationId,
+			pending,
+			excludeSocketId,
+		);
+
+		const gateway = this.#conversationGatewayFor(conversation.provider);
+		if (!gateway) {
+			return this.#markConversationMessageFailed(
+				access.order.id,
+				conversationId,
+				pending.id,
+				"Conversation gateway is not configured.",
+				excludeSocketId,
+			);
+		}
+
+		try {
+			const externalMessageId = await gateway.sendMessage(
+				conversation.externalThreadId,
+				body,
+				pending.id,
+			);
+			const delivered = await this.#markConversationMessageDelivered(
+				access.order.id,
+				conversationId,
+				pending.id,
+				externalMessageId,
+				now,
+				excludeSocketId,
+			);
+			trackEvent({
+				metadata: {
+					conversationId,
+					messageId: delivered.id,
+					orderId: access.order.id,
+				},
+				name: "conversation_message_sent",
+				provider: conversation.provider,
+				type: "integration",
+			});
+			return delivered;
+		} catch (error) {
+			const message = error instanceof Error ? error.message : String(error);
+			trackEvent({
+				metadata: {
+					conversationId,
+					error: message,
+					messageId: pending.id,
+					orderId: access.order.id,
+				},
+				name: "conversation_message_send_failed",
+				provider: conversation.provider,
+				severity: "warning",
+				type: "integration",
+			});
+			return this.#markConversationMessageFailed(
+				access.order.id,
+				conversationId,
+				pending.id,
+				message,
+				excludeSocketId,
+			);
+		}
+	}
+
+	async retryConversationMessage(
+		access: ResolvedOrderAccess,
+		conversationId: string,
+		messageId: string,
+		options: { excludeSocketId?: string | null } = {},
+	): Promise<ConversationMessageDto> {
+		this.#assertOrderPermission(access, "chat");
+		const excludeSocketId = options.excludeSocketId ?? null;
+		const conversation = await this.#loadConversationForAccess(
+			access,
+			conversationId,
+		);
+		if (conversation.status === "archived" || !conversation.externalThreadId) {
+			throw new CommerceError(
+				"conversation_unavailable",
+				"This conversation is not ready yet.",
+				409,
+			);
+		}
+
+		const [messageRow] = await this.#db
+			.select(conversationMessageSelection)
+			.from(conversationMessageTable)
+			.where(
+				and(
+					eq(conversationMessageTable.id, messageId),
+					eq(conversationMessageTable.conversationId, conversationId),
+					eq(conversationMessageTable.deliveryStatus, "failed"),
+				),
+			)
+			.limit(1);
+		if (!messageRow) {
+			throw new CommerceError(
+				"conversation_message_not_found",
+				"Message not found.",
+				404,
+			);
+		}
+		if (
+			access.role !== "owner" &&
+			messageRow.senderMemberId !== access.member?.id
+		) {
+			throw new CommerceError(
+				"order_access_denied",
+				"You do not have access to do that.",
+				403,
+			);
+		}
+
+		const [pending] = await this.#db
+			.update(conversationMessageTable)
+			.set({ deliveryStatus: "pending", updatedAt: new Date() })
+			.where(
+				and(
+					eq(conversationMessageTable.id, messageId),
+					eq(conversationMessageTable.conversationId, conversationId),
+					eq(conversationMessageTable.deliveryStatus, "failed"),
+				),
+			)
+			.returning(conversationMessageSelection);
+		if (!pending) {
+			throw new CommerceError(
+				"conversation_message_not_found",
+				"Message not found.",
+				404,
+			);
+		}
+		await this.#publishMessageCreatedSafe(
+			access.order.id,
+			conversationId,
+			this.#toMessageDto(pending),
+			excludeSocketId,
+		);
+
+		const gateway = this.#conversationGatewayFor(conversation.provider);
+		if (!gateway) {
+			return this.#markConversationMessageFailed(
+				access.order.id,
+				conversationId,
+				messageId,
+				"Conversation gateway is not configured.",
+				excludeSocketId,
+			);
+		}
+
+		try {
+			const externalMessageId = await gateway.sendMessage(
+				conversation.externalThreadId,
+				pending.body,
+				messageId,
+			);
+			return this.#markConversationMessageDelivered(
+				access.order.id,
+				conversationId,
+				messageId,
+				externalMessageId,
+				new Date(),
+				excludeSocketId,
+			);
+		} catch (error) {
+			return this.#markConversationMessageFailed(
+				access.order.id,
+				conversationId,
+				messageId,
+				error instanceof Error ? error.message : String(error),
+				excludeSocketId,
+			);
+		}
+	}
+
+	async reconcileConversations(
+		options: { limit?: number; now?: Date } = {},
+	): Promise<ReconcileConversationsSummary> {
+		const now = options.now ?? new Date();
+		const limit = options.limit ?? 50;
+		const summary: ReconcileConversationsSummary = {
+			failed: 0,
+			importedMessages: 0,
+			linked: 0,
+			provisioned: 0,
+			scanned: 0,
+			synced: 0,
+		};
+
+		const missingRows = await this.#db
+			.select({
+				orderId: orderItemTable.orderId,
+				provider: providerBookingTable.provider,
+				providerBookingId: providerBookingTable.id,
+				providerReservationId: providerBookingTable.providerReservationId,
+			})
+			.from(providerBookingTable)
+			.innerJoin(
+				orderItemTable,
+				eq(orderItemTable.id, providerBookingTable.orderItemId),
+			)
+			.innerJoin(orderTable, eq(orderTable.id, orderItemTable.orderId))
+			.leftJoin(
+				conversationTable,
+				eq(conversationTable.providerBookingId, providerBookingTable.id),
+			)
+			.where(
+				and(
+					eq(orderTable.status, "confirmed"),
+					eq(providerBookingTable.normalizedStatus, "confirmed"),
+					sql`${providerBookingTable.providerReservationId} is not null`,
+					isNull(conversationTable.id),
+				),
+			)
+			.limit(limit);
+
+		for (const row of missingRows) {
+			summary.scanned += 1;
+			try {
+				const provisioned = await this.#provisionConversation(row, now);
+				if (provisioned.created) {
+					summary.provisioned += 1;
+				}
+				if (provisioned.linked) {
+					summary.linked += 1;
+				}
+			} catch (error) {
+				summary.failed += 1;
+				this.#trackConversationReconciliationFailure(
+					row.provider,
+					row.providerBookingId,
+					error,
+				);
+			}
+		}
+
+		const conversationRows = await this.#db
+			.select({
+				externalThreadId: conversationTable.externalThreadId,
+				id: conversationTable.id,
+				orderId: conversationTable.orderId,
+				provider: conversationTable.provider,
+				providerBookingId: conversationTable.providerBookingId,
+				status: conversationTable.status,
+			})
+			.from(conversationTable)
+			.where(inArray(conversationTable.status, ["pending", "active"]))
+			.orderBy(sql`${conversationTable.lastSyncedAt} asc nulls first`)
+			.limit(limit);
+
+		for (const conversation of conversationRows) {
+			summary.scanned += 1;
+			try {
+				const ready =
+					conversation.externalThreadId !== null
+						? conversation
+						: await this.#tryLinkConversation(conversation, now);
+				if (ready && ready.externalThreadId !== conversation.externalThreadId) {
+					summary.linked += 1;
+				}
+				if (!ready?.externalThreadId) {
+					continue;
+				}
+				const imported = await this.#syncConversationMessages(
+					ready.orderId,
+					ready.id,
+					ready.provider,
+					ready.externalThreadId,
+					now,
+				);
+				summary.importedMessages += imported;
+				summary.synced += 1;
+			} catch (error) {
+				summary.failed += 1;
+				this.#trackConversationReconciliationFailure(
+					conversation.provider,
+					conversation.providerBookingId ?? conversation.id,
+					error,
+				);
+			}
+		}
+
+		return summary;
+	}
+
+	/**
+	 * Aggregates the durable order-hub read model from a resolved access context.
+	 * Role drives visibility: the `owner` sees pricing, the tax/billing contact,
+	 * the member roster, and per-item money/charges; a `member` sees only the
+	 * non-sensitive booking shape (dates, property, statuses, guest-progress
+	 * counts). Authorization is the caller's responsibility — pass the result of
+	 * {@link resolveOrderAccess}; this never re-checks the token.
+	 */
+	async readOrderDetail(access: ResolvedOrderAccess): Promise<OrderDetail> {
+		const isOwner = access.role === "owner";
+		const orderId = access.order.id;
+
+		const [orderRow] = await this.#db
+			.select({
+				amountPaidMinor: orderTable.amountPaidMinor,
+				amountRefundedMinor: orderTable.amountRefundedMinor,
+				createdAt: orderTable.createdAt,
+				currency: orderTable.currency,
+				discountMinor: orderTable.discountMinor,
+				publicReference: orderTable.publicReference,
+				status: orderTable.status,
+				stripePaymentMethodBrand: orderTable.stripePaymentMethodBrand,
+				stripePaymentMethodLast4: orderTable.stripePaymentMethodLast4,
+				stripePaymentMethodType: orderTable.stripePaymentMethodType,
+				subtotalMinor: orderTable.subtotalMinor,
+				taxMinor: orderTable.taxMinor,
+				totalMinor: orderTable.totalMinor,
+			})
+			.from(orderTable)
+			.where(eq(orderTable.id, orderId))
+			.limit(1);
+
+		if (!orderRow) {
+			throw new CommerceError("order_not_found", "Order not found.", 404);
+		}
+
+		const itemRows = await this.#db
+			.select({
+				adults: accommodationItemDetailTable.adults,
+				bookingId: providerBookingTable.id,
+				bookingNeedsRecovery: providerBookingTable.needsRecovery,
+				bookingStatus: providerBookingTable.normalizedStatus,
+				checkIn: accommodationItemDetailTable.checkIn,
+				checkOut: accommodationItemDetailTable.checkOut,
+				children: accommodationItemDetailTable.children,
+				currency: orderItemTable.currency,
+				discountMinor: orderItemTable.discountMinor,
+				guests: accommodationItemDetailTable.guests,
+				id: orderItemTable.id,
+				imageUrl: orderItemTable.imageUrlSnapshot,
+				infants: accommodationItemDetailTable.infants,
+				listingExternalId: accommodationItemDetailTable.hostifyListingId,
+				nights: accommodationItemDetailTable.nights,
+				pets: accommodationItemDetailTable.pets,
+				propertyTimezone: accommodationItemDetailTable.propertyTimezone,
+				subtotalMinor: orderItemTable.subtotalMinor,
+				taxMinor: orderItemTable.taxMinor,
+				title: orderItemTable.titleSnapshot,
+				totalMinor: orderItemTable.totalMinor,
+				type: orderItemTable.type,
+			})
+			.from(orderItemTable)
+			.leftJoin(
+				accommodationItemDetailTable,
+				eq(accommodationItemDetailTable.orderItemId, orderItemTable.id),
+			)
+			.leftJoin(
+				providerBookingTable,
+				eq(providerBookingTable.orderItemId, orderItemTable.id),
+			)
+			.where(eq(orderItemTable.orderId, orderId))
+			.orderBy(asc(orderItemTable.position));
+
+		const bookingIds = itemRows
+			.map((row) => row.bookingId)
+			.filter((id): id is string => id !== null);
+
+		const guestRows = bookingIds.length
+			? await this.#db
+					.select({
+						identityStatus: bookingGuestTable.identityStatus,
+						providerBookingId: bookingGuestTable.providerBookingId,
+					})
+					.from(bookingGuestTable)
+					.where(inArray(bookingGuestTable.providerBookingId, bookingIds))
+			: [];
+
+		const statusesByBooking = new Map<
+			string,
+			(typeof guestRows)[number]["identityStatus"][]
+		>();
+		for (const guest of guestRows) {
+			const bucket = statusesByBooking.get(guest.providerBookingId) ?? [];
+			bucket.push(guest.identityStatus);
+			statusesByBooking.set(guest.providerBookingId, bucket);
+		}
+
+		const chargesByItem = new Map<string, OrderDetailCharge[]>();
+		if (isOwner && itemRows.length > 0) {
+			const chargeRows = await this.#db
+				.select({
+					grossMinor: orderItemChargeTable.grossMinor,
+					kind: orderItemChargeTable.kind,
+					name: orderItemChargeTable.name,
+					orderItemId: orderItemChargeTable.orderItemId,
+					position: orderItemChargeTable.position,
+					quantity: orderItemChargeTable.quantity,
+					taxMinor: orderItemChargeTable.taxMinor,
+				})
+				.from(orderItemChargeTable)
+				.where(
+					inArray(
+						orderItemChargeTable.orderItemId,
+						itemRows.map((row) => row.id),
+					),
+				)
+				.orderBy(asc(orderItemChargeTable.position));
+			for (const charge of chargeRows) {
+				const bucket = chargesByItem.get(charge.orderItemId) ?? [];
+				bucket.push({
+					grossMinor: charge.grossMinor,
+					kind: charge.kind,
+					name: charge.name,
+					position: charge.position,
+					quantity: charge.quantity,
+					taxMinor: charge.taxMinor,
+				});
+				chargesByItem.set(charge.orderItemId, bucket);
+			}
+		}
+
+		const items: OrderDetailItem[] = itemRows.map((row) => ({
+			adults: row.adults,
+			charges: isOwner ? (chargesByItem.get(row.id) ?? []) : null,
+			checkIn: row.checkIn,
+			checkOut: row.checkOut,
+			children: row.children,
+			guestProgress: summarizeGuestProgress(
+				row.bookingId ? (statusesByBooking.get(row.bookingId) ?? []) : [],
+			),
+			guests: row.guests,
+			id: row.id,
+			imageUrl: row.imageUrl,
+			infants: row.infants,
+			listingExternalId: row.listingExternalId,
+			nights: row.nights,
+			pets: row.pets,
+			pricing: isOwner
+				? {
+						currency: row.currency,
+						discountMinor: row.discountMinor,
+						subtotalMinor: row.subtotalMinor,
+						taxMinor: row.taxMinor,
+						totalMinor: row.totalMinor,
+					}
+				: null,
+			propertyTimezone: row.propertyTimezone,
+			providerBooking:
+				row.bookingId && row.bookingStatus
+					? {
+							id: row.bookingId,
+							needsRecovery: row.bookingNeedsRecovery ?? false,
+							status: row.bookingStatus,
+						}
+					: null,
+			title: row.title,
+			type: row.type,
+		}));
+
+		const orderGuestProgress = summarizeGuestProgress(
+			guestRows.map((guest) => guest.identityStatus),
+		);
+
+		let contact: OrderContactSummary | null = null;
+		let members: OrderDetailMember[] | null = null;
+		if (isOwner) {
+			const [contactRow] = await this.#db
+				.select({
+					billingAddress: orderContactTable.billingAddress,
+					companyName: orderContactTable.companyName,
+					email: orderContactTable.email,
+					isCompany: orderContactTable.isCompany,
+					name: orderContactTable.name,
+					notes: orderContactTable.notes,
+					phoneE164: orderContactTable.phoneE164,
+					taxNumber: orderContactTable.taxNumber,
+				})
+				.from(orderContactTable)
+				.where(eq(orderContactTable.orderId, orderId))
+				.limit(1);
+			contact = contactRow
+				? {
+						billingAddress: contactRow.billingAddress,
+						companyName: contactRow.companyName,
+						email: contactRow.email,
+						isCompany: contactRow.isCompany,
+						name: contactRow.name,
+						notes: contactRow.notes,
+						phoneE164: contactRow.phoneE164,
+						taxNumber: contactRow.taxNumber,
+					}
+				: null;
+
+			const memberRows = await this.#db
+				.select({
+					acceptedAt: orderMemberTable.acceptedAt,
+					createdAt: orderMemberTable.createdAt,
+					email: orderMemberTable.email,
+					id: orderMemberTable.id,
+					role: orderMemberTable.role,
+					status: orderMemberTable.status,
+				})
+				.from(orderMemberTable)
+				.where(eq(orderMemberTable.orderId, orderId))
+				.orderBy(asc(orderMemberTable.createdAt));
+			members = memberRows.map((member) => ({
+				acceptedAt: member.acceptedAt ? member.acceptedAt.toISOString() : null,
+				email: member.email,
+				id: member.id,
+				invitedAt: member.createdAt.toISOString(),
+				isYou: access.member?.id === member.id,
+				role: member.role,
+				status: member.status,
+			}));
+		}
+
+		const bookingStatus = toOrderBookingStatus(orderRow.status);
+		const conversations = orderRoleCan(access.role, "chat")
+			? await this.readOrderConversations(access)
+			: [];
+
+		return {
+			bookingStatus,
+			contact,
+			conversationAvailability:
+				summarizeConversationAvailability(conversations),
+			createdAt: orderRow.createdAt.toISOString(),
+			conversations,
+			currency: orderRow.currency,
+			guestProgress: orderGuestProgress,
+			items,
+			members,
+			paymentMethod: isOwner ? paymentMethodFromOrderRow(orderRow) : null,
+			pricing: isOwner
+				? {
+						amountPaidMinor: orderRow.amountPaidMinor,
+						amountRefundedMinor: orderRow.amountRefundedMinor,
+						currency: orderRow.currency,
+						discountMinor: orderRow.discountMinor,
+						subtotalMinor: orderRow.subtotalMinor,
+						taxMinor: orderRow.taxMinor,
+						totalMinor: orderRow.totalMinor,
+					}
+				: null,
+			provisioningSubState: toOrderProvisioningSubState({
+				amountPaidMinor: orderRow.amountPaidMinor,
+				amountRefundedMinor: orderRow.amountRefundedMinor,
+				bookingStatus,
+			}),
+			reference: orderRow.publicReference,
+			role: access.role,
+		};
+	}
+
+	#conversationGatewayFor(
+		provider: string,
+	): ProviderConversationGateway | null {
+		return this.#resolveConversationGateway?.(provider) ?? null;
+	}
+
+	#toConversationSummary(row: {
+		externalThreadId: string | null;
+		id: string;
+		lastMessageAt: Date | null;
+		lastMessagePreview: string | null;
+		providerBookingId: string | null;
+		status: ConversationSummary["status"];
+		unreadCount: number;
+	}): ConversationSummary {
+		return {
+			externalThreadId: row.externalThreadId,
+			id: row.id,
+			lastMessageAt: row.lastMessageAt?.toISOString() ?? null,
+			lastMessagePreview: row.lastMessagePreview,
+			providerBookingId: row.providerBookingId,
+			status: row.status,
+			unreadCount: row.unreadCount,
+		};
+	}
+
+	#toMessageDto(row: {
+		body: string;
+		conversationId: string;
+		deliveryStatus: ConversationMessageDto["deliveryStatus"];
+		externalMessageId: string | null;
+		id: string;
+		isAutomatic: boolean;
+		readAt: Date | null;
+		senderMemberId: string | null;
+		senderType: ConversationMessageDto["senderType"];
+		sentAt: Date;
+	}): ConversationMessageDto {
+		return {
+			body: row.body,
+			conversationId: row.conversationId,
+			deliveryStatus: row.deliveryStatus,
+			externalMessageId: row.externalMessageId,
+			id: row.id,
+			isAutomatic: row.isAutomatic,
+			readAt: row.readAt?.toISOString() ?? null,
+			senderMemberId: row.senderMemberId,
+			senderType: row.senderType,
+			sentAt: row.sentAt.toISOString(),
+		};
+	}
+
+	async #loadConversationForAccess(
+		access: ResolvedOrderAccess,
+		conversationId: string,
+	): Promise<{
+		externalThreadId: string | null;
+		id: string;
+		orderId: string;
+		provider: string;
+		providerBookingId: string | null;
+		status: ConversationSummary["status"];
+	}> {
+		const [conversation] = await this.#db
+			.select({
+				externalThreadId: conversationTable.externalThreadId,
+				id: conversationTable.id,
+				orderId: conversationTable.orderId,
+				provider: conversationTable.provider,
+				providerBookingId: conversationTable.providerBookingId,
+				status: conversationTable.status,
+			})
+			.from(conversationTable)
+			.where(
+				and(
+					eq(conversationTable.id, conversationId),
+					eq(conversationTable.orderId, access.order.id),
+				),
+			)
+			.limit(1);
+		if (!conversation) {
+			throw new CommerceError(
+				"conversation_not_found",
+				"Conversation not found.",
+				404,
+			);
+		}
+		return conversation;
+	}
+
+	async #touchConversationPreview(
+		orderId: string,
+		conversationId: string,
+		body: string,
+		sentAt: Date,
+	): Promise<void> {
+		const [summary] = await this.#db
+			.update(conversationTable)
+			.set({
+				lastMessageAt: sentAt,
+				lastMessagePreview: normalizeConversationPreview(body),
+				updatedAt: new Date(),
+			})
+			.where(eq(conversationTable.id, conversationId))
+			.returning(conversationSummarySelection);
+		if (summary) {
+			await this.#publishConversationUpdatedSafe(
+				orderId,
+				conversationId,
+				this.#toConversationSummary(summary),
+			);
+		}
+	}
+
+	async #markConversationMessageDelivered(
+		orderId: string,
+		conversationId: string,
+		messageId: string,
+		externalMessageId: string | null,
+		fallbackSentAt: Date,
+		excludeSocketId: string | null = null,
+	): Promise<ConversationMessageDto> {
+		const [updated] = await this.#db
+			.update(conversationMessageTable)
+			.set({
+				deliveryStatus: "sent",
+				externalMessageId,
+				sentAt: fallbackSentAt,
+				updatedAt: new Date(),
+			})
+			.where(eq(conversationMessageTable.id, messageId))
+			.returning(conversationMessageSelection);
+		if (!updated) {
+			throw new CommerceError(
+				"conversation_message_not_found",
+				"Message not found.",
+				404,
+			);
+		}
+		const dto = this.#toMessageDto(updated);
+		await this.#touchConversationPreview(
+			orderId,
+			conversationId,
+			dto.body,
+			updated.sentAt,
+		);
+		await this.#publishMessageCreatedSafe(
+			orderId,
+			conversationId,
+			dto,
+			excludeSocketId,
+		);
+		return dto;
+	}
+
+	async #markConversationMessageFailed(
+		orderId: string,
+		conversationId: string,
+		messageId: string,
+		errorMessage: string,
+		excludeSocketId: string | null = null,
+	): Promise<ConversationMessageDto> {
+		const [updated] = await this.#db
+			.update(conversationMessageTable)
+			.set({
+				deliveryStatus: "failed",
+				rawPayload: { deliveryError: errorMessage.slice(0, 1000) },
+				updatedAt: new Date(),
+			})
+			.where(eq(conversationMessageTable.id, messageId))
+			.returning(conversationMessageSelection);
+		if (!updated) {
+			throw new CommerceError(
+				"conversation_message_not_found",
+				"Message not found.",
+				404,
+			);
+		}
+		const dto = this.#toMessageDto(updated);
+		await this.#touchConversationPreview(
+			orderId,
+			conversationId,
+			dto.body,
+			updated.sentAt,
+		);
+		await this.#publishMessageCreatedSafe(
+			orderId,
+			conversationId,
+			dto,
+			excludeSocketId,
+		);
+		return dto;
+	}
+
+	async #publishMessageCreatedSafe(
+		orderId: string,
+		conversationId: string,
+		message: ConversationMessageDto,
+		excludeSocketId: string | null = null,
+	): Promise<void> {
+		try {
+			await this.#realtimePublisher.publishMessageCreated(
+				orderId,
+				conversationId,
+				message,
+				{ excludeSocketId },
+			);
+		} catch (error) {
+			this.#trackRealtimePublishFailure(conversationId, error);
+		}
+	}
+
+	async #publishConversationUpdatedSafe(
+		orderId: string,
+		conversationId: string,
+		conversation: ConversationSummary,
+	): Promise<void> {
+		try {
+			await this.#realtimePublisher.publishConversationUpdated(
+				orderId,
+				conversationId,
+				conversation,
+			);
+		} catch (error) {
+			this.#trackRealtimePublishFailure(conversationId, error);
+		}
+	}
+
+	async #provisionConversation(
+		row: {
+			orderId: string;
+			provider: string;
+			providerBookingId: string;
+			providerReservationId: string | null;
+		},
+		now: Date,
+	): Promise<{ created: boolean; linked: boolean }> {
+		const gateway = this.#conversationGatewayFor(row.provider);
+		const thread =
+			gateway && row.providerReservationId
+				? await gateway.findThreadForReservation(row.providerReservationId)
+				: null;
+
+		const [created] = await this.#db
+			.insert(conversationTable)
+			.values({
+				createdAt: now,
+				externalThreadId: thread?.externalThreadId ?? null,
+				id: crypto.randomUUID(),
+				lastMessagePreview: thread?.lastMessagePreview ?? null,
+				orderId: row.orderId,
+				provider: row.provider,
+				providerBookingId: row.providerBookingId,
+				status: thread?.status ?? "pending",
+				unreadCount: thread?.unreadCount ?? 0,
+				updatedAt: now,
+			})
+			.onConflictDoNothing()
+			.returning({ id: conversationTable.id });
+
+		if (created && thread) {
+			trackEvent({
+				metadata: {
+					conversationId: created.id,
+					providerBookingId: row.providerBookingId,
+					providerReservationId: row.providerReservationId,
+				},
+				name: "conversation_linked",
+				provider: row.provider,
+				type: "integration",
+			});
+		}
+
+		return { created: Boolean(created), linked: Boolean(created && thread) };
+	}
+
+	async #tryLinkConversation(
+		conversation: {
+			externalThreadId: string | null;
+			id: string;
+			orderId: string;
+			provider: string;
+			providerBookingId: string | null;
+			status: ConversationSummary["status"];
+		},
+		now: Date,
+	): Promise<typeof conversation | null> {
+		if (!conversation.providerBookingId) {
+			return conversation;
+		}
+		const gateway = this.#conversationGatewayFor(conversation.provider);
+		if (!gateway) {
+			return conversation;
+		}
+		const [booking] = await this.#db
+			.select({
+				providerReservationId: providerBookingTable.providerReservationId,
+			})
+			.from(providerBookingTable)
+			.where(eq(providerBookingTable.id, conversation.providerBookingId))
+			.limit(1);
+		if (!booking?.providerReservationId) {
+			return conversation;
+		}
+
+		const thread = await gateway.findThreadForReservation(
+			booking.providerReservationId,
+		);
+		if (!thread) {
+			return conversation;
+		}
+
+		const [updated] = await this.#db
+			.update(conversationTable)
+			.set({
+				externalThreadId: thread.externalThreadId,
+				lastMessagePreview: thread.lastMessagePreview,
+				status: thread.status,
+				unreadCount: thread.unreadCount,
+				updatedAt: now,
+			})
+			.where(eq(conversationTable.id, conversation.id))
+			.returning({
+				externalThreadId: conversationTable.externalThreadId,
+				id: conversationTable.id,
+				orderId: conversationTable.orderId,
+				provider: conversationTable.provider,
+				providerBookingId: conversationTable.providerBookingId,
+				status: conversationTable.status,
+			});
+		return updated ?? conversation;
+	}
+
+	async #syncConversationMessages(
+		orderId: string,
+		conversationId: string,
+		provider: string,
+		externalThreadId: string,
+		now: Date,
+	): Promise<number> {
+		const gateway = this.#conversationGatewayFor(provider);
+		if (!gateway) {
+			throw new Error(
+				`Conversation gateway is not configured for ${provider}.`,
+			);
+		}
+
+		const snapshot = await gateway.getThread(externalThreadId);
+		let latestMessage: ProviderConversationMessage | null = null;
+		let imported = 0;
+		for (const message of snapshot.messages) {
+			if (
+				!latestMessage ||
+				message.sentAt.getTime() >= latestMessage.sentAt.getTime()
+			) {
+				latestMessage = message;
+			}
+			const result = await this.#upsertProviderMessage(
+				orderId,
+				conversationId,
+				message,
+			);
+			if (result.inserted) {
+				imported += 1;
+				trackEvent({
+					metadata: {
+						conversationId,
+						externalMessageId: message.externalMessageId,
+					},
+					name: "conversation_message_received",
+					provider,
+					type: "integration",
+				});
+				await this.#publishMessageCreatedSafe(
+					orderId,
+					conversationId,
+					result.message,
+				);
+			}
+		}
+
+		const [summary] = await this.#db
+			.update(conversationTable)
+			.set({
+				lastMessageAt: latestMessage?.sentAt ?? null,
+				lastMessagePreview:
+					latestMessage?.body !== undefined
+						? normalizeConversationPreview(latestMessage.body)
+						: snapshot.thread.lastMessagePreview,
+				lastSyncedAt: now,
+				status: snapshot.thread.status,
+				unreadCount: snapshot.thread.unreadCount,
+				updatedAt: now,
+			})
+			.where(eq(conversationTable.id, conversationId))
+			.returning(conversationSummarySelection);
+		if (summary) {
+			await this.#publishConversationUpdatedSafe(
+				orderId,
+				conversationId,
+				this.#toConversationSummary(summary),
+			);
+		}
+		return imported;
+	}
+
+	async #upsertProviderMessage(
+		orderId: string,
+		conversationId: string,
+		message: ProviderConversationMessage,
+	): Promise<{ inserted: boolean; message: ConversationMessageDto }> {
+		const now = new Date();
+		const [row] = await this.#db
+			.insert(conversationMessageTable)
+			.values({
+				body: message.body,
+				conversationId,
+				createdAt: now,
+				deliveryStatus: "sent",
+				externalMessageId: message.externalMessageId,
+				id: crypto.randomUUID(),
+				isAutomatic: message.isAutomatic,
+				orderId,
+				rawPayload: message.raw,
+				senderType: message.senderType,
+				sentAt: message.sentAt,
+				updatedAt: now,
+			})
+			.onConflictDoUpdate({
+				target: [
+					conversationMessageTable.conversationId,
+					conversationMessageTable.externalMessageId,
+				],
+				targetWhere: sql`${conversationMessageTable.externalMessageId} is not null`,
+				// Sender is settled at first insert and must not be rewritten on
+				// re-import: a guest message we sent through the channel comes back from
+				// the provider classified as host, so re-applying `senderType` here would
+				// flip our own messages to the wrong side.
+				set: {
+					body: message.body,
+					deliveryStatus: "sent",
+					isAutomatic: message.isAutomatic,
+					rawPayload: message.raw,
+					sentAt: message.sentAt,
+					updatedAt: now,
+				},
+			})
+			.returning({
+				...conversationMessageSelection,
+				inserted: sql<boolean>`xmax = 0`,
+			});
+		if (!row) {
+			throw new CommerceError(
+				"conversation_unavailable",
+				"Could not import the message.",
+				503,
+			);
+		}
+		return { inserted: row.inserted, message: this.#toMessageDto(row) };
+	}
+
+	#trackRealtimePublishFailure(conversationId: string, error: unknown): void {
+		trackEvent({
+			metadata: {
+				conversationId,
+				error: error instanceof Error ? error.message : String(error),
+			},
+			name: "conversation_realtime_publish_failed",
+			severity: "warning",
+			type: "integration",
+		});
+	}
+
+	#trackConversationReconciliationFailure(
+		provider: string,
+		reference: string,
+		error: unknown,
+	): void {
+		trackEvent({
+			metadata: {
+				error: error instanceof Error ? error.message : String(error),
+				reference,
+			},
+			name: "conversation_reconcile_failed",
+			provider,
+			severity: "warning",
+			type: "integration",
+		});
+	}
+
+	async #readResolvedOrder(
+		db: DbExecutor,
+		reference: string,
+	): Promise<ResolvedOrder | null> {
+		const [row] = await db
+			.select({
+				cartToken: cartTable.cartToken,
+				id: orderTable.id,
+				publicReference: orderTable.publicReference,
+				status: orderTable.status,
+				userId: orderTable.userId,
+			})
+			.from(orderTable)
+			.leftJoin(cartTable, eq(cartTable.id, orderTable.cartId))
+			.where(eq(orderTable.publicReference, reference))
+			.limit(1);
+		return row ?? null;
 	}
 
 	/**
@@ -1439,6 +4215,7 @@ export class CommerceService {
 				externalAccountId: rows.detail.externalAccountId,
 				id: providerBookingId,
 				normalizedStatus: "pending",
+				orderId,
 				orderItemId,
 				provider: rows.detail.provider,
 				stayEndsAt: stayDateToTimestamp(rows.detail.checkOut),
@@ -1452,6 +4229,7 @@ export class CommerceService {
 						createdAt: now,
 						id: crypto.randomUUID(),
 						identityStatus: "missing" as const,
+						orderId,
 						position,
 						providerBookingId,
 						updatedAt: now,
@@ -2309,6 +5087,7 @@ export class CommerceService {
 
 		let sawTransient = false;
 		let sawPermanent = false;
+		let sawNotSettled = false;
 		for (const booking of context.bookings) {
 			const result = await this.#confirmHold(
 				booking,
@@ -2318,6 +5097,8 @@ export class CommerceService {
 				sawTransient = true;
 			} else if (result === "permanent") {
 				sawPermanent = true;
+			} else if (result === "not_settled") {
+				sawNotSettled = true;
 			}
 		}
 
@@ -2338,8 +5119,14 @@ export class CommerceService {
 			return { outcome: "not_applicable" };
 		}
 
-		if (sawTransient) {
-			return { outcome: "pending_retry" };
+		// A still-pending accept (`not_settled`) leaves the order pending for the
+		// cron exactly like a transient confirm, but is deliberately kept out of the
+		// `sawPermanent` path above so it can never trigger a refund on a live hold.
+		if (sawTransient || sawNotSettled) {
+			return {
+				outcome: "pending_retry",
+				pending: this.#buildConfirmationFacts(context),
+			};
 		}
 
 		const now = new Date();
@@ -2627,6 +5414,48 @@ export class CommerceService {
 			);
 	}
 
+	/**
+	 * Atomically claims the pending-notice email for an order, returning `true`
+	 * only to the caller that wins the claim. Reuses the finalization claim window
+	 * so a crash mid-send is retried by a later reconciler pass. Independent of the
+	 * `finalizationEmail*` slot because the notice precedes (not replaces) the
+	 * confirmation email for the same order.
+	 */
+	async claimPendingNoticeEmail(orderId: string): Promise<boolean> {
+		const now = new Date();
+		const claimExpiresAt = new Date(
+			now.getTime() + FINALIZATION_EMAIL_CLAIM_MS,
+		);
+		const [updated] = await this.#db
+			.update(orderTable)
+			.set({
+				pendingNoticeEmailNextAttemptAt: claimExpiresAt,
+				updatedAt: now,
+			})
+			.where(
+				and(
+					eq(orderTable.id, orderId),
+					isNull(orderTable.pendingNoticeEmailSentAt),
+					lte(orderTable.pendingNoticeEmailNextAttemptAt, now),
+				),
+			)
+			.returning({ id: orderTable.id });
+		return Boolean(updated);
+	}
+
+	async markPendingNoticeEmailSent(orderId: string): Promise<void> {
+		const now = new Date();
+		await this.#db
+			.update(orderTable)
+			.set({ pendingNoticeEmailSentAt: now, updatedAt: now })
+			.where(
+				and(
+					eq(orderTable.id, orderId),
+					isNull(orderTable.pendingNoticeEmailSentAt),
+				),
+			);
+	}
+
 	async claimFinalizationEmail(
 		orderId: string,
 		kind: OrderFinalizationEmailKind,
@@ -2737,6 +5566,7 @@ export class CommerceService {
 			now?: Date;
 			onCompensated?: (facts: OrderCompensationFacts) => Promise<void>;
 			onConfirmed?: (facts: OrderConfirmationFacts) => Promise<void>;
+			onPendingNotice?: (facts: OrderConfirmationFacts) => Promise<void>;
 		} = {},
 	): Promise<ReconcileReservationsSummary> {
 		const now = options.now ?? new Date();
@@ -2744,6 +5574,7 @@ export class CommerceService {
 		const handlers = {
 			onCompensated: options.onCompensated,
 			onConfirmed: options.onConfirmed,
+			onPendingNotice: options.onPendingNotice,
 		};
 		const summary: ReconcileReservationsSummary = {
 			cancelled: 0,
@@ -2773,7 +5604,13 @@ export class CommerceService {
 						),
 						and(
 							eq(providerBookingTable.normalizedStatus, "pending"),
-							eq(providerBookingTable.needsRecovery, false),
+							// A hold whose accept will not settle is flagged `needsRecovery`
+							// for the operator yet must keep getting its daily nudge, so it
+							// is selected despite the flag via its distinct error code.
+							or(
+								eq(providerBookingTable.needsRecovery, false),
+								eq(providerBookingTable.lastErrorCode, "confirm_not_settled"),
+							),
 						),
 						and(
 							eq(providerBookingTable.normalizedStatus, "failed"),
@@ -3003,6 +5840,7 @@ export class CommerceService {
 				const marked = await this.markOrderPaid(orderId, {
 					amountMinor: live.amountMinor,
 					currency: live.currency,
+					paymentMethod: live.paymentMethod,
 				});
 				if (marked.outcome === "amount_mismatch") {
 					const compensated = await this.compensateOrder(
@@ -3065,6 +5903,37 @@ export class CommerceService {
 			await this.#dispatchCompensationEmail(result.compensation, handlers);
 		} else if (result.outcome === "pending_retry") {
 			summary.rescheduled += 1;
+			await this.#dispatchPendingNoticeEmail(result.pending, handlers);
+		}
+	}
+
+	/**
+	 * Sends the "payment received, finalizing your booking" courtesy email while an
+	 * order sits `pending` awaiting hold confirmation. Deduped by its own
+	 * `pendingNoticeEmail*` slot so a re-delivered webhook and this reconciler pass
+	 * never double-send. Best-effort: a send failure leaves the claim to lapse for
+	 * a later retry and never blocks the authoritative confirmation email.
+	 */
+	async #dispatchPendingNoticeEmail(
+		facts: OrderConfirmationFacts,
+		handlers: ReconcileHandlers,
+	): Promise<void> {
+		if (!facts.email || !handlers.onPendingNotice) {
+			return;
+		}
+		if (!(await this.claimPendingNoticeEmail(facts.orderId))) {
+			return;
+		}
+		try {
+			await handlers.onPendingNotice(facts);
+		} catch {
+			return;
+		}
+		try {
+			await this.markPendingNoticeEmailSent(facts.orderId);
+		} catch {
+			// The email went out; failing to record it only risks a rare duplicate
+			// on the next pass, which is acceptable for a courtesy notice.
 		}
 	}
 
@@ -3243,6 +6112,9 @@ export class CommerceService {
 				refundRequestedAt: orderTable.refundRequestedAt,
 				status: orderTable.status,
 				stripePaymentIntentId: orderTable.stripePaymentIntentId,
+				stripePaymentMethodBrand: orderTable.stripePaymentMethodBrand,
+				stripePaymentMethodLast4: orderTable.stripePaymentMethodLast4,
+				stripePaymentMethodType: orderTable.stripePaymentMethodType,
 				stripeRefundId: orderTable.stripeRefundId,
 				stripeRefundIdempotencyKey: orderTable.stripeRefundIdempotencyKey,
 			})
@@ -3612,6 +6484,15 @@ export class CommerceService {
 				);
 				return "ok";
 			}
+			if (result.kind === "not_settled") {
+				await this.#recordConfirmNotSettled(
+					currentBooking,
+					result.providerStatus,
+					result.raw,
+					tx,
+				);
+				return "not_settled";
+			}
 			if (result.kind === "transient") {
 				const exhausted = await this.#recordBookingAttempt(
 					currentBooking,
@@ -3896,6 +6777,60 @@ export class CommerceService {
 			.where(eq(providerBookingTable.id, providerBookingId));
 	}
 
+	/**
+	 * Records a confirm whose accept has not taken on the provider yet (the hold is
+	 * alive and `pending`, the payment captured). This is never a failure and never
+	 * compensates: refunding a paid, still-held booking would be wrong. The booking
+	 * stays `pending` and is retried — first on the standard backoff, then daily
+	 * once the grace count is passed, at which point `needsRecovery` is set so an
+	 * operator can finish the accept by hand. The reconciler's `pending` selection
+	 * is widened to keep nudging these despite the `needsRecovery` flag.
+	 */
+	async #recordConfirmNotSettled(
+		booking: SagaBooking,
+		providerStatus: string | null,
+		raw: Record<string, unknown>,
+		db: DbExecutor = this.#db,
+	): Promise<void> {
+		const now = new Date();
+		const attemptCount = booking.attemptCount + 1;
+		const gracePassed = attemptCount >= CONFIRM_SETTLE_GRACE_ATTEMPTS;
+		await db
+			.update(providerBookingTable)
+			.set({
+				attemptCount,
+				lastAttemptAt: now,
+				lastErrorCode: "confirm_not_settled",
+				lastErrorMessage: `Hostify accept has not taken; reservation still ${providerStatus ?? "unconfirmed"}.`,
+				needsRecovery: gracePassed,
+				nextAttemptAt: gracePassed
+					? new Date(now.getTime() + RESERVATION_SETTLE_RETRY_MS)
+					: this.#backoffFrom(now, attemptCount),
+				providerStatus,
+				providerUpdatedAt: now,
+				rawOperationalPayload: raw,
+				updatedAt: now,
+			})
+			.where(eq(providerBookingTable.id, booking.providerBookingId));
+
+		// Alert the operator exactly once, when the grace count is first crossed.
+		if (attemptCount === CONFIRM_SETTLE_GRACE_ATTEMPTS) {
+			trackEvent({
+				metadata: {
+					attemptCount,
+					orderItemId: booking.orderItemId,
+					providerBookingId: booking.providerBookingId,
+					providerReservationId: booking.providerReservationId,
+					providerStatus,
+				},
+				name: "reservation_confirm_stuck",
+				provider: this.#provider,
+				severity: "warning",
+				type: "integration",
+			});
+		}
+	}
+
 	/** Records a retryable attempt; returns true when the retry cap is exhausted. */
 	async #recordBookingAttempt(
 		booking: SagaBooking,
@@ -4059,6 +6994,7 @@ export class CommerceService {
 			guests: first?.guests ?? 0,
 			name: context.contact?.name ?? "",
 			orderId: context.order.id,
+			paymentMethod: paymentMethodFromOrderRow(context.order),
 			publicReference: context.order.publicReference,
 		};
 	}

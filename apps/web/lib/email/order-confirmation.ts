@@ -2,14 +2,19 @@ import {
 	buildOrderConfirmationEmail as buildBrandedOrderConfirmationEmail,
 	type EmailMessage,
 	getEmailSender,
+	type OrderConfirmationEmailInput,
 } from "@workspace/auth";
-import type { OrderConfirmationFacts } from "@workspace/core/commerce";
+import {
+	generateMemberToken,
+	type OrderConfirmationFacts,
+} from "@workspace/core/commerce";
 import type { OrderBillingAddressSnapshot } from "@workspace/db";
+import { commerceService } from "@/lib/api/commerce";
 import { countryName } from "@/lib/site/countries";
+import { orderHubUrl } from "./order-url";
 
 const FALLBACK_IMAGE_URL =
 	"https://alojamentoideal.pt/alojamento-ideal-logo.png";
-const SITE_URL_FALLBACK = "https://alojamentoideal.pt";
 
 /**
  * Formats a minor-unit amount for display in the confirmation email. The ISO
@@ -23,26 +28,6 @@ function formatAmount(amountMinor: number, currency: string): string {
 	});
 	const fractionDigits = formatter.resolvedOptions().maximumFractionDigits ?? 2;
 	return formatter.format(amountMinor / 10 ** fractionDigits);
-}
-
-function siteBaseUrl(): string {
-	const configured =
-		process.env.BETTER_AUTH_URL ?? process.env.NEXT_PUBLIC_AUTH_URL;
-	if (!configured) {
-		return SITE_URL_FALLBACK;
-	}
-
-	try {
-		return new URL(configured).origin;
-	} catch {
-		return SITE_URL_FALLBACK;
-	}
-}
-
-function manageUrl(publicReference: string): string {
-	const url = new URL("/booking/complete", siteBaseUrl());
-	url.searchParams.set("order", publicReference);
-	return url.toString();
 }
 
 function formatDate(value: string): string {
@@ -91,38 +76,91 @@ function formatBillingAddress(address: OrderBillingAddressSnapshot): string {
 	return parts.length > 0 ? parts.join(", ") : "Not provided";
 }
 
-export function buildOrderConfirmationEmail(
-	facts: OrderConfirmationFacts,
-): EmailMessage {
-	const amount = formatAmount(facts.amountPaidMinor, facts.currency);
+function titleCasePaymentPart(value: string): string {
+	return value
+		.split(/[_\s-]+/)
+		.filter(Boolean)
+		.map(
+			(part) => `${part.charAt(0).toUpperCase()}${part.slice(1).toLowerCase()}`,
+		)
+		.join(" ");
+}
 
-	return buildBrandedOrderConfirmationEmail({
+function formatPaymentMethod(method: OrderConfirmationFacts["paymentMethod"]): {
+	cardLastFour?: string;
+	label: string;
+} {
+	if (!method) {
+		return { label: "Online payment" };
+	}
+	if (method.type === "card") {
+		return {
+			cardLastFour: method.last4 ?? undefined,
+			label: method.brand ? titleCasePaymentPart(method.brand) : "Card",
+		};
+	}
+	return { label: titleCasePaymentPart(method.type) || "Online payment" };
+}
+
+/**
+ * Maps the durable order facts to the transport-layer email input, formatting
+ * money, dates and the payment method for display. Shared by the confirmation
+ * and pending-notice emails so both render identical booking details.
+ */
+export function toOrderEmailInput(
+	facts: OrderConfirmationFacts,
+	manageUrl: string,
+): OrderConfirmationEmailInput {
+	const paymentMethod = formatPaymentMethod(facts.paymentMethod);
+
+	return {
 		accommodationImage: facts.accommodationImage ?? FALLBACK_IMAGE_URL,
 		accommodationTitle: facts.accommodationTitle,
 		billingAddress: formatBillingAddress(facts.billingAddress),
+		cardLastFour: paymentMethod.cardLastFour,
 		checkIn: formatDate(facts.checkIn),
 		checkOut: formatDate(facts.checkOut),
 		contactEmail: facts.email,
 		contactPhone: facts.contactPhone || "Not provided",
 		email: facts.email,
 		guests: formatGuests(facts.guests),
-		manageUrl: manageUrl(facts.publicReference),
+		manageUrl,
 		orderNumber: facts.publicReference,
-		paymentMethod: "Online payment",
-		totalPrice: amount,
-	});
+		paymentMethod: paymentMethod.label,
+		totalPrice: formatAmount(facts.amountPaidMinor, facts.currency),
+	};
+}
+
+export function buildOrderConfirmationEmail(
+	facts: OrderConfirmationFacts,
+	manageUrl: string,
+): EmailMessage {
+	return buildBrandedOrderConfirmationEmail(
+		toOrderEmailInput(facts, manageUrl),
+	);
 }
 
 /**
  * Sends the single order-confirmation email for a freshly confirmed order.
- * Callers must only invoke this on the first draft -> confirmed transition so a
- * re-delivered webhook never produces a duplicate email.
+ * Callers must only invoke this on the first pending -> confirmed transition so a
+ * re-delivered webhook never produces a duplicate email. Provisioning the booker
+ * as the order's `owner` member is bound here, the one guarded once-per-order
+ * action both the webhook and the reconciler cron funnel through. The raw access
+ * token is activated before sending so an accepted email never carries a dead
+ * "Manage reservation" CTA; only its hash is persisted.
  */
 export async function sendOrderConfirmationEmail(
 	facts: OrderConfirmationFacts,
 ): Promise<void> {
+	const token = generateMemberToken();
+	await commerceService().activateOwnerAccessToken(
+		facts.orderId,
+		facts.email,
+		token,
+	);
+	const manageUrl = orderHubUrl(facts.publicReference, token);
 	await getEmailSender().send({
 		to: facts.email,
-		...buildOrderConfirmationEmail(facts),
+		...buildOrderConfirmationEmail(facts, manageUrl),
 	});
 }

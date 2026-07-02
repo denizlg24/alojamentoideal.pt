@@ -1,25 +1,39 @@
 import type { MetadataRoute } from "next";
+import { generateListingStaticParams } from "@/lib/catalog/listing-route";
 import { siteConfig } from "@/lib/site/config";
 
 /**
- * Static routes that currently resolve. Add entries here as public pages ship
- * (/homes, /activities, /about, /faq, /help, /owner, /legal/*) and append
- * dynamic listing URLs from the catalog once detail pages exist. Avoid listing
- * routes that 404, since that harms crawl trust.
+ * Static public routes that currently resolve. Add entries here as more public
+ * pages ship (/activities, /about, /faq, /help, /owner, /legal/*). Avoid listing
+ * private checkout/order/account routes or public routes that still 404.
  */
 const STATIC_ROUTES: ReadonlyArray<{
 	changeFrequency: MetadataRoute.Sitemap[number]["changeFrequency"];
 	path: string;
 	priority: number;
-}> = [{ changeFrequency: "daily", path: "/", priority: 1 }];
+}> = [
+	{ changeFrequency: "daily", path: "/", priority: 1 },
+	{ changeFrequency: "daily", path: "/homes", priority: 0.9 },
+];
 
-export default function sitemap(): MetadataRoute.Sitemap {
+export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
 	const lastModified = new Date();
+	const listingRoutes = (await generateListingStaticParams())
+		.filter(({ id }) => id !== "__ci_placeholder__")
+		.map(({ id }) => ({
+			url: `${siteConfig.url}/homes/${encodeURIComponent(id)}`,
+			lastModified,
+			changeFrequency: "weekly" as const,
+			priority: 0.7,
+		}));
 
-	return STATIC_ROUTES.map((route) => ({
-		url: `${siteConfig.url}${route.path}`,
-		lastModified,
-		changeFrequency: route.changeFrequency,
-		priority: route.priority,
-	}));
+	return [
+		...STATIC_ROUTES.map((route) => ({
+			url: `${siteConfig.url}${route.path}`,
+			lastModified,
+			changeFrequency: route.changeFrequency,
+			priority: route.priority,
+		})),
+		...listingRoutes,
+	];
 }

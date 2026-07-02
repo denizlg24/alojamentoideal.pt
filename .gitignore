@@ -35,7 +35,8 @@ yarn-error.log*
 .pnpm-debug.log*
 
 # env files (can opt-in for committing if needed)
-.env*
+.env
+.env.prod
 !.env.example
 
 # vercel
@@ -49,3 +50,17 @@ next-env.d.ts
 
 # Hostify shape-dump diagnostic output
 packages/core/scripts/.hostify-dump/
+
+# Listing localization backfill reports
+packages/core/scripts/.listing-localization/
+
+# Envoy - Local state
+.envoy/cache/
+.envoy/latest
+.envoy/HEAD
+.envoy/refs/
+
+# Envoy - Config
+!.envoy/config.toml
+
+

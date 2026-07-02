@@ -127,8 +127,8 @@ function fakeClient(overrides: {
 				calls.reservationUpdate.push({ id, input });
 				return (
 					overrides.reservationUpdate?.() ?? {
-						reservation: { id, status: input.status ?? "pending" },
 						success: true,
+						update_data: { status: input.status ?? "pending" },
 					}
 				);
 			},
@@ -209,7 +209,13 @@ describe("HostifyReservationGateway.placeHold", () => {
 
 describe("HostifyReservationGateway.confirmHold", () => {
 	test("accepts the reservation and completes the transaction", async () => {
-		const { calls, client } = fakeClient({});
+		const { calls, client } = fakeClient({
+			// The confirm is classified against a live re-read, not the PUT echo.
+			reservationGet: () => ({
+				reservation: { id: 999, status: "accepted" },
+				success: true,
+			}),
+		});
 		const gateway = new HostifyReservationGateway({ client });
 		const result = await gateway.confirmHold({
 			paymentReference: "pi_123",
@@ -222,8 +228,112 @@ describe("HostifyReservationGateway.confirmHold", () => {
 		expect(calls.transactionUpdate[0]?.input.is_completed).toBe(1);
 	});
 
-	test("treats an already-accepted reservation as success on error", async () => {
+	test("a PUT that echoes accepted but stays pending is not_settled", async () => {
+		// Hostify can return `accepted` on the PUT yet leave a far-future
+		// reservation `pending`. The re-read is authoritative and must not confirm.
+		const { calls, client } = fakeClient({
+			reservationGet: () => ({
+				reservation: { id: 999, status: "pending" },
+				success: true,
+			}),
+			reservationUpdate: () => ({
+				success: true,
+				update_data: { status: "accepted" },
+			}),
+		});
+		const gateway = new HostifyReservationGateway({ client });
+		const result = await gateway.confirmHold({
+			paymentReference: "pi_123",
+			reservationId: "999",
+			transactionId: "555",
+		});
+
+		expect(result.kind).toBe("not_settled");
+		expect(calls.reservationUpdate[0]?.input.status).toBe("accepted");
+	});
+
+	test("a hold that died (denied) is permanent, not a false confirm", async () => {
 		const { client } = fakeClient({
+			reservationGet: () => ({
+				reservation: { id: 999, status: "denied" },
+				success: true,
+			}),
+		});
+		const gateway = new HostifyReservationGateway({ client });
+		const result = await gateway.confirmHold({
+			paymentReference: "pi_123",
+			reservationId: "999",
+			transactionId: "555",
+		});
+
+		expect(result.kind).toBe("permanent");
+	});
+
+	test("a failed PUT whose re-read still shows pending is not_settled", async () => {
+		// The PUT errored but the hold is alive and pending: keep retrying without
+		// ever escalating to a refund.
+		const { client } = fakeClient({
+			reservationGet: () => ({
+				reservation: { id: 999, status: "pending" },
+				success: true,
+			}),
+			reservationUpdate: () => {
+				throw new HostifyApiError("conflict", 409);
+			},
+		});
+		const gateway = new HostifyReservationGateway({ client });
+		const result = await gateway.confirmHold({
+			paymentReference: "pi_123",
+			reservationId: "999",
+			transactionId: "555",
+		});
+
+		expect(result.kind).toBe("not_settled");
+	});
+
+	test("a failed PUT whose re-read also fails is transient", async () => {
+		const { client } = fakeClient({
+			reservationGet: () => {
+				throw new HostifyApiError("unavailable", 503);
+			},
+			reservationUpdate: () => {
+				throw new HostifyApiError("unavailable", 503);
+			},
+		});
+		const gateway = new HostifyReservationGateway({ client });
+		const result = await gateway.confirmHold({
+			paymentReference: "pi_123",
+			reservationId: "999",
+			transactionId: "555",
+		});
+
+		expect(result.kind).toBe("transient");
+	});
+
+	test("a retryable re-read failure stays transient even when the PUT failure is permanent", async () => {
+		const { client } = fakeClient({
+			reservationGet: () => {
+				throw new HostifyApiError("unavailable", 503);
+			},
+			reservationUpdate: () => {
+				throw new HostifyApiError("conflict", 409);
+			},
+		});
+		const gateway = new HostifyReservationGateway({ client });
+		const result = await gateway.confirmHold({
+			paymentReference: "pi_123",
+			reservationId: "999",
+			transactionId: "555",
+		});
+
+		expect(result.kind).toBe("transient");
+		if (result.kind !== "transient") return;
+		expect(result.code).toBe("confirm_status_unknown_http_503");
+		expect(result.message).toContain("reservation status is unknown");
+	});
+
+	test("treats an already-accepted reservation as success on error", async () => {
+		const { calls, client } = fakeClient({
 			reservationUpdate: () => {
 				throw new HostifyApiError("conflict", 409);
 			},
@@ -239,6 +349,28 @@ describe("HostifyReservationGateway.confirmHold", () => {
 			transactionId: "555",
 		});
 		expect(result.kind).toBe("ok");
+		expect(calls.transactionUpdate[0]?.input.is_completed).toBe(1);
+	});
+
+	test("an unparseable PUT whose re-read shows pending is not_settled", async () => {
+		const { client } = fakeClient({
+			reservationGet: () => ({
+				reservation: { id: 999, status: "pending" },
+				success: true,
+			}),
+			reservationUpdate: () => {
+				throw new HostifyResponseValidationError("schema drift");
+			},
+		});
+		const gateway = new HostifyReservationGateway({ client });
+		const result = await gateway.confirmHold({
+			paymentReference: "pi_123",
+			reservationId: "999",
+			transactionId: "555",
+		});
+		// The live re-read resolves the ambiguity: the hold is alive and pending, so
+		// this must not hard-fail into compensation/refund.
+		expect(result.kind).toBe("not_settled");
 	});
 });
 

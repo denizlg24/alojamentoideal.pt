@@ -7,6 +7,7 @@ import {
 	customType,
 	date,
 	doublePrecision,
+	foreignKey,
 	index,
 	integer,
 	jsonb,
@@ -66,6 +67,7 @@ export interface ProcessedAmenity {
 export interface AccommodationListingProcessedContent {
 	amenities: ProcessedAmenity[];
 	description: LocalizedText;
+	descriptionSections?: Record<string, LocalizedText>;
 	guide: LocalizedText;
 	model: string | null;
 	title: LocalizedText;
@@ -74,6 +76,7 @@ export interface AccommodationListingProcessedContent {
 export interface AccommodationListingNormalizedContent {
 	amenities: unknown[];
 	description: string | null;
+	descriptionSections?: Record<string, string>;
 	guide: unknown;
 	listing: Record<string, unknown>;
 	title: string | null;
@@ -879,6 +882,14 @@ export const order = pgTable(
 		finalizationEmailSentAt: timestampWithTimezone(
 			"finalization_email_sent_at",
 		),
+		pendingNoticeEmailNextAttemptAt: timestampWithTimezone(
+			"pending_notice_email_next_attempt_at",
+		)
+			.notNull()
+			.defaultNow(),
+		pendingNoticeEmailSentAt: timestampWithTimezone(
+			"pending_notice_email_sent_at",
+		),
 		publicReference: text("public_reference").notNull(),
 		status: text("status").notNull().default("draft"),
 		refundCompletedAt: timestampWithTimezone("refund_completed_at"),
@@ -886,6 +897,9 @@ export const order = pgTable(
 		stripeRefundId: text("stripe_refund_id"),
 		stripeRefundIdempotencyKey: text("stripe_refund_idempotency_key"),
 		stripePaymentIntentId: text("stripe_payment_intent_id"),
+		stripePaymentMethodBrand: text("stripe_payment_method_brand"),
+		stripePaymentMethodLast4: text("stripe_payment_method_last4"),
+		stripePaymentMethodType: text("stripe_payment_method_type"),
 		subtotalMinor: bigint("subtotal_minor", { mode: "number" }).notNull(),
 		taxMinor: bigint("tax_minor", { mode: "number" }).notNull().default(0),
 		totalMinor: bigint("total_minor", { mode: "number" }).notNull(),
@@ -972,6 +986,89 @@ export const orderContact = pgTable(
 	],
 );
 
+export type OrderMemberRole = "owner" | "member";
+export type OrderMemberStatus = "invited" | "active" | "revoked";
+export type ConversationStatus = "pending" | "active" | "archived";
+export type ConversationMessageSenderType = "guest" | "host" | "system";
+export type ConversationMessageDeliveryStatus = "pending" | "sent" | "failed";
+
+/**
+ * People who can reach an order's hub (`/order/[reference]`). The `owner` is the
+ * booker (full access); `member` rows are invited guests. Access is proven by a
+ * high-entropy token whose sha-256 hash is stored here — the low-entropy
+ * `public_reference` is never sufficient on its own. The partial unique index
+ * caps an order at one owner.
+ */
+export const orderMember = pgTable(
+	"order_members",
+	{
+		id: text("id").primaryKey(),
+		orderId: text("order_id")
+			.notNull()
+			.references(() => order.id, { onDelete: "cascade" }),
+		role: text("role").$type<OrderMemberRole>().notNull(),
+		email: text("email").notNull(),
+		userId: text("user_id").references(() => user.id, {
+			onDelete: "set null",
+		}),
+		accessTokenHash: text("access_token_hash").notNull(),
+		status: text("status")
+			.$type<OrderMemberStatus>()
+			.notNull()
+			.default("invited"),
+		invitedByMemberId: text("invited_by_member_id").references(
+			(): AnyPgColumn => orderMember.id,
+			{ onDelete: "set null" },
+		),
+		expiresAt: timestampWithTimezone("expires_at"),
+		createdAt: timestampWithTimezone("created_at").notNull().defaultNow(),
+		acceptedAt: timestampWithTimezone("accepted_at"),
+		lastSeenAt: timestampWithTimezone("last_seen_at"),
+	},
+	(table) => [
+		uniqueIndex("order_members_access_token_hash_uidx").on(
+			table.accessTokenHash,
+		),
+		index("order_members_order_id_idx").on(table.orderId),
+		index("order_members_user_id_idx")
+			.on(table.userId)
+			.where(sql`${table.userId} is not null`),
+		uniqueIndex("order_members_id_order_id_uidx").on(table.id, table.orderId),
+		uniqueIndex("order_members_order_email_uidx")
+			.on(table.orderId, sql`lower(${table.email})`)
+			.where(sql`${table.status} <> 'revoked'`),
+		// At most one live membership per account per order: a signed-in user cannot
+		// redeem two invites for the same booking (which would split access
+		// resolution and double-count them against capacity). Revoked rows keep their
+		// user_id for audit, so they are excluded from the uniqueness rule.
+		uniqueIndex("order_members_order_user_uidx")
+			.on(table.orderId, table.userId)
+			.where(sql`${table.userId} is not null and ${table.status} <> 'revoked'`),
+		uniqueIndex("order_members_owner_uidx")
+			.on(table.orderId)
+			.where(sql`${table.role} = 'owner'`),
+		check(
+			"order_members_role_check",
+			sql`${table.role} in ('owner', 'member')`,
+		),
+		check(
+			"order_members_status_check",
+			sql`${table.status} in ('invited', 'active', 'revoked')`,
+		),
+		check(
+			"order_members_owner_expires_null",
+			sql`${table.role} = 'member' or ${table.expiresAt} is null`,
+		),
+		foreignKey({
+			columns: [table.invitedByMemberId, table.orderId],
+			foreignColumns: [table.id, table.orderId],
+			name: "order_members_invited_by_member_order_fk",
+		}).onDelete("set null"),
+	],
+);
+
+export type OrderMember = typeof orderMember.$inferSelect;
+
 export const orderItem = pgTable(
 	"order_items",
 	{
@@ -1006,6 +1103,7 @@ export const orderItem = pgTable(
 	},
 	(table) => [
 		index("order_items_order_id_idx").on(table.orderId),
+		uniqueIndex("order_items_id_order_id_uidx").on(table.id, table.orderId),
 		uniqueIndex("order_items_order_position_uidx").on(
 			table.orderId,
 			table.position,
@@ -1037,6 +1135,9 @@ export const providerBooking = pgTable(
 	"provider_bookings",
 	{
 		id: text("id").primaryKey(),
+		orderId: text("order_id")
+			.notNull()
+			.references(() => order.id, { onDelete: "cascade" }),
 		orderItemId: text("order_item_id")
 			.notNull()
 			.references(() => orderItem.id, { onDelete: "cascade" }),
@@ -1075,6 +1176,10 @@ export const providerBooking = pgTable(
 	},
 	(table) => [
 		uniqueIndex("provider_bookings_order_item_uidx").on(table.orderItemId),
+		uniqueIndex("provider_bookings_id_order_id_uidx").on(
+			table.id,
+			table.orderId,
+		),
 		uniqueIndex("provider_bookings_provider_reservation_uidx")
 			.on(table.provider, table.externalAccountId, table.providerReservationId)
 			.where(
@@ -1113,15 +1218,141 @@ export const providerBooking = pgTable(
 			"provider_bookings_attempt_count_nonneg",
 			sql`${table.attemptCount} >= 0`,
 		),
+		foreignKey({
+			columns: [table.orderItemId, table.orderId],
+			foreignColumns: [orderItem.id, orderItem.orderId],
+			name: "provider_bookings_order_item_order_fk",
+		}).onDelete("cascade"),
 	],
 );
 
 export type ProviderBooking = typeof providerBooking.$inferSelect;
 
+export const conversation = pgTable(
+	"conversations",
+	{
+		id: text("id").primaryKey(),
+		orderId: text("order_id")
+			.notNull()
+			.references(() => order.id, { onDelete: "cascade" }),
+		providerBookingId: text("provider_booking_id").references(
+			() => providerBooking.id,
+			{ onDelete: "set null" },
+		),
+		provider: text("provider").notNull(),
+		externalThreadId: text("external_thread_id"),
+		status: text("status")
+			.$type<ConversationStatus>()
+			.notNull()
+			.default("pending"),
+		lastMessageAt: timestampWithTimezone("last_message_at"),
+		lastMessagePreview: text("last_message_preview"),
+		unreadCount: integer("unread_count").notNull().default(0),
+		lastSyncedAt: timestampWithTimezone("last_synced_at"),
+		createdAt: timestampWithTimezone("created_at").notNull().defaultNow(),
+		updatedAt: timestampWithTimezone("updated_at").notNull().defaultNow(),
+	},
+	(table) => [
+		index("conversations_order_id_idx").on(table.orderId),
+		uniqueIndex("conversations_id_order_id_uidx").on(table.id, table.orderId),
+		uniqueIndex("conversations_provider_booking_uidx")
+			.on(table.providerBookingId)
+			.where(sql`${table.providerBookingId} is not null`),
+		uniqueIndex("conversations_provider_thread_uidx")
+			.on(table.provider, table.externalThreadId)
+			.where(sql`${table.externalThreadId} is not null`),
+		index("conversations_active_sync_idx")
+			.on(table.lastSyncedAt)
+			.where(
+				sql`${table.status} = 'active' and ${table.externalThreadId} is not null`,
+			),
+		check(
+			"conversations_status_check",
+			sql`${table.status} in ('pending', 'active', 'archived')`,
+		),
+		check("conversations_unread_count_nonneg", sql`${table.unreadCount} >= 0`),
+		foreignKey({
+			columns: [table.providerBookingId, table.orderId],
+			foreignColumns: [providerBooking.id, providerBooking.orderId],
+			name: "conversations_provider_booking_order_fk",
+		}).onDelete("set null"),
+	],
+);
+
+export type Conversation = typeof conversation.$inferSelect;
+
+export const conversationMessage = pgTable(
+	"messages",
+	{
+		id: text("id").primaryKey(),
+		orderId: text("order_id")
+			.notNull()
+			.references(() => order.id, { onDelete: "cascade" }),
+		conversationId: text("conversation_id")
+			.notNull()
+			.references(() => conversation.id, { onDelete: "cascade" }),
+		externalMessageId: text("external_message_id"),
+		senderType: text("sender_type")
+			.$type<ConversationMessageSenderType>()
+			.notNull(),
+		senderMemberId: text("sender_member_id").references(() => orderMember.id, {
+			onDelete: "set null",
+		}),
+		body: text("body").notNull(),
+		sentAt: timestampWithTimezone("sent_at").notNull(),
+		readAt: timestampWithTimezone("read_at"),
+		isAutomatic: boolean("is_automatic").notNull().default(false),
+		deliveryStatus: text("delivery_status")
+			.$type<ConversationMessageDeliveryStatus>()
+			.notNull()
+			.default("pending"),
+		rawPayload: jsonb("raw_payload").$type<Record<string, unknown>>(),
+		createdAt: timestampWithTimezone("created_at").notNull().defaultNow(),
+		updatedAt: timestampWithTimezone("updated_at").notNull().defaultNow(),
+	},
+	(table) => [
+		index("messages_conversation_sent_idx").on(
+			table.conversationId,
+			table.sentAt,
+		),
+		index("messages_order_id_idx").on(table.orderId),
+		index("messages_sender_member_idx")
+			.on(table.senderMemberId)
+			.where(sql`${table.senderMemberId} is not null`),
+		uniqueIndex("messages_conversation_external_uidx")
+			.on(table.conversationId, table.externalMessageId)
+			.where(sql`${table.externalMessageId} is not null`),
+		check(
+			"messages_sender_type_check",
+			sql`${table.senderType} in ('guest', 'host', 'system')`,
+		),
+		check(
+			"messages_delivery_status_check",
+			sql`${table.deliveryStatus} in ('pending', 'sent', 'failed')`,
+		),
+		check("messages_body_not_empty", sql`length(trim(${table.body})) > 0`),
+		foreignKey({
+			columns: [table.conversationId, table.orderId],
+			foreignColumns: [conversation.id, conversation.orderId],
+			name: "messages_conversation_order_fk",
+		}).onDelete("cascade"),
+		foreignKey({
+			columns: [table.senderMemberId, table.orderId],
+			foreignColumns: [orderMember.id, orderMember.orderId],
+			name: "messages_sender_member_order_fk",
+		}).onDelete("set null"),
+	],
+);
+
+export type ConversationMessage = typeof conversationMessage.$inferSelect;
+
 export const bookingGuest = pgTable(
 	"booking_guests",
 	{
 		id: text("id").primaryKey(),
+		orderId: text("order_id")
+			.notNull()
+			.references(() => order.id, { onDelete: "cascade" }),
 		providerBookingId: text("provider_booking_id")
 			.notNull()
 			.references(() => providerBooking.id, { onDelete: "cascade" }),
@@ -1132,6 +1363,9 @@ export const bookingGuest = pgTable(
 			() => userIdentityDocument.id,
 			{ onDelete: "set null" },
 		),
+		orderMemberId: text("order_member_id").references(() => orderMember.id, {
+			onDelete: "set null",
+		}),
 		position: integer("position").notNull(),
 		identityStatus: text("identity_status")
 			.$type<BookingGuestIdentityStatus>()
@@ -1167,16 +1401,33 @@ export const bookingGuest = pgTable(
 			.on(table.stripeVerificationSessionId)
 			.where(sql`${table.stripeVerificationSessionId} is not null`),
 		index("booking_guests_provider_booking_idx").on(table.providerBookingId),
+		index("booking_guests_order_id_idx").on(table.orderId),
 		index("booking_guests_user_idx").on(table.userId),
+		index("booking_guests_order_member_idx")
+			.on(table.orderMemberId)
+			.where(sql`${table.orderMemberId} is not null`),
 		index("booking_guests_identity_document_idx").on(
 			table.userIdentityDocumentId,
 		),
 		index("booking_guests_purge_after_idx").on(table.purgeAfter),
+		uniqueIndex("booking_guests_booking_member_uidx")
+			.on(table.providerBookingId, table.orderMemberId)
+			.where(sql`${table.orderMemberId} is not null`),
 		check("booking_guests_position_nonneg", sql`${table.position} >= 0`),
 		check(
 			"booking_guests_identity_status_check",
 			sql`${table.identityStatus} in ('missing', 'provided', 'processing', 'requires_input', 'verified', 'canceled')`,
 		),
+		foreignKey({
+			columns: [table.providerBookingId, table.orderId],
+			foreignColumns: [providerBooking.id, providerBooking.orderId],
+			name: "booking_guests_provider_booking_order_fk",
+		}).onDelete("cascade"),
+		foreignKey({
+			columns: [table.orderMemberId, table.orderId],
+			foreignColumns: [orderMember.id, orderMember.orderId],
+			name: "booking_guests_order_member_order_fk",
+		}).onDelete("set null"),
 	],
 );
 
@@ -1353,6 +1604,8 @@ export const schema = {
 	orderContact,
 	orderItem,
 	providerBooking,
+	conversation,
+	conversationMessage,
 	bookingGuest,
 	guestSubmissionJob,
 	accommodationItemDetail,

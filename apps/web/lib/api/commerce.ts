@@ -10,8 +10,10 @@ import {
 	type CommerceParseResult,
 	type CommerceQuoteInput,
 	CommerceService,
+	HostifyConversationGateway,
 	HostifyReservationGateway,
 	mapStripePaymentStatus,
+	type OrderAccessContext,
 	type ProviderReservationGateway,
 	StubReservationGateway,
 } from "@workspace/core/commerce";
@@ -26,12 +28,33 @@ import {
 import { getRedis } from "@workspace/core/redis";
 import type { AppliedDiscountSnapshot } from "@workspace/db";
 import { CART_COOKIE_NAME, getDb } from "@workspace/db";
-import { getServerUser } from "@/lib/auth/session";
+import { cookies } from "next/headers";
+import { getCurrentUser, getServerUser } from "@/lib/auth/session";
 import { HOSTIFY_PROVIDER } from "@/lib/catalog/constants";
 import { quoteFailure } from "./hostify-errors";
+import { createPusherRealtimePublisher } from "./realtime";
 
 // Matches CART_TTL_MS in the commerce service (~14 days).
 const CART_COOKIE_MAX_AGE_SECONDS = 14 * 24 * 60 * 60;
+
+/**
+ * Cookie binding a browser to a redeemed `order_members` row. Holds the raw
+ * booking-access token (re-hashed per request by `resolveOrderAccess`), so it is
+ * httpOnly and never exposed to client JS.
+ */
+const ORDER_MEMBER_COOKIE_NAME = "ai_order_member";
+const ORDER_MEMBER_COOKIE_MAX_AGE_SECONDS = 30 * 24 * 60 * 60;
+
+function normalizedOrderReference(reference: string): string {
+	return reference.trim().toUpperCase();
+}
+
+function orderMemberCookieName(reference: string): string {
+	return `${ORDER_MEMBER_COOKIE_NAME}.${Buffer.from(
+		normalizedOrderReference(reference),
+		"utf8",
+	).toString("base64url")}`;
+}
 
 /**
  * Dev/prod safety switch. Real Hostify reservations are created only when this is
@@ -67,8 +90,8 @@ export async function readJson(request: Request): Promise<unknown> {
 	}
 }
 
-/** Reads the secret cart token from the `ai_cart` cookie, if present. */
-export function readCartToken(request: Request): string | null {
+/** Reads a single cookie value from the request `Cookie` header, if present. */
+function readCookie(request: Request, cookieName: string): string | null {
 	const header = request.headers.get("cookie");
 	if (!header) {
 		return null;
@@ -80,7 +103,7 @@ export function readCartToken(request: Request): string | null {
 			continue;
 		}
 		const name = part.slice(0, separator).trim();
-		if (name === CART_COOKIE_NAME) {
+		if (name === cookieName) {
 			try {
 				return decodeURIComponent(part.slice(separator + 1).trim());
 			} catch {
@@ -91,6 +114,22 @@ export function readCartToken(request: Request): string | null {
 	}
 
 	return null;
+}
+
+/** Reads the secret cart token from the `ai_cart` cookie, if present. */
+export function readCartToken(request: Request): string | null {
+	return readCookie(request, CART_COOKIE_NAME);
+}
+
+/** Reads the redeemed booking-access token for this order, if present. */
+export function readMemberToken(
+	request: Request,
+	reference: string,
+): string | null {
+	return (
+		readCookie(request, orderMemberCookieName(reference)) ??
+		readCookie(request, ORDER_MEMBER_COOKIE_NAME)
+	);
 }
 
 /**
@@ -115,6 +154,76 @@ export function cartCookie(token: string): string {
 		attributes.push("Secure");
 	}
 	return attributes.join("; ");
+}
+
+/**
+ * Builds the order-access context: the cart/user grants that resolve the owner
+ * plus the redeemed member token. The service (`resolveOrderAccess`) decides
+ * which, if any, authorizes the order and at what role.
+ */
+export async function resolveOrderAccessContext(
+	request: Request,
+	reference: string,
+): Promise<OrderAccessContext> {
+	const user = await getServerUser(request);
+	return {
+		cartToken: readCartToken(request),
+		memberToken: readMemberToken(request, reference),
+		userId: user?.id ?? null,
+	};
+}
+
+/** Serializes the `Set-Cookie` value binding the browser to a member. */
+export function memberCookie(reference: string, token: string): string {
+	const attributes = [
+		`${orderMemberCookieName(reference)}=${encodeURIComponent(token)}`,
+		"Path=/",
+		`Max-Age=${ORDER_MEMBER_COOKIE_MAX_AGE_SECONDS}`,
+		"HttpOnly",
+		"SameSite=Lax",
+	];
+	if (process.env.NODE_ENV === "production") {
+		attributes.push("Secure");
+	}
+	return attributes.join("; ");
+}
+
+/**
+ * Server Component / Server Action variant of {@link resolveOrderAccessContext}.
+ * Builds the order-access context from `next/headers` so pages and actions can
+ * authorize an order without a `Request` object.
+ */
+export async function resolveOrderAccessFromCookies(
+	reference: string,
+): Promise<OrderAccessContext> {
+	const [store, user] = await Promise.all([cookies(), getCurrentUser()]);
+	return {
+		cartToken: store.get(CART_COOKIE_NAME)?.value ?? null,
+		memberToken:
+			store.get(orderMemberCookieName(reference))?.value ??
+			store.get(ORDER_MEMBER_COOKIE_NAME)?.value ??
+			null,
+		userId: user?.id ?? null,
+	};
+}
+
+/**
+ * Binds the browser to a redeemed member from a Server Action by writing the
+ * order-scoped httpOnly cookie through the `next/headers` store. Mirrors the
+ * attributes of {@link memberCookie}, which the access route handler emits.
+ */
+export async function setOrderMemberCookie(
+	reference: string,
+	token: string,
+): Promise<void> {
+	const store = await cookies();
+	store.set(orderMemberCookieName(reference), token, {
+		httpOnly: true,
+		maxAge: ORDER_MEMBER_COOKIE_MAX_AGE_SECONDS,
+		path: "/",
+		sameSite: "lax",
+		secure: process.env.NODE_ENV === "production",
+	});
 }
 
 function optionalStripeClient(): ReturnType<
@@ -166,16 +275,23 @@ export function commerceService(): CommerceService {
 			provider === HOSTIFY_PROVIDER
 				? resolveHostifyGateway(hostifyClient)
 				: undefined,
+		resolveConversationGateway: (provider) =>
+			provider === HOSTIFY_PROVIDER
+				? new HostifyConversationGateway({ client: hostifyClient })
+				: undefined,
+		realtimePublisher: createPusherRealtimePublisher(),
 		// The reconciler reads live PaymentIntent state when a webhook never arrived.
 		retrievePaymentIntent: stripe
 			? async (paymentIntentId) => {
 					const snapshot = await retrievePaymentIntentSnapshot(
 						stripe,
 						paymentIntentId,
+						{ includePaymentMethod: true },
 					);
 					return {
 						amountMinor: snapshot.amountMinor,
 						currency: snapshot.currency,
+						paymentMethod: snapshot.paymentMethod,
 						status: mapStripePaymentStatus(snapshot.status),
 					};
 				}
