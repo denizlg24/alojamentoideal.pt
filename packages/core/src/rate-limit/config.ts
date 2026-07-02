@@ -7,7 +7,8 @@ export type RateLimitBucket =
 	| "mutation"
 	| "cart.read"
 	| "cart.write"
-	| "checkout.write";
+	| "checkout.write"
+	| "orders.members_resend";
 
 export interface RateLimitBucketConfig {
 	/** Seconds a key stays blocked after exhausting its points. */
@@ -39,6 +40,8 @@ interface RateLimitEnvironment {
 	RATE_LIMIT_ENABLED?: string;
 	RATE_LIMIT_MUTATION_POINTS?: string;
 	RATE_LIMIT_MUTATION_WINDOW_SECONDS?: string;
+	RATE_LIMIT_ORDERS_MEMBERS_RESEND_WINDOW_SECONDS?: string;
+	RATE_LIMIT_ORDERS_MEMBERS_RESEND_POINTS?: string;
 }
 
 function readEnvironment(): RateLimitEnvironment {
@@ -64,6 +67,10 @@ function readEnvironment(): RateLimitEnvironment {
 		RATE_LIMIT_MUTATION_POINTS: process.env.RATE_LIMIT_MUTATION_POINTS,
 		RATE_LIMIT_MUTATION_WINDOW_SECONDS:
 			process.env.RATE_LIMIT_MUTATION_WINDOW_SECONDS,
+		RATE_LIMIT_ORDERS_MEMBERS_RESEND_WINDOW_SECONDS:
+			process.env.RATE_LIMIT_ORDERS_MEMBERS_RESEND_WINDOW_SECONDS,
+		RATE_LIMIT_ORDERS_MEMBERS_RESEND_POINTS:
+			process.env.RATE_LIMIT_ORDERS_MEMBERS_RESEND_POINTS,
 	};
 }
 
@@ -191,6 +198,23 @@ export function getRateLimitConfig(
 					1,
 					100_000,
 					60,
+				),
+			},
+			"orders.members_resend": {
+				blockDurationSeconds: 0,
+				durationSeconds: optionalInteger(
+					"RATE_LIMIT_ORDERS_MEMBERS_RESEND_WINDOW_SECONDS",
+					environment.RATE_LIMIT_ORDERS_MEMBERS_RESEND_WINDOW_SECONDS,
+					1,
+					86_400,
+					300,
+				),
+				points: optionalInteger(
+					"RATE_LIMIT_ORDERS_MEMBERS_RESEND_POINTS",
+					environment.RATE_LIMIT_ORDERS_MEMBERS_RESEND_POINTS,
+					1,
+					100_000,
+					1,
 				),
 			},
 		},

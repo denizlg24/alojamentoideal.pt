@@ -50,6 +50,7 @@ export const POST = withApiRoute(
 			siteConfig.url,
 		).toString();
 		const session = await createIdentityVerificationSession(stripe, {
+			idempotencyKey: request.headers.get("Idempotency-Key") ?? undefined,
 			userId: user.id,
 			returnUrl,
 		});

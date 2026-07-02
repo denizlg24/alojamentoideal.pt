@@ -1290,7 +1290,8 @@ function shapeOf(value: unknown, depth: number): unknown {
 			return "object";
 		}
 		const shape: Record<string, unknown> = {};
-		for (const key of Object.keys(value as Record<string, unknown>)) {
+		const keys = Object.keys(value as Record<string, unknown>).slice(0, 50);
+		for (const key of keys) {
 			shape[key] = shapeOf((value as Record<string, unknown>)[key], depth - 1);
 		}
 		return shape;

@@ -14,7 +14,7 @@ import { Button } from "@workspace/ui/components/button";
 import { Textarea } from "@workspace/ui/components/textarea";
 import { cn } from "@workspace/ui/lib/utils";
 import { format } from "date-fns";
-import { User } from "lucide-react";
+import { AlertCircle, User } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { type KeyboardEvent, useEffect, useRef, useState } from "react";
 import { toCheckoutError } from "@/lib/checkout/errors";
@@ -30,6 +30,96 @@ function sortBySentAt(messages: UiMessage[]): UiMessage[] {
 	return [...messages].sort(
 		(a, b) => new Date(a.sentAt).getTime() - new Date(b.sentAt).getTime(),
 	);
+}
+
+function sameMessage(a: UiMessage, b: UiMessage): boolean {
+	return (
+		a.body === b.body &&
+		a.conversationId === b.conversationId &&
+		a.deliveryStatus === b.deliveryStatus &&
+		a.externalMessageId === b.externalMessageId &&
+		a.id === b.id &&
+		a.isAutomatic === b.isAutomatic &&
+		(a.localOnly ?? false) === (b.localOnly ?? false) &&
+		a.readAt === b.readAt &&
+		a.senderMemberId === b.senderMemberId &&
+		a.senderType === b.senderType &&
+		a.sentAt === b.sentAt
+	);
+}
+
+function sameMessages(a: UiMessage[], b: UiMessage[]): boolean {
+	return (
+		a.length === b.length &&
+		a.every((message, index) => {
+			const next = b[index];
+			return next !== undefined && sameMessage(message, next);
+		})
+	);
+}
+
+function isSameOptimisticGuestMessage(
+	message: UiMessage,
+	initialMessage: UiMessage,
+): boolean {
+	return (
+		message.localOnly === true &&
+		message.senderType === "guest" &&
+		initialMessage.senderType === "guest" &&
+		message.body === initialMessage.body
+	);
+}
+
+function reconcileInitialMessages(
+	current: UiMessage[],
+	initialMessages: ConversationMessageDto[],
+	conversationId: string | null,
+): UiMessage[] {
+	const sourceMessages: UiMessage[] = initialMessages.map((message) => ({
+		...message,
+		localOnly: false,
+	}));
+	const sourceIds = new Set(sourceMessages.map((message) => message.id));
+	const sourceExternalIds = new Set(
+		sourceMessages
+			.map((message) => message.externalMessageId)
+			.filter((id): id is string => id !== null),
+	);
+	const currentById = new Map(current.map((message) => [message.id, message]));
+	const mergedSource = sourceMessages.map((message) => {
+		const existing = currentById.get(message.id);
+		if (
+			existing?.deliveryStatus === "sent" &&
+			message.deliveryStatus === "pending"
+		) {
+			return existing;
+		}
+		return message;
+	});
+	const preservedCurrent = current.filter((message) => {
+		if (
+			message.conversationId !== conversationId ||
+			sourceIds.has(message.id)
+		) {
+			return false;
+		}
+		if (
+			message.externalMessageId &&
+			sourceExternalIds.has(message.externalMessageId)
+		) {
+			return false;
+		}
+		if (
+			sourceMessages.some((sourceMessage) =>
+				isSameOptimisticGuestMessage(message, sourceMessage),
+			)
+		) {
+			return false;
+		}
+		return true;
+	});
+	const next = sortBySentAt([...mergedSource, ...preservedCurrent]);
+	return sameMessages(current, next) ? current : next;
 }
 
 function replaceById(
@@ -222,6 +312,9 @@ function emptyStateCopy(availability: OrderConversationAvailability): string {
 	if (availability === "pending") {
 		return "Your conversation with the Alojamento Ideal team opens once your booking is confirmed.";
 	}
+	if (availability === "available") {
+		return "We're opening your conversation with the Alojamento Ideal team. This page will update automatically.";
+	}
 	return "Messaging will be available once your booking is confirmed.";
 }
 
@@ -230,12 +323,14 @@ export function OrderMessages({
 	channelName,
 	conversationId,
 	initialMessages,
+	messagesLoadError,
 	reference,
 }: {
 	availability: OrderConversationAvailability;
 	channelName: string | null;
 	conversationId: string | null;
 	initialMessages: ConversationMessageDto[];
+	messagesLoadError: boolean;
 	reference: string;
 }) {
 	const [messages, setMessages] = useState<UiMessage[]>(() =>
@@ -249,11 +344,20 @@ export function OrderMessages({
 
 	useEffect(() => setMounted(true), []);
 
-	const canSend = availability === "available" && conversationId !== null;
+	useEffect(() => {
+		setMessages((current) =>
+			reconcileInitialMessages(current, initialMessages, conversationId),
+		);
+	}, [conversationId, initialMessages]);
+
+	const canSend =
+		availability === "available" &&
+		conversationId !== null &&
+		!messagesLoadError;
 
 	const { socketIdRef } = useOrderConversation({
 		channelName,
-		enabled: conversationId !== null,
+		enabled: conversationId !== null && !messagesLoadError,
 		onMessage: (incoming) => {
 			setMessages((current) => {
 				// Same row we already hold: apply status/content transitions in place so
@@ -286,14 +390,24 @@ export function OrderMessages({
 				// echo with the optimistic bubble we already rendered instead of adding a
 				// duplicate. Server-side socket exclusion handles the common case.
 				if (incoming.senderType === "guest") {
-					const optimistic = current.findIndex(
-						(message) => message.localOnly && message.body === incoming.body,
-					);
-					if (optimistic !== -1) {
-						return replaceAt(current, optimistic, {
+					const optimisticMatches: number[] = [];
+					for (const [index, message] of current.entries()) {
+						if (message.localOnly && message.body === incoming.body) {
+							optimisticMatches.push(index);
+						}
+					}
+					if (
+						optimisticMatches.length === 1 &&
+						optimisticMatches[0] !== undefined
+					) {
+						return replaceAt(current, optimisticMatches[0], {
 							...incoming,
 							localOnly: false,
 						});
+					}
+
+					if (optimisticMatches.length > 1) {
+						return current;
 					}
 				}
 				return sortBySentAt([...current, { ...incoming, localOnly: false }]);
@@ -444,7 +558,18 @@ export function OrderMessages({
 				className="flex max-h-[55vh] min-h-64 flex-col gap-3 overflow-y-auto rounded-2xl bg-muted/30 p-4"
 				ref={listRef}
 			>
-				{messages.length === 0 ? (
+				{messagesLoadError ? (
+					<div className="m-auto flex max-w-sm flex-col items-center gap-2 text-center">
+						<AlertCircle
+							aria-hidden="true"
+							className="size-5 text-destructive"
+						/>
+						<p className="text-muted-foreground text-sm leading-relaxed">
+							There was a problem loading your messages. Please come back in a
+							few minutes.
+						</p>
+					</div>
+				) : messages.length === 0 ? (
 					<p className="m-auto text-center text-muted-foreground text-sm">
 						No messages yet. Say hello to start the conversation.
 					</p>
@@ -462,7 +587,7 @@ export function OrderMessages({
 
 			{error && <p className="text-destructive text-sm">{error}</p>}
 
-			{canSend ? (
+			{messagesLoadError ? null : canSend ? (
 				<div className="flex items-end gap-2">
 					<Textarea
 						className="min-h-11 resize-none"

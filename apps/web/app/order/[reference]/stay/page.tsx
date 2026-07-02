@@ -42,7 +42,9 @@ async function OrderStayRoute({ params }: OrderStayPageProps) {
 
 	const stays = (
 		await Promise.all(
-			externalIds.map((id) => getCachedCatalogDetail(id, scope, "en")),
+			externalIds.map((id) =>
+				getCachedCatalogDetail(id, scope, "en").catch(() => null),
+			),
 		)
 	).filter((listing): listing is CatalogListingDetailDto => listing !== null);
 

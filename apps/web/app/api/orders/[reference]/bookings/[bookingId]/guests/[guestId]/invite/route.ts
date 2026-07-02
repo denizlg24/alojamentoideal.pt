@@ -1,3 +1,4 @@
+import z from "zod";
 import {
 	commerceErrorResponse,
 	commerceService,
@@ -11,14 +12,11 @@ interface OrderGuestInviteRouteContext {
 	params: Promise<{ bookingId: string; guestId: string; reference: string }>;
 }
 
+const inviteEmailSchema = z.object({ email: z.email() });
+
 function readEmail(body: unknown): string | null {
-	if (body && typeof body === "object" && "email" in body) {
-		const value = (body as { email?: unknown }).email;
-		if (typeof value === "string" && value.trim().length > 0) {
-			return value.trim();
-		}
-	}
-	return null;
+	const parsed = inviteEmailSchema.safeParse(body);
+	return parsed.success ? parsed.data.email.trim() : null;
 }
 
 /**

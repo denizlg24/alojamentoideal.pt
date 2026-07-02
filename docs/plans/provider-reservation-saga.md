@@ -431,7 +431,7 @@ Hostify can return `accepted` on the confirm PUT while silently leaving a
 reservation `pending` (observed for accepts far in the future). The old
 `confirmHold` trusted the PUT echo and reported `ok`, so the order was marked
 `confirmed` and the confirmation email fired while the real hold stayed `pending`
-(and could later auto-deny) — a silent false confirm. Fixed:
+(and could later auto-deny) - a silent false confirm. Fixed:
 
 - **Gateway `confirmHold` re-reads after the PUT and classifies against the live
   status, never the echo** (`reservations.ts`): `accepted` → `ok`;
@@ -450,7 +450,7 @@ reservation `pending` (observed for accepts far in the future). The old
   `pending_retry`, never `compensateOrder`. The reconciler's `pending` selection is
   widened to keep nudging holds flagged `needsRecovery` when
   `lastErrorCode = 'confirm_not_settled'`, so the daily retry survives the operator
-  flag. No migration — the existing `provider_bookings` columns carry the state.
+  flag. No migration - the existing `provider_bookings` columns carry the state.
 
 Remaining: validate the far-future-accept behavior against a live Hostify response
 (the `logger.warn` quantifies how often it actually happens) and decide whether the

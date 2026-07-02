@@ -169,7 +169,7 @@ async function ListingContent({
 			</div>
 
 			<ListingGallery
-				galleryHref={`/homes/${listing.id}/galery`}
+				galleryHref={`/homes/${listing.id}/gallery`}
 				photos={listing.photos}
 				title={listing.title}
 			/>

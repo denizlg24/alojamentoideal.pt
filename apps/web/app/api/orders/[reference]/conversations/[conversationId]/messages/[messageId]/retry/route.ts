@@ -1,3 +1,4 @@
+import { z } from "zod";
 import {
 	commerceErrorResponse,
 	commerceService,
@@ -14,14 +15,13 @@ interface RetryConversationMessageRouteContext {
 	}>;
 }
 
+const socketIdSchema = z.object({
+	socketId: z.string().min(1),
+});
+
 function readSocketId(body: unknown): string | null {
-	if (body && typeof body === "object" && "socketId" in body) {
-		const value = (body as { socketId?: unknown }).socketId;
-		if (typeof value === "string" && value.length > 0) {
-			return value;
-		}
-	}
-	return null;
+	const parsed = socketIdSchema.safeParse(body);
+	return parsed.success ? parsed.data.socketId : null;
 }
 
 export const POST = withApiRoute<RetryConversationMessageRouteContext>(

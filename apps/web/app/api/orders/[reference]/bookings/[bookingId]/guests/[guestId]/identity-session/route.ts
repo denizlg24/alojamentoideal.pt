@@ -66,6 +66,7 @@ export const POST = withApiRoute<OrderGuestIdentitySessionRouteContext>(
 			).toString();
 			const session = await createGuestIdentityVerificationSession(stripe, {
 				bookingGuestId: target.bookingGuestId,
+				idempotencyKey: request.headers.get("Idempotency-Key") ?? undefined,
 				orderId: target.orderId,
 				providerBookingId: target.providerBookingId,
 				returnUrl,

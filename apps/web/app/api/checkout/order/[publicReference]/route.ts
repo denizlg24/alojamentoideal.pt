@@ -14,6 +14,7 @@ import {
 	resolveCartOwner,
 } from "@/lib/api/commerce";
 import { withApiRoute } from "@/lib/api/route";
+import { buildOrderPath } from "@/lib/order/api-client";
 
 interface OrderStatusRouteContext {
 	params: Promise<{ publicReference: string }>;
@@ -67,7 +68,7 @@ export const GET = withApiRoute<OrderStatusRouteContext>(
 				currency: record.currency,
 				guestProgress: record.guestProgress,
 				orderId: record.orderId,
-				orderUrl: `/order/${encodeURIComponent(record.publicReference)}`,
+				orderUrl: buildOrderPath(record.publicReference),
 				paymentStatus,
 				provisioningSubState: record.provisioningSubState,
 				publicReference: record.publicReference,

@@ -1,3 +1,5 @@
+import type { OrderRole } from "@workspace/core/commerce";
+import type { OrderMemberStatus } from "@workspace/db";
 import {
 	commerceErrorResponse,
 	commerceService,
@@ -16,7 +18,10 @@ interface OrderMemberRouteContext {
  * an already accepted member or the owner cannot be resent.
  */
 export const POST = withApiRoute<OrderMemberRouteContext>(
-	{ name: "orders.members_resend", rateLimit: { bucket: "mutation" } },
+	{
+		name: "orders.members_resend",
+		rateLimit: { bucket: "orders.members_resend" },
+	},
 	async (request: Request, context): Promise<Response> => {
 		const { memberId, reference } = await context.params;
 		const accessContext = await resolveOrderAccessContext(request, reference);
@@ -41,8 +46,8 @@ export const POST = withApiRoute<OrderMemberRouteContext>(
 					email: invite.email,
 					expiresAt: invite.expiresAt.toISOString(),
 					id: invite.memberId,
-					role: "member",
-					status: "invited",
+					role: "member" as OrderRole,
+					status: "invited" as OrderMemberStatus,
 				},
 			});
 		} catch (error) {

@@ -1,3 +1,4 @@
+import { z } from "zod";
 import {
 	commerceErrorResponse,
 	commerceService,
@@ -10,15 +11,10 @@ interface OrderGuestResidencyRouteContext {
 	params: Promise<{ bookingId: string; guestId: string; reference: string }>;
 }
 
-function readCode(body: unknown, key: string): string | null {
-	if (body && typeof body === "object" && key in body) {
-		const value = (body as Record<string, unknown>)[key];
-		if (typeof value === "string") {
-			return value;
-		}
-	}
-	return null;
-}
+const guestResidencySchema = z.object({
+	nationality: z.string(),
+	residenceCountry: z.string(),
+});
 
 /**
  * Confirms the two residency fields Stripe Identity never returns (nationality,
@@ -30,9 +26,8 @@ export const POST = withApiRoute<OrderGuestResidencyRouteContext>(
 	async (request: Request, context): Promise<Response> => {
 		const { bookingId, guestId, reference } = await context.params;
 		const body = await readJson(request);
-		const nationality = readCode(body, "nationality");
-		const residenceCountry = readCode(body, "residenceCountry");
-		if (nationality === null || residenceCountry === null) {
+		const parsed = guestResidencySchema.safeParse(body);
+		if (!parsed.success) {
 			return Response.json(
 				{
 					code: "invalid_request",
@@ -41,6 +36,7 @@ export const POST = withApiRoute<OrderGuestResidencyRouteContext>(
 				{ status: 400 },
 			);
 		}
+		const { nationality, residenceCountry } = parsed.data;
 
 		const accessContext = await resolveOrderAccessContext(request, reference);
 		try {

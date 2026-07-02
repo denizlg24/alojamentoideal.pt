@@ -304,17 +304,22 @@ function EditableGuestCard({
 	const [inviteOpen, setInviteOpen] = useState(false);
 	const [inviteEmail, setInviteEmail] = useState("");
 
+	const [dirty, setDirty] = useState(false);
+
 	// Keep the local form in sync when a refetch delivers new authoritative fields
 	// (post-verification, account reuse). Refetches only follow the viewer's own
 	// actions or the post-redirect poll, so this never clobbers a live edit.
 	useEffect(() => {
-		setForm(toFormState(guest.fields));
-	}, [guest.fields]);
+		if (!dirty) {
+			setForm(toFormState(guest.fields));
+		}
+	}, [guest.fields, dirty]);
 
 	const fieldId = (name: string) => `guest-${guest.id}-${name}`;
 	const update = (key: keyof FormState, value: string) => {
 		setForm((current) => ({ ...current, [key]: value }));
 		setSaved(false);
+		setDirty(true);
 	};
 
 	async function handleManualSave(event: FormEvent<HTMLFormElement>) {
@@ -329,6 +334,7 @@ function EditableGuestCard({
 				{ fields: toPayload(form), id: guest.id },
 			]);
 			setSaved(true);
+			setDirty(false);
 			await onRefresh();
 		} catch (caught) {
 			setError(toCheckoutError(caught).message);
@@ -350,6 +356,7 @@ function EditableGuestCard({
 				residenceCountry: form.residenceCountry,
 			});
 			setSaved(true);
+			setDirty(false);
 			await onRefresh();
 		} catch (caught) {
 			setError(toCheckoutError(caught).message);
@@ -741,12 +748,18 @@ function sleep(ms: number): Promise<void> {
 	return new Promise((resolve) => window.setTimeout(resolve, ms));
 }
 
-async function pollUntilSettled(refresh: () => Promise<void>): Promise<void> {
+async function pollUntilSettled(
+	refresh: () => Promise<void>,
+	isSettled?: () => boolean,
+): Promise<void> {
 	for (let attempt = 0; attempt < IDENTITY_RETURN_POLLS; attempt += 1) {
 		if (attempt > 0) {
 			await sleep(IDENTITY_RETURN_DELAY_MS);
 		}
 		await refresh();
+		if (isSettled?.()) {
+			return;
+		}
 	}
 }
 

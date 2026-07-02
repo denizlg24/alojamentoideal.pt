@@ -4,6 +4,7 @@ import { CommerceError } from "@workspace/core/commerce";
 import { redirect } from "next/navigation";
 import { commerceService, setOrderMemberCookie } from "@/lib/api/commerce";
 import { getCurrentUser } from "@/lib/auth/session";
+import { buildOrderPath } from "@/lib/order/api-client";
 
 export type RedeemOrderAccessResult = {
 	ok: false;
@@ -35,5 +36,5 @@ export async function redeemOrderAccess(
 	}
 
 	await setOrderMemberCookie(reference, token);
-	redirect(`/order/${encodeURIComponent(reference)}`);
+	redirect(buildOrderPath(reference));
 }

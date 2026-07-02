@@ -257,7 +257,7 @@ function extractDescriptionSections(
 			rawBody;
 		// Skip anything already shown as the lead paragraph.
 		if (body && body !== lead && rawBody !== rawLead) {
-			sections.push({ body, key, label });
+			sections.push({ body, key, label: label[locale] });
 		}
 	}
 

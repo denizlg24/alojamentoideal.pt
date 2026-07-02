@@ -44,21 +44,21 @@ async function OrderMessagesRoute({ params }: OrderMessagesPageProps) {
 	}
 
 	const conversation = primaryConversation(loaded.detail.conversations);
+	const channelName = conversation
+		? conversationChannelName(loaded.access.order.id, conversation.id)
+		: null;
 	let initialMessages: ConversationMessageDto[] = [];
-	let channelName: string | null = null;
+	let messagesLoadError = false;
 	if (conversation) {
-		channelName = conversationChannelName(
-			loaded.access.order.id,
-			conversation.id,
-		);
 		try {
 			initialMessages = await commerceService().readConversationMessages(
 				loaded.access,
 				conversation.id,
 				{ limit: 50 },
 			);
-		} catch {
-			initialMessages = [];
+		} catch (error) {
+			console.error("Failed to load order conversation messages", error);
+			messagesLoadError = true;
 		}
 	}
 
@@ -69,6 +69,7 @@ async function OrderMessagesRoute({ params }: OrderMessagesPageProps) {
 				channelName={channelName}
 				conversationId={conversation?.id ?? null}
 				initialMessages={initialMessages}
+				messagesLoadError={messagesLoadError}
 				reference={reference}
 			/>
 		</OrderHubShell>

@@ -356,7 +356,7 @@ async function handleIdentityUpdated(
 		});
 		if (!guestId) {
 			logger.warn("Stripe identity event referenced an unknown booking guest", {
-				bookingGuestId: event.bookingGuestId,
+				bookingGuestId: hashIdentifier(`booking-guest:${event.bookingGuestId}`),
 				sessionIdHash: stripeSessionLogId(event.sessionId),
 				status: event.status,
 			});

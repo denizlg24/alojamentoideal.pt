@@ -1,3 +1,4 @@
+import { z } from "zod";
 import {
 	commerceErrorResponse,
 	commerceService,
@@ -11,26 +12,25 @@ interface ConversationMessagesRouteContext {
 }
 
 const MAX_MESSAGE_LIMIT = 200;
+const MAX_MESSAGE_BODY_LENGTH = 4000;
 const LIMIT_PATTERN = /^[1-9]\d*$/;
 
+const messageBodySchema = z.object({
+	body: z.string().trim().min(1).max(MAX_MESSAGE_BODY_LENGTH),
+});
+
+const socketIdSchema = z.object({
+	socketId: z.string().min(1),
+});
+
 function readMessageBody(body: unknown): string | null {
-	if (body && typeof body === "object" && "body" in body) {
-		const value = (body as { body?: unknown }).body;
-		if (typeof value === "string" && value.trim().length > 0) {
-			return value.trim();
-		}
-	}
-	return null;
+	const parsed = messageBodySchema.safeParse(body);
+	return parsed.success ? parsed.data.body : null;
 }
 
 function readSocketId(body: unknown): string | null {
-	if (body && typeof body === "object" && "socketId" in body) {
-		const value = (body as { socketId?: unknown }).socketId;
-		if (typeof value === "string" && value.length > 0) {
-			return value;
-		}
-	}
-	return null;
+	const parsed = socketIdSchema.safeParse(body);
+	return parsed.success ? parsed.data.socketId : null;
 }
 
 function readLimit(request: Request): number | null | undefined {

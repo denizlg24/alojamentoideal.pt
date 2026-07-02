@@ -520,7 +520,7 @@ set per retention policy.
 
 - `booking-complete-view.tsx`: distinct copy for `held-unpaid`/`paid-confirming`
   ("Payment received, finalizing your booking"), `confirmed` ("Booking
-  confirmed") with a CTA into `/order/[ref]`, and `cancelled` ("Refunded — we
+  confirmed") with a CTA into `/order/[ref]`, and `cancelled` ("Refunded - we
   couldn't confirm"). Keep polling/revalidate so the few-second provisioning delay
   resolves without a manual refresh.
 - Handle the saga's `reservation_unavailable` (409) / transient (503) responses

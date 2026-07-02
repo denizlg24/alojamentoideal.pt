@@ -1,3 +1,5 @@
+import * as Sentry from "@sentry/nextjs";
+import { logger } from "@workspace/core/observability";
 import type { Metadata } from "next";
 import { Suspense } from "react";
 import { OrderAccessDenied } from "@/components/order/order-access-denied";
@@ -57,6 +59,25 @@ async function OrderGuestsRoute({ params }: OrderGuestsPageProps) {
 			} catch {
 				// A member with no slot left (or a provider hiccup) should still see the
 				// section rather than a 500; the slot simply reads as unavailable.
+				logger.error(
+					`Failed to read guests for booking ${item.providerBooking.id} in order ${reference}.`,
+					{
+						orderReference: reference,
+						providerBookingId: item.providerBooking.id,
+					},
+				);
+				Sentry.captureException(
+					new Error(
+						`Failed to read guests for booking ${item.providerBooking.id} in order ${reference}.`,
+					),
+					{
+						extra: {
+							orderReference: reference,
+							providerBookingId: item.providerBooking.id,
+						},
+						level: "error",
+					},
+				);
 				return {
 					bookingId: item.providerBooking.id,
 					guests: [],

@@ -1,3 +1,4 @@
+import { z } from "zod";
 import {
 	commerceErrorResponse,
 	commerceService,
@@ -15,6 +16,48 @@ interface RealtimeAuthBody {
 	reference: string;
 	socketId: string;
 }
+
+const realtimeAuthBodySchema = z
+	.object({
+		channel_name: z.string().optional(),
+		channelName: z.string().optional(),
+		reference: z.string(),
+		socket_id: z.string().optional(),
+		socketId: z.string().optional(),
+	})
+	.transform((body, context) => {
+		const channelName = body.channel_name ?? body.channelName;
+		const socketId = body.socket_id ?? body.socketId;
+		if (!channelName || channelName.trim().length === 0) {
+			context.addIssue({
+				code: "custom",
+				message: "Channel name is required.",
+				path: ["channelName"],
+			});
+			return z.NEVER;
+		}
+		if (!socketId || socketId.trim().length === 0) {
+			context.addIssue({
+				code: "custom",
+				message: "Socket id is required.",
+				path: ["socketId"],
+			});
+			return z.NEVER;
+		}
+		if (body.reference.trim().length === 0) {
+			context.addIssue({
+				code: "custom",
+				message: "Reference is required.",
+				path: ["reference"],
+			});
+			return z.NEVER;
+		}
+		return {
+			channelName: channelName.trim(),
+			reference: body.reference.trim(),
+			socketId: socketId.trim(),
+		};
+	});
 
 async function readRealtimeAuthRequest(
 	request: Request,
@@ -38,28 +81,8 @@ async function readRealtimeAuthRequest(
 }
 
 function readRealtimeAuthBody(body: unknown): RealtimeAuthBody | null {
-	if (!body || typeof body !== "object") {
-		return null;
-	}
-	const record = body as Record<string, unknown>;
-	const socketId = record.socket_id ?? record.socketId;
-	const channelName = record.channel_name ?? record.channelName;
-	const reference = record.reference;
-	if (
-		typeof socketId !== "string" ||
-		socketId.trim().length === 0 ||
-		typeof channelName !== "string" ||
-		channelName.trim().length === 0 ||
-		typeof reference !== "string" ||
-		reference.trim().length === 0
-	) {
-		return null;
-	}
-	return {
-		channelName: channelName.trim(),
-		reference: reference.trim(),
-		socketId: socketId.trim(),
-	};
+	const parsed = realtimeAuthBodySchema.safeParse(body);
+	return parsed.success ? parsed.data : null;
 }
 
 export const POST = withApiRoute(

@@ -42,7 +42,7 @@ export async function generateMetadata({
 	return buildPageMetadata({
 		title,
 		description: `Browse ${listing.photos.length} photos of ${listing.title}.`,
-		path: `/homes/${id}/galery`,
+		path: `/homes/${id}/gallery`,
 		image: listing.coverPhoto?.url,
 	});
 }

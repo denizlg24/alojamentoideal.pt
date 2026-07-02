@@ -30,7 +30,10 @@ function GuideBlock({ guide }: { guide: string }) {
 			<h2 className="font-heading font-semibold text-2xl">House guide</h2>
 			<div className="flex flex-col gap-4">
 				{sections.map((section) => (
-					<div className="flex flex-col gap-1" key={section.heading}>
+					<div
+						className="flex flex-col gap-1"
+						key={`${section.heading}-${section.body.slice(0, 20)}`}
+					>
 						<h3 className="font-heading font-medium text-base">
 							{section.heading}
 						</h3>
@@ -57,7 +60,7 @@ function StayListing({ listing }: { listing: CatalogListingDetailDto }) {
 			key: "gallery",
 			node: (
 				<ListingGallery
-					galleryHref={`/homes/${listing.id}/galery`}
+					galleryHref={`/homes/${listing.id}/gallery`}
 					photos={listing.photos}
 					title={listing.title}
 				/>

@@ -1,3 +1,4 @@
+import { z } from "zod";
 import {
 	commerceErrorResponse,
 	commerceService,
@@ -10,6 +11,10 @@ import { getServerUser } from "@/lib/auth/session";
 interface OrderAccessRouteContext {
 	params: Promise<{ reference: string }>;
 }
+
+const orderAccessBodySchema = z.object({
+	token: z.string(),
+});
 
 /**
  * Redeems a booking-access token for an order. The raw token arrives by email
@@ -24,11 +29,8 @@ export const POST = withApiRoute<OrderAccessRouteContext>(
 		const { reference } = await context.params;
 
 		const body = await readJson(request);
-		const bodyToken =
-			body && typeof body === "object" && "token" in body
-				? (body as { token?: unknown }).token
-				: null;
-		const token = typeof bodyToken === "string" ? bodyToken : null;
+		const parsed = orderAccessBodySchema.safeParse(body);
+		const token = parsed.success ? parsed.data.token : null;
 
 		if (!token) {
 			return Response.json(

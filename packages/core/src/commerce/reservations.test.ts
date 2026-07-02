@@ -310,8 +310,30 @@ describe("HostifyReservationGateway.confirmHold", () => {
 		expect(result.kind).toBe("transient");
 	});
 
-	test("treats an already-accepted reservation as success on error", async () => {
+	test("a retryable re-read failure stays transient even when the PUT failure is permanent", async () => {
 		const { client } = fakeClient({
+			reservationGet: () => {
+				throw new HostifyApiError("unavailable", 503);
+			},
+			reservationUpdate: () => {
+				throw new HostifyApiError("conflict", 409);
+			},
+		});
+		const gateway = new HostifyReservationGateway({ client });
+		const result = await gateway.confirmHold({
+			paymentReference: "pi_123",
+			reservationId: "999",
+			transactionId: "555",
+		});
+
+		expect(result.kind).toBe("transient");
+		if (result.kind !== "transient") return;
+		expect(result.code).toBe("confirm_status_unknown_http_503");
+		expect(result.message).toContain("reservation status is unknown");
+	});
+
+	test("treats an already-accepted reservation as success on error", async () => {
+		const { calls, client } = fakeClient({
 			reservationUpdate: () => {
 				throw new HostifyApiError("conflict", 409);
 			},
@@ -327,6 +349,7 @@ describe("HostifyReservationGateway.confirmHold", () => {
 			transactionId: "555",
 		});
 		expect(result.kind).toBe("ok");
+		expect(calls.transactionUpdate[0]?.input.is_completed).toBe(1);
 	});
 
 	test("an unparseable PUT whose re-read shows pending is not_settled", async () => {

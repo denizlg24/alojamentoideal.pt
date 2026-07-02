@@ -132,7 +132,10 @@ export function createGuestIdentitySession(
 		`${base(reference)}/bookings/${seg(bookingId)}/guests/${seg(
 			guestId,
 		)}/identity-session`,
-		jsonBody({}),
+		{
+			...jsonBody({}),
+			headers: { "Idempotency-Key": crypto.randomUUID() },
+		},
 	);
 }
 
@@ -213,4 +216,9 @@ export function resendOrderMemberInvite(
 		`${base(reference)}/members/${seg(memberId)}/resend`,
 		jsonBody({}),
 	);
+}
+
+// --- 	Helpers ---
+export function buildOrderPath(reference: string) {
+	return `/order/${encodeURIComponent(reference)}`;
 }

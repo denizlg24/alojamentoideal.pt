@@ -511,11 +511,6 @@ export class HostifyReservationGateway implements ProviderReservationGateway {
 
 	async confirmHold(args: ConfirmHoldArgs): Promise<MutateHoldResult> {
 		try {
-			await this.#completeHoldTransaction(
-				args.transactionId,
-				args.paymentReference,
-			);
-
 			await this.#client.reservations.update(
 				args.reservationId,
 				{ status: "accepted" },
@@ -525,11 +520,11 @@ export class HostifyReservationGateway implements ProviderReservationGateway {
 			logUnexpectedResponseShape("confirm", args.reservationId, error);
 			// The PUT itself failed. The accept may still have applied server-side, or
 			// the hold may have died (auto-deny), so a live re-read is the authority,
-			// never the thrown error. Only when the reservation cannot be read either
-			// do we fall back to classifying the original failure.
+			// never the thrown error. If the reservation cannot be read either, the
+			// status is unknown and stays retryable.
 			const verified = await this.#verifyConfirmStatus(args.reservationId);
 			if (verified.kind === "transient") {
-				return toMutationFailure(error);
+				return verified;
 			}
 			if (verified.kind === "ok") {
 				await this.#completeHoldTransaction(
@@ -543,7 +538,14 @@ export class HostifyReservationGateway implements ProviderReservationGateway {
 		// Hostify echoes the requested status on a successful PUT even when the change
 		// does not take (a far-future accept returns `accepted` but the reservation
 		// stays `pending`). The live reservation is authoritative, not the PUT echo.
-		return this.#verifyConfirmStatus(args.reservationId);
+		const verified = await this.#verifyConfirmStatus(args.reservationId);
+		if (verified.kind === "ok") {
+			await this.#completeHoldTransaction(
+				args.transactionId,
+				args.paymentReference,
+			);
+		}
+		return verified;
 	}
 
 	/**
@@ -552,7 +554,8 @@ export class HostifyReservationGateway implements ProviderReservationGateway {
 	 * denied/cancelled/no-show status means the hold died and can never be confirmed
 	 * (`permanent`, which drives compensation); anything still `pending` means the
 	 * accept has not taken yet (`not_settled`) and must be retried without ever
-	 * refunding a live, paid hold. A failed read is classified like any other call.
+	 * refunding a live, paid hold. A failed read means status is unknown after a
+	 * confirm attempt, so it stays retryable regardless of the original PUT error.
 	 */
 	async #verifyConfirmStatus(reservationId: string): Promise<MutateHoldResult> {
 		try {
@@ -581,7 +584,7 @@ export class HostifyReservationGateway implements ProviderReservationGateway {
 			);
 			return { kind: "not_settled", providerStatus: status, raw };
 		} catch (error) {
-			return toMutationFailure(error);
+			return toConfirmStatusReadFailure(error, reservationId);
 		}
 	}
 
@@ -732,6 +735,18 @@ function toMutationFailure(error: unknown): SettledMutateResult {
 		};
 	}
 	return toMutateFailure(classified);
+}
+
+function toConfirmStatusReadFailure(
+	error: unknown,
+	reservationId: string,
+): SettledMutateResult {
+	const classified = classifyError(error);
+	return {
+		code: `confirm_status_unknown_${classified.code}`,
+		kind: "transient",
+		message: `Could not verify Hostify reservation ${reservationId} after confirm attempt; reservation status is unknown. ${classified.message}`,
+	};
 }
 
 /** Prefix marking a synthetic reservation id produced by the dry-run gateway. */

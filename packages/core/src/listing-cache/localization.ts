@@ -24,12 +24,42 @@ const MAX_ATTEMPTS = 3;
 const LOCALES = ["en", "pt", "es"] as const;
 
 export const LISTING_DESCRIPTION_SECTIONS = [
-	{ key: "space", label: "The space" },
-	{ key: "access", label: "Guest access" },
-	{ key: "interaction", label: "During your stay" },
-	{ key: "neighborhood_overview", label: "The neighborhood" },
-	{ key: "transit", label: "Getting around" },
-	{ key: "notes", label: "Other things to note" },
+	{
+		key: "space",
+		label: { en: "The space", pt: "O espaço", es: "El espacio" },
+	},
+	{
+		key: "access",
+		label: {
+			en: "Guest access",
+			pt: "Acesso dos hóspedes",
+			es: "Acceso de los huéspedes",
+		},
+	},
+	{
+		key: "interaction",
+		label: {
+			en: "During your stay",
+			pt: "Durante a sua estadia",
+			es: "Durante su estancia",
+		},
+	},
+	{
+		key: "neighborhood_overview",
+		label: { en: "The neighborhood", pt: "A vizinhança", es: "El vecindario" },
+	},
+	{
+		key: "transit",
+		label: { en: "Getting around", pt: "Mobilidade", es: "Desplazamiento" },
+	},
+	{
+		key: "notes",
+		label: {
+			en: "Other things to note",
+			pt: "Outras coisas a ter em conta",
+			es: "Otras cosas a tener en cuenta",
+		},
+	},
 ] as const;
 
 export type ListingDescriptionSectionKey =
