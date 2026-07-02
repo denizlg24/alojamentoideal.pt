@@ -11,7 +11,6 @@ export interface CheckoutResumeState {
 	checkoutExpiresAt: string | null;
 	orderId: string;
 	publicReference: string;
-	stayKey: string;
 }
 
 export const CHECKOUT_RESUME_STORAGE_KEY = "ai_checkout_resume";
@@ -27,8 +26,8 @@ export interface StayKeyParts {
 }
 
 /**
- * Stable token identifying one stay. Used to confirm stored resume metadata
- * belongs to the stay the visitor is currently checking out before resuming.
+ * Stable token identifying one stay. Used to check whether a cart already
+ * holds the stay a booking route arrived with before adding it again.
  */
 export function stayKeyToken(stay: StayKeyParts): string {
 	return [
@@ -51,7 +50,6 @@ function isResumeShape(value: unknown): value is CheckoutResumeState {
 		typeof record.cartId === "string" &&
 		typeof record.orderId === "string" &&
 		typeof record.publicReference === "string" &&
-		typeof record.stayKey === "string" &&
 		(record.checkoutExpiresAt === null ||
 			typeof record.checkoutExpiresAt === "string")
 	);
@@ -73,18 +71,16 @@ export function parseResumeState(
 }
 
 /**
- * Resume metadata is usable when it is for the same stay and its checkout
- * window has not closed. A null `checkoutExpiresAt` defers entirely to the
- * server, which still rejects an expired order on the payment-intent call.
+ * Resume metadata is usable while its checkout window has not closed. A null
+ * `checkoutExpiresAt` defers entirely to the server, which still rejects an
+ * expired order on the payment-intent call. Whether the resumed order matches
+ * the cart being checked out is the caller's concern (it compares cart ids and
+ * item sets).
  */
 export function isResumeUsable(
 	state: CheckoutResumeState,
-	stayKey: string,
 	nowMs: number,
 ): boolean {
-	if (state.stayKey !== stayKey) {
-		return false;
-	}
 	if (!state.checkoutExpiresAt) {
 		return true;
 	}

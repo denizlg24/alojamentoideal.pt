@@ -1,6 +1,5 @@
 "use client";
 
-import type { CartDto } from "@workspace/core/commerce";
 import {
 	Accordion,
 	AccordionContent,
@@ -32,16 +31,7 @@ import type { DateRange } from "react-day-picker";
 import { nightsBetween, parseIsoDate, toIsoDate } from "@/lib/catalog/dates";
 import { capacityForGuests, MAX_INFANTS } from "@/lib/catalog/guests";
 import { formatListingMoney } from "@/lib/catalog/pricing-display";
-import {
-	addCartItem,
-	CHECKOUT_CART_STORAGE_KEY,
-	createCart,
-	getCart,
-} from "@/lib/checkout/api-client";
-import {
-	cartItemClientMutationId,
-	cartItemIdempotencyKey,
-} from "@/lib/checkout/idempotency";
+import { addStayToCart } from "@/lib/checkout/cart-store";
 import { GuestFields } from "../../search/guest-selector";
 import { ListingCalendar } from "./listing-calendar";
 import { useBookingAvailability } from "./use-booking-availability";
@@ -209,21 +199,9 @@ function BookingWidgetInner({
 		}
 		setAdding(true);
 		try {
-			let cart: CartDto | null = null;
-			const storedId = sessionStorage.getItem(CHECKOUT_CART_STORAGE_KEY);
-			if (storedId) {
-				try {
-					cart = (await getCart(storedId)).cart;
-				} catch {
-					sessionStorage.removeItem(CHECKOUT_CART_STORAGE_KEY);
-				}
-			}
-			if (cart?.status !== "draft") {
-				cart = (await createCart()).cart;
-				sessionStorage.setItem(CHECKOUT_CART_STORAGE_KEY, cart.id);
-			}
-
-			const stayKey = {
+			// The shared cart store dedupes an identical stay server-side and
+			// broadcasts the new count to the header badge.
+			await addStayToCart({
 				adults: guests.adults,
 				checkIn,
 				checkOut,
@@ -231,26 +209,7 @@ function BookingWidgetInner({
 				guests: guestCapacity,
 				infants: guests.infants,
 				listingId,
-			};
-			const alreadyInCart = cart.items.some(
-				(entry) =>
-					entry.status === "active" &&
-					entry.listingId === listingId &&
-					entry.checkIn === checkIn &&
-					entry.checkOut === checkOut &&
-					entry.adults === guests.adults &&
-					entry.children === guests.children &&
-					entry.infants === guests.infants &&
-					entry.guests === guestCapacity,
-			);
-			if (!alreadyInCart) {
-				await addCartItem(cart.id, {
-					...stayKey,
-					clientMutationId: cartItemClientMutationId(stayKey),
-					idempotencyKey: cartItemIdempotencyKey(stayKey),
-				});
-			}
-
+			});
 			setAdded(true);
 			setTimeout(() => setAdded(false), 2000);
 		} catch {

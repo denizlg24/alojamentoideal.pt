@@ -1,28 +1,19 @@
 import type { AccountProfile } from "@workspace/core/account";
 import type { DraftOrderContactInput } from "@workspace/core/commerce";
 
-/** Serializable listing facts the checkout shell renders (from the server). */
-export interface InitialListing {
-	coverPhotoUrl: string | null;
-	currency: string;
-	id: string;
-	locationLabel: string | null;
-	maxGuests: number | null;
-	minNights: number;
-	petsAllowed: boolean;
-	reviewAverage: number | null;
-	reviewCount: number;
-	title: string;
-}
-
-/** Stay seed parsed from the booking route query params. */
-export interface InitialStay {
+/**
+ * Stay seed parsed from the booking route query params ("Reserve" entry).
+ * The controller ensures this stay is in the shared cart before checkout;
+ * the cart-first `/checkout` route passes no seed.
+ */
+export interface CheckoutSeed {
 	adults: number;
 	checkIn: string | null;
 	checkOut: string | null;
 	children: number;
 	guests: number;
 	infants: number;
+	listingId: string;
 }
 
 /** Mutable contact/billing form state. Mirrors the draft-order contact shape. */
