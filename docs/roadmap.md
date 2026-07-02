@@ -13,7 +13,7 @@ Legend: ✅ done · 🟡 in progress / partial · ⬜ not started
 | 0 | Foundations (cache, sync, platform) | ✅ | Hostify incremental sync cron, content processing, and the `accommodation_listing` projection with FTS + trigram + geo search index. Rate limiting (Redis) and observability (Sentry errors + PostgreSQL analytics) wired through `withApiRoute`. LLM localization backfill + one-run sync script and env-driven listing sync version landed post-M6. |
 | 1 | Catalog Browsing | ✅ | Catalog read API done: `GET /api/catalog/listings` (filter/sort/paginate) and `/api/catalog/listings/[externalId]` (localized detail), with Next.js `use cache` + cron-driven `revalidateTag` invalidation. Frontend: `/homes` grid, filter bar (dates/guests/rooms/rating/amenities), and Leaflet map. Detail page (`/homes/[id]`) shipped with gallery + full-screen gallery route, amenities dialog, reviews (synced via cron), location map, share button, room/sleeping layout, and skeleton fallbacks. |
 | 2 | Live Availability and Quote | ✅ | Detail-page booking widget runs live Hostify quotes via `POST /api/accommodations/quote` (`AccommodationQuoteService`, Redis short-lived quote cache w/ `forceFresh` bypass), debounced + stale-abort. Availability calendar from `/api/accommodations/calendar`, date/guest pickers, guest-type/tax overhaul, min-stay + capacity enforcement, price breakdown (fees + VAT), and clear unavailable/provider-error states. |
-| 3 | Cart and Checkout Shell | 🟡 | Backend (DB-backed multi-item cart/order schema, `CommerceService`, idempotent cart mutations, cart validation, draft-order conversion over N items) shipped, plus the single-stay checkout frontend: `/homes/[id]/book`, contact/billing capture, draft-order creation, and `/booking/complete`. **In progress (this branch): the customer-facing multi-booking cart** — header cart icon, `/cart` page, add-to-cart from the booking widget, and a cart-driven `/checkout` that purchases several stays in one payment. Activities stay out of the cart until M9. |
+| 3 | Cart and Checkout Shell | ✅ | Backend (DB-backed multi-item cart/order schema, `CommerceService`, idempotent cart mutations, cart validation, draft-order conversion over N items) plus the multi-booking cart frontend (this branch): one persistent shared cart per browser, a live header cart badge, the `/cart` page with per-item date/guest edits and removal, add-to-cart from the booking widget, and a cart-driven `/checkout` that purchases several stays in one payment ("Reserve" seeds its stay into the same cart). Emails, completion page and the order hub render every stay on the order. Activities stay out of the cart until M9. |
 | 4 | Payment Foundation | ✅ | Stripe PaymentIntent created from the server-side order total (never client-submitted), one idempotent intent per draft order, retry-safe card failures, `payment_intent.succeeded` / `payment_failed` webhook handling, a Stripe refund helper, and reconciliation from live PaymentIntent state when a webhook never arrives. One-round-trip payment prep (`/api/checkout/prepare-payment`) with the provider hold placed immediately before Stripe confirmation. |
 | 5 | Provider Reservation Saga | ✅ | Reserve-first saga shipped: a Hostify hold is placed before any charge, confirmed on payment success (with a re-read verifying the accept actually settled — an accepted echo on a still-pending reservation no longer confirms), compensated (auto full refund) on permanent confirm failure / amount mismatch, reconciler cron (`/api/cron/commerce/reservations`) as durability authority, bounded retry/backoff, provider-keyed gateway, idempotent reconciliation email. Remaining debt: DB-integration saga tests and registering the cron in the external scheduler (see Open debt). |
 | 6 | Customer Order Experience | ✅ | Order hub at `/order/[reference]` (overview, stay details, guests, messages) with role-scoped access (owner vs member), booking-access tokens, member invites/revoke/resend, and realtime updates. Completion page surfaces held → pending → confirmed → refunded states. Confirmation, pending-confirmation, "could not confirm / refunded", amount-mismatch, and invite emails fire from durable saga state via Maizzle-branded templates. |
@@ -23,20 +23,47 @@ Legend: ✅ done · 🟡 in progress / partial · ⬜ not started
 | 10 | Fiscal Documents, Messaging, Post-Stay | 🟡 | Guest↔host messaging shipped: per-booking conversations bridged to Hostify inbox (send/retry/reconcile cron + realtime UI in the order hub). Invoices/credit notes and post-stay reconciliation not started. |
 | 11 | Analytics and Optimization | 🟡 | Per-request analytics events persisted to PostgreSQL and errors to Sentry. Durable-state booking events (`reservation_provisioned`, `order_confirmed`, `order_compensated`) emitted from the saga; the broader commercial funnel (search → view → quote → checkout → payment) is still partial. |
 
-Current focus: the multi-booking cart (this branch,
-`feat/cart-multiple-booking`). The commerce backend already handles N
-accommodation items per cart/order (conversion, per-item discount allocation,
-per-booking holds and compensation), so this iteration is customer-facing: a
-persistent shared cart with a header icon and `/cart` page, "Add to cart" on
-the booking widget, a cart-driven `/checkout` for several stays in one payment,
-and multi-stay rendering in the confirmation emails, completion page, and order
-hub. Activities/mixed-cart (M9) stay deferred.
+Current focus: the multi-booking cart shipped on this branch
+(`feat/cart-multiple-booking`); see the iteration notes below. Next up are the
+release blockers (cron registration, DB-integration saga tests), the Hostify
+reservation webhook, and the admin dashboard (M7). Activities/mixed-cart (M9)
+stay deferred.
 
 ## Technical Notes and Debt
 
 Running list of known shortcuts and follow-ups noticed during implementation.
 Keep this honest: when a debt item is paid, move the detail into the relevant
 milestone and delete it here.
+
+### Done in the multi-booking cart iteration (2026-07-02)
+
+- ✅ **One shared cart per browser.** The cart id persists in localStorage (the
+  secret token stays in the httpOnly `ai_cart` cookie); a `cart-changed` event
+  plus a cached count feed the new header cart badge. Anonymous carts claim to
+  the account on sign-in as before.
+- ✅ **`/cart` page.** Lists every stay with per-item date/guest edits (reusing
+  the checkout dialogs; listing constraints fetched from the catalog detail
+  API), removal, load-time revalidation with inline stale-stay flags that block
+  checkout, and the cart-level price roll-up.
+- ✅ **Cart-driven `/checkout`.** One checkout pays for every stay in the cart.
+  The "Reserve" entry (`/homes/[id]/book`) seeds its stay into the same shared
+  cart instead of discarding other items into a throwaway cart. Resume metadata
+  is keyed by cart id (not a single stay); an expired order or rejected hold
+  rebuilds a mutable cart from the frozen one (dropping stays that no longer
+  quote) and recovers to `/cart`. Summary, review step, and price breakdown
+  render all stays; add-to-cart on the booking widget feeds the shared cart.
+- ✅ **Multi-stay emails.** `OrderConfirmationFacts` carries `stays[]` built
+  from all saga bookings; the Maizzle confirmation and pending-confirmation
+  templates gained a repeatable stay block (`__STAYS_START__`/`__STAYS_END__`
+  markers survive both HTML and plaintext builds) expanded per stay by the
+  builders, with payment moved to the order-level table and pluralized
+  subjects/intros. Old baked templates fall back to first-stay placeholders.
+- ✅ **Order surfaces.** Completion page clears the spent cart/resume metadata
+  once money settles and uses stay-count-neutral copy; the order hub header
+  summarizes a multi-stay order (count + date envelope); order-level invite
+  emails title themselves after every stay.
+- ✅ Validation: `bun test ./packages/core` (306 pass), `bun test ./apps/web`
+  (26 pass), full turbo typecheck green on every commit.
 
 ### Done in the order-hub + messaging + guest-identity iteration (2026-06-26 → 2026-07-01)
 
