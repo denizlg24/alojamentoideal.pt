@@ -13,6 +13,7 @@ import type {
 	AccountIdentityDocumentDisplay,
 	AccountProfile,
 	AccountProfileInput,
+	GuestIdentityPrefill,
 	VerifiedIdentityDocumentFields,
 } from "./types";
 
@@ -192,6 +193,75 @@ export class AccountProfileRepository {
 		return profileRows[0] || identityRows[0]
 			? toProfile(profileRows[0], identity)
 			: { ...EMPTY_PROFILE, identity };
+	}
+
+	/**
+	 * Returns the user's verified account identity, decrypted in full (unmasked
+	 * document number) and merged with their profile residency, ready to pre-fill a
+	 * booking guest slot. Returns null when the user has no verified identity, so
+	 * the guest flow falls back to a fresh Stripe Identity scan or manual entry.
+	 */
+	async getVerifiedGuestPrefill(
+		userId: string,
+	): Promise<GuestIdentityPrefill | null> {
+		const [profileRows, identityRows] = await Promise.all([
+			this.db
+				.select()
+				.from(userProfile)
+				.where(eq(userProfile.userId, userId))
+				.limit(1),
+			this.db
+				.select()
+				.from(userIdentityDocument)
+				.where(
+					and(
+						eq(userIdentityDocument.userId, userId),
+						eq(userIdentityDocument.status, "verified"),
+						isNull(userIdentityDocument.purgedAt),
+					),
+				)
+				.orderBy(desc(userIdentityDocument.updatedAt))
+				.limit(1),
+		]);
+
+		const doc = identityRows[0];
+		if (!doc) {
+			return null;
+		}
+		const profile = profileRows[0];
+		const documentNationality = cleanDisplayValue(
+			decryptIdentityField(doc.nationalityEncrypted),
+		);
+
+		return {
+			fields: {
+				dateOfBirth: cleanDisplayValue(
+					decryptIdentityField(doc.dateOfBirthEncrypted),
+				),
+				documentExpiresOn: cleanDisplayValue(
+					decryptIdentityField(doc.documentExpiresOnEncrypted),
+				),
+				documentIssuingCountry: cleanDisplayValue(
+					decryptIdentityField(doc.documentIssuingCountryEncrypted),
+				),
+				documentNumber: cleanDisplayValue(
+					decryptIdentityField(doc.documentNumberEncrypted),
+				),
+				documentType: cleanDisplayValue(
+					decryptIdentityField(doc.documentTypeEncrypted),
+				),
+				firstName: cleanDisplayValue(
+					decryptIdentityField(doc.firstNameEncrypted),
+				),
+				lastName: cleanDisplayValue(
+					decryptIdentityField(doc.lastNameEncrypted),
+				),
+				nationality: documentNationality ?? profile?.nationality ?? null,
+				stripeVerificationReportId: doc.stripeVerificationReportId ?? null,
+			},
+			residenceCountry: profile?.residenceCountry ?? null,
+			userIdentityDocumentId: doc.id,
+		};
 	}
 
 	async updateProfile(

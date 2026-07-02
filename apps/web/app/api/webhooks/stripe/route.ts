@@ -10,6 +10,7 @@ import {
 	getStripeWebhookSecret,
 	interpretStripeEvent,
 	type RelevantStripeEvent,
+	retrievePaymentIntentSnapshot,
 	retrieveVerifiedIdentityDocumentFields,
 	StripeConfigurationError,
 	StripeWebhookSignatureError,
@@ -23,6 +24,7 @@ import {
 	sendOrderAmountMismatchRefundEmail,
 	sendOrderCompensationEmail,
 } from "@/lib/email/order-could-not-confirm";
+import { sendOrderPendingConfirmationEmail } from "@/lib/email/order-pending";
 
 function stripeSessionLogId(sessionId: string): string {
 	return hashIdentifier(`stripe-identity:${sessionId}`);
@@ -43,6 +45,7 @@ function stripeSessionLogId(sessionId: string): string {
  */
 async function handlePaymentSucceeded(
 	event: Extract<RelevantStripeEvent, { type: "payment_succeeded" }>,
+	stripe: ReturnType<typeof createStripeClientFromEnv>,
 ): Promise<void> {
 	if (!event.orderId) {
 		logger.warn("Stripe payment_intent.succeeded without orderId metadata", {
@@ -53,9 +56,14 @@ async function handlePaymentSucceeded(
 
 	try {
 		const service = commerceService();
+		const paymentMethod = await loadPaymentMethodSummary(
+			stripe,
+			event.paymentIntentId,
+		);
 		const marked = await service.markOrderPaid(event.orderId, {
 			amountMinor: event.amountReceivedMinor,
 			currency: event.currency,
+			paymentMethod,
 		});
 
 		if (marked.outcome === "not_found") {
@@ -119,6 +127,28 @@ async function handlePaymentSucceeded(
 	}
 }
 
+async function loadPaymentMethodSummary(
+	stripe: ReturnType<typeof createStripeClientFromEnv>,
+	paymentIntentId: string,
+) {
+	try {
+		const snapshot = await retrievePaymentIntentSnapshot(
+			stripe,
+			paymentIntentId,
+			{
+				includePaymentMethod: true,
+			},
+		);
+		return snapshot.paymentMethod;
+	} catch (error) {
+		logger.warn("Failed to read Stripe payment method summary", {
+			error: error instanceof Error ? error.message : String(error),
+			paymentIntentId,
+		});
+		return null;
+	}
+}
+
 /**
  * Drives the provider hold confirmation after payment and dispatches the right
  * customer email. Shared by the webhook and any future inline caller.
@@ -131,6 +161,10 @@ async function finalizeReservation(
 	const result = await service.confirmOrderReservations(orderId);
 	switch (result.outcome) {
 		case "confirmed":
+			logger.info("Order confirmed: provider holds accepted", {
+				orderId,
+				paymentIntentId,
+			});
 			if (!result.confirmation.email) {
 				logger.warn("Confirmed order has no contact email; skipping email", {
 					orderId,
@@ -146,6 +180,10 @@ async function finalizeReservation(
 			);
 			return;
 		case "compensated":
+			logger.error("Order refunded: provider hold could not be confirmed", {
+				orderId,
+				paymentIntentId,
+			});
 			Sentry.captureException(
 				new Error("Order refunded: provider hold could not be confirmed"),
 				{ extra: { orderId, paymentIntentId }, level: "error" },
@@ -158,18 +196,67 @@ async function finalizeReservation(
 			);
 			return;
 		case "manual_recovery":
+			logger.error("Order needs manual recovery: auto-refund disabled", {
+				orderId,
+				paymentIntentId,
+			});
 			Sentry.captureException(
 				new Error("Order needs manual recovery: auto-refund disabled"),
 				{ extra: { orderId, paymentIntentId }, level: "error" },
 			);
 			return;
-		default:
-			// pending_retry / not_applicable: the reconciler cron will finish it.
+		case "pending_retry":
+			// The hold has not settled yet: the reconciler cron will confirm it. Send
+			// the "payment received, finalizing" courtesy email so the guest is not
+			// left in silence while it settles.
+			await sendPendingNoticeEmail(service, result.pending);
 			logger.info("Reservation confirmation deferred to reconciler", {
 				orderId,
 				outcome: result.outcome,
 			});
 			return;
+		default:
+			// not_applicable: nothing to finalize (already settled, or never paid).
+			logger.info("Reservation confirmation deferred to reconciler", {
+				orderId,
+				outcome: result.outcome,
+			});
+			return;
+	}
+}
+
+/**
+ * Sends the pending-confirmation courtesy email, deduped via the order's
+ * `pendingNoticeEmail*` slot so a re-delivered webhook (which re-runs this path
+ * while the order is still pending) never double-sends. Best-effort: a failure is
+ * logged and left for the reconciler to retry, never surfaced to Stripe.
+ */
+async function sendPendingNoticeEmail(
+	service: ReturnType<typeof commerceService>,
+	facts: OrderConfirmationFacts,
+): Promise<void> {
+	if (!facts.email) {
+		return;
+	}
+	if (!(await service.claimPendingNoticeEmail(facts.orderId))) {
+		return;
+	}
+	try {
+		await sendOrderPendingConfirmationEmail(facts);
+	} catch (error) {
+		logger.warn("Failed to send pending-confirmation email", {
+			error: error instanceof Error ? error.message : String(error),
+			publicReference: facts.publicReference,
+		});
+		return;
+	}
+	try {
+		await service.markPendingNoticeEmailSent(facts.orderId);
+	} catch (error) {
+		logger.warn("Pending-confirmation email sent, but marking it sent failed", {
+			error: error instanceof Error ? error.message : String(error),
+			publicReference: facts.publicReference,
+		});
 	}
 }
 
@@ -254,6 +341,29 @@ async function handleIdentityUpdated(
 	event: Extract<RelevantStripeEvent, { type: "identity_updated" }>,
 	stripe: ReturnType<typeof createStripeClientFromEnv>,
 ): Promise<void> {
+	const verifiedFields =
+		event.status === "verified"
+			? await retrieveVerifiedIdentityDocumentFields(stripe, event.sessionId)
+			: undefined;
+
+	if (event.bookingGuestId) {
+		const guestId = await commerceService().applyBookingGuestIdentityStatus({
+			bookingGuestId: event.bookingGuestId,
+			sessionId: event.sessionId,
+			status: event.status,
+			statusChangedAt: event.verifiedAt ?? event.statusChangedAt,
+			verifiedFields,
+		});
+		if (!guestId) {
+			logger.warn("Stripe identity event referenced an unknown booking guest", {
+				bookingGuestId: hashIdentifier(`booking-guest:${event.bookingGuestId}`),
+				sessionIdHash: stripeSessionLogId(event.sessionId),
+				status: event.status,
+			});
+		}
+		return;
+	}
+
 	const repository = accountProfileRepository();
 	const knownSession = await repository.hasIdentitySession(event.sessionId);
 	if (!knownSession) {
@@ -266,11 +376,6 @@ async function handleIdentityUpdated(
 		);
 		return;
 	}
-
-	const verifiedFields =
-		event.status === "verified"
-			? await retrieveVerifiedIdentityDocumentFields(stripe, event.sessionId)
-			: undefined;
 
 	const userId = await repository.applyIdentityStatus({
 		sessionId: event.sessionId,
@@ -292,7 +397,7 @@ async function handleStripeEvent(
 ): Promise<void> {
 	switch (event.type) {
 		case "payment_succeeded":
-			await handlePaymentSucceeded(event);
+			await handlePaymentSucceeded(event, stripe);
 			return;
 		case "payment_failed":
 			await handlePaymentFailed(event);

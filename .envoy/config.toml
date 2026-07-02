@@ -1,0 +1,11 @@
+
+version = 1
+project_id = "727eb63a-1663-4004-9c55-59d95c95e21e"
+name = "alojamentoideal.pt"
+
+default_remote = "origin"
+
+[remotes]
+origin = "https://envoy.denizlg24.com/api"
+
+

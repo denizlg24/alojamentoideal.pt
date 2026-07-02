@@ -15,6 +15,17 @@ function paymentIntentEvent(
 	return { data: { object }, type } as unknown as Stripe.Event;
 }
 
+function identitySessionEvent(
+	type: string,
+	object: Partial<Stripe.Identity.VerificationSession>,
+): Stripe.Event {
+	return {
+		created: Date.UTC(2026, 5, 30, 12, 0, 0) / 1000,
+		data: { object },
+		type,
+	} as unknown as Stripe.Event;
+}
+
 function fakeStripe(
 	constructEventAsync: (
 		payload: string,
@@ -149,5 +160,43 @@ describe("interpretStripeEvent", () => {
 		} as unknown as Stripe.Event);
 
 		expect(result).toEqual({ type: "ignored" });
+	});
+
+	test("normalizes account-scoped identity metadata", () => {
+		const result = interpretStripeEvent(
+			identitySessionEvent("identity.verification_session.processing", {
+				id: "vs_1",
+				metadata: { userId: "user_1" } as Stripe.Metadata,
+			}),
+		);
+
+		expect(result).toEqual({
+			bookingGuestId: null,
+			sessionId: "vs_1",
+			status: "processing",
+			statusChangedAt: "2026-06-30T12:00:00.000Z",
+			type: "identity_updated",
+			userId: "user_1",
+			verifiedAt: null,
+		});
+	});
+
+	test("normalizes order guest identity metadata", () => {
+		const result = interpretStripeEvent(
+			identitySessionEvent("identity.verification_session.verified", {
+				id: "vs_2",
+				metadata: { bookingGuestId: "guest_1" } as Stripe.Metadata,
+			}),
+		);
+
+		expect(result).toEqual({
+			bookingGuestId: "guest_1",
+			sessionId: "vs_2",
+			status: "verified",
+			statusChangedAt: "2026-06-30T12:00:00.000Z",
+			type: "identity_updated",
+			userId: null,
+			verifiedAt: "2026-06-30T12:00:00.000Z",
+		});
 	});
 });

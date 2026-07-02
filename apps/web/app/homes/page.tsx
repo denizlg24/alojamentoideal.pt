@@ -43,6 +43,19 @@ import {
 	type ListingCardPrice,
 	searchPriceMap,
 } from "@/lib/catalog/pricing-display";
+import { buildPageMetadata } from "@/lib/site/metadata";
+
+export const metadata = buildPageMetadata({
+	title: "Homes",
+	description:
+		"Explore Alojamento Ideal apartments across Porto, Póvoa de Varzim, Leça da Palmeira and Canidelo, with live availability and guest-friendly filters.",
+	path: "/homes",
+	keywords: [
+		"homes in Northern Portugal",
+		"apartments in Porto",
+		"North Coast Portugal stays",
+	],
+});
 
 type SearchParams = Record<string, string | string[] | undefined>;
 

@@ -1,5 +1,6 @@
 export { HostifyClient } from "./client";
 export { createHostifyClientFromEnv } from "./config";
+export type { HostifyResponseValidationIssue } from "./errors";
 export {
 	HostifyApiError,
 	HostifyConfigurationError,

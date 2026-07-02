@@ -7,6 +7,7 @@ const DEFAULT_URL = "https://alojamentoideal.pt";
  */
 export const siteConfig = {
 	name: "Alojamento Ideal",
+	supportEmail: "support@alojamentoideal.pt",
 	title: "Find Your Ideal Stay | Alojamento Ideal",
 	description:
 		"Cozy, thoughtfully designed apartments along Portugal's North Coast in Porto, Póvoa de Varzim, Leça da Palmeira and Canidelo. Comfortable, modern and full of local charm.",

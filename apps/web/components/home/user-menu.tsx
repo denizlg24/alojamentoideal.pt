@@ -15,8 +15,23 @@ import { cn } from "@workspace/ui/lib/utils";
 import { UserRound } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { useEffect, useState } from "react";
 import { useAuthDialog } from "@/components/auth/auth-dialog-provider";
 import { signOut, useSession } from "@/lib/auth/client";
+
+/**
+ * True only after the first client paint. `useSession` resolves the auth cookie
+ * on the client, so the server always renders signed-out; gating the
+ * authenticated branch on this avoids a hydration mismatch by deferring it until
+ * after hydration.
+ */
+function useMounted(): boolean {
+	const [mounted, setMounted] = useState(false);
+	useEffect(() => {
+		setMounted(true);
+	}, []);
+	return mounted;
+}
 
 function initials(name?: string | null): string {
 	if (!name) {
@@ -34,6 +49,7 @@ export function UserMenu({ opaque }: { opaque: boolean }) {
 	const { data: session, isPending } = useSession();
 	const { openAuth } = useAuthDialog();
 	const router = useRouter();
+	const mounted = useMounted();
 	const user = session?.user;
 
 	const triggerClasses = cn(
@@ -43,12 +59,12 @@ export function UserMenu({ opaque }: { opaque: boolean }) {
 			: "text-white hover:bg-white/15 hover:text-white",
 	);
 
-	if (!user) {
+	if (!mounted || !user) {
 		return (
 			<Button
 				aria-label="Sign in"
 				className={triggerClasses}
-				disabled={isPending}
+				disabled={!mounted || isPending}
 				onClick={() => openAuth({ view: "login" })}
 				size="icon"
 				variant="ghost"
@@ -101,9 +117,10 @@ export function MobileAuthSection() {
 	const { data: session } = useSession();
 	const { openAuth } = useAuthDialog();
 	const router = useRouter();
+	const mounted = useMounted();
 	const user = session?.user;
 
-	if (!user) {
+	if (!mounted || !user) {
 		return (
 			<SheetClose asChild>
 				<button

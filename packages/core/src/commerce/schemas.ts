@@ -1,6 +1,7 @@
 import type { OrderBillingAddressSnapshot } from "@workspace/db";
 import { z } from "zod";
 import { parseQuoteBody, type QuoteRequest } from "../accommodations";
+import type { BookingGuestUpdateInput } from "./order-guests";
 import type { DraftOrderContactInput } from "./types";
 
 const idString = z.string().trim().min(1).max(128);
@@ -144,6 +145,67 @@ const draftOrderContactFieldsSchema = draftOrderSchema.pick({
 	taxNumber: true,
 });
 
+const isoDateString = z.iso.date("Use YYYY-MM-DD");
+
+const optionalIsoDateString = isoDateString
+	.nullish()
+	.transform((value) => value ?? null);
+const countryCode = z
+	.string()
+	.trim()
+	.regex(/^[A-Za-z]{2}$/, "Use an ISO 3166-1 alpha-2 country code")
+	.transform((value) => value.toUpperCase());
+const optionalGuestField = (maxLength: number) =>
+	z
+		.string()
+		.trim()
+		.min(1)
+		.max(maxLength)
+		.nullish()
+		.transform((value) => value ?? null);
+
+const guestIdentityFieldsSchema = z
+	.object({
+		dateOfBirth: isoDateString,
+		documentExpiresOn: optionalIsoDateString,
+		documentIssuingCountry: countryCode
+			.nullish()
+			.transform((value) => value ?? null),
+		documentNumber: optionalGuestField(80),
+		documentType: optionalGuestField(80),
+		firstName: z.string().trim().min(1).max(120),
+		lastName: z.string().trim().min(1).max(120),
+		nationality: countryCode,
+		residenceCountry: countryCode,
+	})
+	.superRefine((value, context) => {
+		if (
+			!(
+				(value.documentType &&
+					value.documentNumber &&
+					value.documentIssuingCountry) ||
+				(!value.documentType &&
+					!value.documentNumber &&
+					!value.documentIssuingCountry)
+			)
+		) {
+			context.addIssue({
+				code: "custom",
+				message: "All document fields are required",
+				path: ["documentType"],
+			});
+		}
+	});
+
+const bookingGuestUpdateSchema = z.object({
+	fields: guestIdentityFieldsSchema,
+	id: idString.nullish().transform((value) => value ?? null),
+});
+
+const updateBookingGuestsSchema = z.object({
+	guests: z.array(bookingGuestUpdateSchema).min(1).max(30),
+});
+
 export type CommerceParseResult<T> =
 	| { data: T; success: true }
 	| { error: z.ZodError; success: false };
@@ -189,6 +251,10 @@ export interface CreatePaymentIntentBody {
 	cartId: string;
 	idempotencyKey?: string;
 	orderId?: string;
+}
+
+export interface UpdateBookingGuestsBody {
+	guests: BookingGuestUpdateInput[];
 }
 
 export function parseCreateCartBody(
@@ -244,6 +310,12 @@ export function parseCreatePaymentIntentBody(
 	body: unknown,
 ): CommerceParseResult<CreatePaymentIntentBody> {
 	return createPaymentIntentSchema.safeParse(body);
+}
+
+export function parseUpdateBookingGuestsBody(
+	body: unknown,
+): CommerceParseResult<UpdateBookingGuestsBody> {
+	return updateBookingGuestsSchema.safeParse(body);
 }
 
 /**

@@ -143,7 +143,9 @@ function mergeShape(a: Shape, b: Shape): Shape {
 	for (const shape of [...flatten(a), ...flatten(b)]) {
 		addVariant(variants, shape);
 	}
-	return variants.length === 1 ? variants[0]! : { type: "union", variants };
+	return variants.length === 1 && variants[0] !== undefined
+		? variants[0]
+		: { type: "union", variants };
 }
 
 function flatten(shape: Shape): Shape[] {
@@ -158,14 +160,19 @@ function addVariant(variants: Shape[], incoming: Shape): void {
 		variants.push(incoming);
 		return;
 	}
-	variants[index] = combineSameKind(variants[index]!, incoming);
+	variants[index] = variants[index]
+		? combineSameKind(variants[index], incoming)
+		: incoming;
 }
 
 function combineSameKind(a: Shape, b: Shape): Shape {
 	if (a.type === "object" && b.type === "object") {
 		const keys: Record<string, Shape> = { ...a.keys };
 		for (const [key, shape] of Object.entries(b.keys)) {
-			keys[key] = key in keys ? mergeShape(keys[key]!, shape) : shape;
+			keys[key] =
+				key in keys && keys[key] !== undefined
+					? mergeShape(keys[key], shape)
+					: shape;
 		}
 		return { type: "object", keys };
 	}
@@ -218,8 +225,8 @@ async function main(): Promise<void> {
 	const report: Record<string, Shape> = {};
 	const record = (endpoint: string, payload: unknown) => {
 		report[endpoint] =
-			endpoint in report
-				? mergeShape(report[endpoint]!, describe(payload))
+			endpoint in report && report[endpoint] !== undefined
+				? mergeShape(report[endpoint], describe(payload))
 				: describe(payload);
 	};
 

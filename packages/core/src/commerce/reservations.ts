@@ -6,8 +6,10 @@ import {
 	type HostifyCreateTransactionInput,
 	HostifyNetworkError,
 	type HostifyRequestContext,
+	HostifyResponseValidationError,
 	HostifyTimeoutError,
 } from "../integrations/hostify";
+import { logger } from "../observability";
 import { minorUnitFactor } from "./money";
 
 /**
@@ -214,10 +216,31 @@ export type PlaceHoldResult =
 	| { code: string; kind: "transient"; message: string }
 	| { code: string; kind: "permanent"; message: string };
 
-export type MutateHoldResult =
+/**
+ * Outcome of a hold mutation that has reached a resolution the orchestrator can
+ * act on: applied (`ok`), retryable call failure (`transient`), or a terminal
+ * provider rejection (`permanent`). Shared by confirm and cancel.
+ */
+export type SettledMutateResult =
 	| { kind: "ok"; providerStatus: string | null; raw: Record<string, unknown> }
 	| { code: string; kind: "transient"; message: string }
 	| { code: string; kind: "permanent"; message: string };
+
+/**
+ * A confirm outcome. Adds `not_settled` to {@link SettledMutateResult}: the
+ * accept call returned but the provider has not applied it yet, leaving the hold
+ * alive and `pending` (e.g. Hostify refuses to accept a reservation far in the
+ * future and silently leaves it pending). Distinct from `transient` because it
+ * must be retried *without* ever escalating to a refund. Only `confirmHold` can
+ * produce it; cancel never does.
+ */
+export type MutateHoldResult =
+	| SettledMutateResult
+	| {
+			kind: "not_settled";
+			providerStatus: string | null;
+			raw: Record<string, unknown>;
+	  };
 
 export interface FindHoldQuery {
 	checkIn: string;
@@ -233,7 +256,7 @@ export interface FindHoldQuery {
  * with persisted state.
  */
 export interface ProviderReservationGateway {
-	cancelHold(args: CancelHoldArgs): Promise<MutateHoldResult>;
+	cancelHold(args: CancelHoldArgs): Promise<SettledMutateResult>;
 	confirmHold(args: ConfirmHoldArgs): Promise<MutateHoldResult>;
 	findExistingHold(query: FindHoldQuery): Promise<PlacedHold | null>;
 	placeHold(request: HostifyHoldRequest): Promise<PlaceHoldResult>;
@@ -265,11 +288,48 @@ function classifyError(error: unknown): ClassifiedError {
 	) {
 		return { code: error.name, message: error.message, transient: true };
 	}
+	if (error instanceof HostifyResponseValidationError) {
+		// Default classification is permanent: a read that cannot be parsed must
+		// surface (e.g. hold lookup) rather than be mistaken for "no hold". The
+		// confirm/cancel mutation paths override this to transient via
+		// `toMutationFailure`, because there the same drift is ambiguous about
+		// whether the change applied.
+		const fields = error.issues.map((issue) => issue.path).join(", ");
+		return {
+			code: error.name,
+			message: fields ? `${error.message} (fields: ${fields})` : error.message,
+			transient: false,
+		};
+	}
 	return {
 		code: error instanceof Error ? error.name : "unknown_error",
 		message: error instanceof Error ? error.message : String(error),
 		transient: false,
 	};
+}
+
+/**
+ * Surfaces a provider response that failed schema validation, including the
+ * exact failing fields and a PII-safe skeleton of the real body. A schema drift
+ * on a mutation is otherwise invisible (the saga only persists a generic
+ * message), and on `confirm` it can drive a wrongful refund, so it is logged at
+ * the point the mutation is reported as failed.
+ */
+function logUnexpectedResponseShape(
+	operation: string,
+	reservationId: string,
+	error: unknown,
+): void {
+	if (!(error instanceof HostifyResponseValidationError)) {
+		return;
+	}
+	logger.error("Hostify reservation mutation returned an unexpected shape", {
+		issues: error.issues,
+		operation,
+		requestId: error.requestId,
+		reservationId,
+		responseShape: error.responseShape,
+	});
 }
 
 function toRecord(value: unknown): Record<string, unknown> {
@@ -451,54 +511,98 @@ export class HostifyReservationGateway implements ProviderReservationGateway {
 
 	async confirmHold(args: ConfirmHoldArgs): Promise<MutateHoldResult> {
 		try {
-			const response = await this.#client.reservations.update(
+			await this.#client.reservations.update(
 				args.reservationId,
 				{ status: "accepted" },
 				this.#context,
 			);
-			const reservation = response.reservation as HostifyReservationShape;
-			await this.#completeHoldTransaction(
-				args.transactionId,
-				args.paymentReference,
-			);
-			return {
-				kind: "ok",
-				providerStatus: reservation.status ?? null,
-				raw: toRecord(response.reservation),
-			};
 		} catch (error) {
-			// A failed confirm on an already-accepted reservation (re-delivery race)
-			// must not trigger a false compensation: re-read and treat as success.
-			const reconciled = await this.#reconcileStatus(
-				args.reservationId,
-				(status) => status === "accepted",
-			);
-			if (reconciled) {
+			logUnexpectedResponseShape("confirm", args.reservationId, error);
+			// The PUT itself failed. The accept may still have applied server-side, or
+			// the hold may have died (auto-deny), so a live re-read is the authority,
+			// never the thrown error. If the reservation cannot be read either, the
+			// status is unknown and stays retryable.
+			const verified = await this.#verifyConfirmStatus(args.reservationId);
+			if (verified.kind === "transient") {
+				return verified;
+			}
+			if (verified.kind === "ok") {
 				await this.#completeHoldTransaction(
 					args.transactionId,
 					args.paymentReference,
 				);
-				return reconciled;
 			}
-			return toMutateFailure(classifyError(error));
+			return verified;
+		}
+
+		// Hostify echoes the requested status on a successful PUT even when the change
+		// does not take (a far-future accept returns `accepted` but the reservation
+		// stays `pending`). The live reservation is authoritative, not the PUT echo.
+		const verified = await this.#verifyConfirmStatus(args.reservationId);
+		if (verified.kind === "ok") {
+			await this.#completeHoldTransaction(
+				args.transactionId,
+				args.paymentReference,
+			);
+		}
+		return verified;
+	}
+
+	/**
+	 * Re-reads a reservation to classify a confirm against its live status rather
+	 * than the PUT echo. `accepted` is a real confirm (`ok`); a
+	 * denied/cancelled/no-show status means the hold died and can never be confirmed
+	 * (`permanent`, which drives compensation); anything still `pending` means the
+	 * accept has not taken yet (`not_settled`) and must be retried without ever
+	 * refunding a live, paid hold. A failed read means status is unknown after a
+	 * confirm attempt, so it stays retryable regardless of the original PUT error.
+	 */
+	async #verifyConfirmStatus(reservationId: string): Promise<MutateHoldResult> {
+		try {
+			const response = await this.#client.reservations.get(
+				reservationId,
+				{},
+				this.#context,
+			);
+			const reservation = response.reservation as HostifyReservationShape;
+			const status =
+				typeof reservation.status === "string" ? reservation.status : null;
+			const raw = toRecord(response.reservation);
+			if (status === "accepted") {
+				return { kind: "ok", providerStatus: status, raw };
+			}
+			if (status !== null && CANCELLED_PROVIDER_STATUSES.has(status)) {
+				return {
+					code: `hold_${status}`,
+					kind: "permanent",
+					message: `Hostify reservation ${reservationId} is ${status}; the hold can no longer be confirmed.`,
+				};
+			}
+			logger.warn(
+				"Hostify accept did not settle; reservation still unconfirmed after update",
+				{ providerStatus: status, reservationId },
+			);
+			return { kind: "not_settled", providerStatus: status, raw };
+		} catch (error) {
+			return toConfirmStatusReadFailure(error, reservationId);
 		}
 	}
 
-	async cancelHold(args: CancelHoldArgs): Promise<MutateHoldResult> {
+	async cancelHold(args: CancelHoldArgs): Promise<SettledMutateResult> {
 		try {
 			const response = await this.#client.reservations.update(
 				args.reservationId,
 				{ notes: args.reason, status: "cancelled_by_host" },
 				this.#context,
 			);
-			const reservation = response.reservation as HostifyReservationShape;
 			await this.#voidHoldTransaction(args.transactionId, args.reason);
 			return {
 				kind: "ok",
-				providerStatus: reservation.status ?? null,
-				raw: toRecord(response.reservation),
+				providerStatus: response.update_data?.status ?? null,
+				raw: toRecord(response.update_data),
 			};
 		} catch (error) {
+			logUnexpectedResponseShape("cancel", args.reservationId, error);
 			const reconciled = await this.#reconcileStatus(
 				args.reservationId,
 				(status) => CANCELLED_PROVIDER_STATUSES.has(status),
@@ -507,7 +611,7 @@ export class HostifyReservationGateway implements ProviderReservationGateway {
 				await this.#voidHoldTransaction(args.transactionId, args.reason);
 				return reconciled;
 			}
-			return toMutateFailure(classifyError(error));
+			return toMutationFailure(error);
 		}
 	}
 
@@ -582,7 +686,7 @@ export class HostifyReservationGateway implements ProviderReservationGateway {
 	async #reconcileStatus(
 		reservationId: string,
 		isSettled: (status: string) => boolean,
-	): Promise<MutateHoldResult | null> {
+	): Promise<SettledMutateResult | null> {
 		try {
 			const response = await this.#client.reservations.get(
 				reservationId,
@@ -607,11 +711,41 @@ export class HostifyReservationGateway implements ProviderReservationGateway {
 	}
 }
 
-function toMutateFailure(classified: ClassifiedError): MutateHoldResult {
+function toMutateFailure(classified: ClassifiedError): SettledMutateResult {
 	return {
 		code: classified.code,
 		kind: classified.transient ? "transient" : "permanent",
 		message: classified.message,
+	};
+}
+
+/**
+ * Failure mapping for the confirm/cancel mutation paths. An unparseable response
+ * is forced to transient here (overriding the default permanent classification)
+ * because the mutation may have applied server-side: retrying and reconciling
+ * against live state is safer than refunding a possibly-settled booking.
+ */
+function toMutationFailure(error: unknown): SettledMutateResult {
+	const classified = classifyError(error);
+	if (error instanceof HostifyResponseValidationError) {
+		return {
+			code: classified.code,
+			kind: "transient",
+			message: classified.message,
+		};
+	}
+	return toMutateFailure(classified);
+}
+
+function toConfirmStatusReadFailure(
+	error: unknown,
+	reservationId: string,
+): SettledMutateResult {
+	const classified = classifyError(error);
+	return {
+		code: `confirm_status_unknown_${classified.code}`,
+		kind: "transient",
+		message: `Could not verify Hostify reservation ${reservationId} after confirm attempt; reservation status is unknown. ${classified.message}`,
 	};
 }
 
@@ -648,7 +782,7 @@ export class StubReservationGateway implements ProviderReservationGateway {
 		return { kind: "ok", providerStatus: "accepted", raw: { stub: true } };
 	}
 
-	async cancelHold(_args: CancelHoldArgs): Promise<MutateHoldResult> {
+	async cancelHold(_args: CancelHoldArgs): Promise<SettledMutateResult> {
 		return {
 			kind: "ok",
 			providerStatus: "cancelled_by_host",

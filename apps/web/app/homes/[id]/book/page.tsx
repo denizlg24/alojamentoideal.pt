@@ -15,10 +15,13 @@ import {
 	generateListingStaticParams,
 	getListingCatalogScope,
 } from "@/lib/catalog/listing-route";
+import { buildPrivatePageMetadata } from "@/lib/site/metadata";
 
-export const metadata: Metadata = {
+export const metadata: Metadata = buildPrivatePageMetadata({
 	title: "Confirm and pay",
-};
+	description:
+		"Review your stay, guest details and secure payment for an Alojamento Ideal booking.",
+});
 
 type SearchParams = Record<string, string | string[] | undefined>;
 

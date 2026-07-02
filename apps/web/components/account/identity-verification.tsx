@@ -155,6 +155,7 @@ export function IdentityVerification({
 		setBusy(true);
 		try {
 			const response = await fetch("/api/account/identity-session", {
+				headers: { "Idempotency-Key": crypto.randomUUID() },
 				method: "POST",
 			});
 			if (!response.ok) {

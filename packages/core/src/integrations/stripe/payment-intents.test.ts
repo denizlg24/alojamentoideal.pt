@@ -1,6 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import type Stripe from "stripe";
-import { createOrUpdatePaymentIntent } from "./payment-intents";
+import {
+	createOrUpdatePaymentIntent,
+	retrievePaymentIntentSnapshot,
+} from "./payment-intents";
 
 interface CreateCall {
 	opts: { idempotencyKey?: string };
@@ -181,5 +184,33 @@ describe("createOrUpdatePaymentIntent", () => {
 				idempotencyKey: "pi:order_1",
 			}),
 		).rejects.toThrow(/client secret/i);
+	});
+
+	test("extracts card display details from an expanded latest charge", async () => {
+		const { stripe } = fakeStripe({
+			retrieve: (id) => ({
+				amount: 12_345,
+				client_secret: "pi_secret_existing",
+				currency: "eur",
+				id,
+				latest_charge: {
+					payment_method_details: {
+						card: { brand: "visa", last4: "4242" },
+						type: "card",
+					},
+				} as Stripe.Charge,
+				status: "succeeded",
+			}),
+		});
+
+		const snapshot = await retrievePaymentIntentSnapshot(stripe, "pi_done", {
+			includePaymentMethod: true,
+		});
+
+		expect(snapshot.paymentMethod).toEqual({
+			brand: "visa",
+			last4: "4242",
+			type: "card",
+		});
 	});
 });

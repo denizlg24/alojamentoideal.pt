@@ -387,13 +387,21 @@ describe("HostifyListingCacheSync.pollListings", () => {
 	test("captures related detail siblings in the raw listing cache", async () => {
 		const repository = new FakeListingCacheRepository();
 		const client = new FakeHostifyClient({
-			1: [listing("1")],
+			1: [
+				listing("1", {
+					checkin_end: "00:00:00",
+					checkin_start: "15:00:00",
+					checkout: "11:00:00",
+				}),
+			],
 		});
 		client.detailSiblings.set("1", {
 			amenities: [{ id: 46, name: "Air conditioning" }],
 			description: {
 				description: "Detail sibling description",
-				house_rules: { quiet_hours: "22:00" },
+				directions: "Take the metro to Trindade.",
+				house_rules: "No parties. No smoking.",
+				notes: "No parking on site.",
 				summary: "Detail sibling summary",
 			},
 			details: {
@@ -436,7 +444,9 @@ describe("HostifyListingCacheSync.pollListings", () => {
 		expect(upsert?.processed.description.en).toBe("Detail sibling summary");
 		expect(upsert?.raw.description).toEqual({
 			description: "Detail sibling description",
-			house_rules: { quiet_hours: "22:00" },
+			directions: "Take the metro to Trindade.",
+			house_rules: "No parties. No smoking.",
+			notes: "No parking on site.",
 			summary: "Detail sibling summary",
 		});
 		expect(upsert?.raw.details).toEqual({
@@ -455,12 +465,16 @@ describe("HostifyListingCacheSync.pollListings", () => {
 				],
 			},
 		});
-		expect(upsert?.processed.guide.en).toContain(
-			"area_guide.description: Explore the best nearby cafes",
-		);
-		expect(upsert?.processed.guide.en).toContain(
-			"area_guide.places[0].description: Great coffee and pastries",
-		);
+		// The guest-facing guide is assembled from the check-in schedule and the
+		// optional `description` fields, not the unpopulated `guest_guide` endpoint.
+		const guide = upsert?.processed.guide.en ?? "";
+		expect(guide).toContain("Check-in and check-out");
+		expect(guide).toContain("Check-in: from 15:00");
+		expect(guide).toContain("Check-out: until 11:00");
+		expect(guide).toContain("Getting there\nTake the metro to Trindade.");
+		expect(guide).toContain("House rules\nNo parties. No smoking.");
+		expect(guide).toContain("Good to know\nNo parking on site.");
+		expect(guide).not.toContain("area_guide");
 		expect(upsert?.raw.rooms).toEqual([
 			{
 				beds: [{ count: 1, type: "Queen bed" }],

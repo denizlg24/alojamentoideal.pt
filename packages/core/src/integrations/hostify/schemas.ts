@@ -509,6 +509,15 @@ export const hostifySchemas = {
 	reservations: hostifySuccessSchema.extend({
 		reservations: z.array(hostifyReservationSchema),
 	}),
+	// `PUT /reservations/{id}` does not echo the full reservation; it returns the
+	// fields that changed under `update_data`. Validating it against the full
+	// `reservation` schema is what previously surfaced as a confirm failure.
+	reservationUpdate: hostifySuccessSchema.extend({
+		update_data: z
+			.looseObject({ status: nullableStringSchema })
+			.nullable()
+			.optional(),
+	}),
 	review: hostifySuccessSchema.extend({ review: hostifyReviewSchema }),
 	reviews: hostifySuccessSchema.extend({
 		// Present when scoping to a single listing: reviews grouped by the channel

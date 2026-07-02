@@ -112,10 +112,14 @@ interface EmailTemplates {
 	passwordResetText?: string;
 	orderConfirmationHtml?: string;
 	orderConfirmationText?: string;
+	orderPendingConfirmationHtml?: string;
+	orderPendingConfirmationText?: string;
 	orderCouldNotConfirmHtml?: string;
 	orderCouldNotConfirmText?: string;
 	orderAmountMismatchRefundHtml?: string;
 	orderAmountMismatchRefundText?: string;
+	orderInviteHtml?: string;
+	orderInviteText?: string;
 }
 
 async function loadTemplates(): Promise<EmailTemplates> {
@@ -288,6 +292,88 @@ export function buildOrderConfirmationEmail(
 	};
 }
 
+/**
+ * Builds the "payment received, we're finalizing your booking" email sent while
+ * an order sits paid but not yet confirmed (the provider hold has not settled).
+ * Carries the same booking details as the confirmation email plus a link to the
+ * order page so the guest can track status. Text-first today; the branded HTML
+ * template can drop in later via `orderPendingConfirmationHtml` without touching
+ * any call site.
+ */
+export function buildOrderPendingConfirmationEmail(
+	input: OrderConfirmationEmailInput,
+): EmailMessage {
+	const safeTitleForSubject = safeSubjectPart(input.accommodationTitle);
+	const cardInfo = input.cardLastFour ? ` ending in ${input.cardLastFour}` : "";
+	const subject = `Payment received for ${safeTitleForSubject}: finalizing your booking`;
+
+	if (TEMPLATES.orderPendingConfirmationHtml) {
+		const html = applyPlaceholders(TEMPLATES.orderPendingConfirmationHtml, {
+			APP_NAME,
+			ORDER_NUMBER: escapeHtml(input.orderNumber),
+			ACCOMMODATION_TITLE: escapeHtml(input.accommodationTitle),
+			ACCOMMODATION_IMAGE: escapeHtml(input.accommodationImage),
+			CHECK_IN: escapeHtml(input.checkIn),
+			CHECK_OUT: escapeHtml(input.checkOut),
+			GUESTS: escapeHtml(input.guests),
+			TOTAL_PRICE: escapeHtml(input.totalPrice),
+			PAYMENT_METHOD: escapeHtml(input.paymentMethod),
+			CARD_LAST_FOUR: escapeHtml(cardInfo),
+			CONTACT_EMAIL: escapeHtml(input.contactEmail),
+			CONTACT_PHONE: escapeHtml(input.contactPhone),
+			BILLING_ADDRESS: escapeHtml(input.billingAddress),
+			MANAGE_URL: escapeHtml(input.manageUrl),
+			CURRENT_YEAR,
+		});
+		const text = TEMPLATES.orderPendingConfirmationText
+			? applyPlaceholders(TEMPLATES.orderPendingConfirmationText, {
+					APP_NAME,
+					ORDER_NUMBER: input.orderNumber,
+					ACCOMMODATION_TITLE: input.accommodationTitle,
+					ACCOMMODATION_IMAGE: input.accommodationImage,
+					CHECK_IN: input.checkIn,
+					CHECK_OUT: input.checkOut,
+					GUESTS: input.guests,
+					TOTAL_PRICE: input.totalPrice,
+					PAYMENT_METHOD: input.paymentMethod,
+					CARD_LAST_FOUR: cardInfo,
+					CONTACT_EMAIL: input.contactEmail,
+					CONTACT_PHONE: input.contactPhone,
+					BILLING_ADDRESS: input.billingAddress,
+					MANAGE_URL: input.manageUrl,
+					CURRENT_YEAR,
+				})
+			: orderPendingConfirmationFallbackText(input, cardInfo);
+		return { html, subject, text };
+	}
+
+	const text = orderPendingConfirmationFallbackText(input, cardInfo);
+	return { html: plainCompensationHtml(text), subject, text };
+}
+
+function orderPendingConfirmationFallbackText(
+	input: OrderConfirmationEmailInput,
+	cardInfo: string,
+): string {
+	return [
+		`We've received your payment for ${input.accommodationTitle}.`,
+		"",
+		`Reservation code: ${input.orderNumber}`,
+		"",
+		"We're finalizing your booking now and will email you a full confirmation as soon as it's secured. You can track its status any time here:",
+		input.manageUrl,
+		"",
+		`Check-in: ${input.checkIn}`,
+		`Check-out: ${input.checkOut}`,
+		`Guests: ${input.guests}`,
+		"",
+		`Total paid: ${input.totalPrice}`,
+		`Payment: ${input.paymentMethod}${cardInfo}`,
+		"",
+		`The ${APP_NAME} team`,
+	].join("\n");
+}
+
 export interface OrderCompensationEmailInput {
 	/** Pre-built greeting line, e.g. "Hi Ana," or "Hi there,". */
 	greeting: string;
@@ -405,6 +491,72 @@ function plainCompensationHtml(text: string): string {
 		.map((line) => (line === "" ? "<br/>" : `<p>${escapeHtml(line)}</p>`))
 		.join("");
 	return `<div style="font-family:system-ui,sans-serif;line-height:1.5">${paragraphs}</div>`;
+}
+
+function orderInviteFallbackHtml(input: OrderInviteEmailInput): string {
+	return `<div style="font-family:system-ui,sans-serif;line-height:1.5"><p>Hi,</p><p>You've been invited to join booking ${escapeHtml(input.orderNumber)} for ${escapeHtml(input.accommodationTitle)} with ${APP_NAME}.</p><p><a href="${escapeHtml(input.inviteUrl)}">Open your booking</a> to message us and add your guest details.</p><p>This invitation link expires in ${input.expiresInHours} hours. If it lapses, ask whoever booked to resend it.</p><p>The ${APP_NAME} team</p></div>`;
+}
+
+export interface OrderInviteEmailInput {
+	/** Property name for the subject and body, e.g. "Sunny Loft in Porto". */
+	accommodationTitle: string;
+	/** Public order reference, e.g. "AI-XK4P". */
+	orderNumber: string;
+	/** Magic-link into the order hub carrying the single-use invite token. */
+	inviteUrl: string;
+	/** Whole hours until the invite lapses (24 today). */
+	expiresInHours: number;
+}
+
+/**
+ * Builds the "you've been invited to a booking" email carrying the order-hub
+ * magic-link. Uses the branded template when the emails package ships one,
+ * falling back to a plain body otherwise (same degrade path as the other order
+ * emails). The link is a bearer credential, so the body states the short expiry.
+ */
+export function buildOrderInviteEmail(
+	input: OrderInviteEmailInput,
+): EmailMessage {
+	const safeTitle = safeSubjectPart(input.accommodationTitle);
+	const subject = `You're invited to booking ${safeSubjectPart(input.orderNumber)} at ${safeTitle}`;
+
+	if (TEMPLATES.orderInviteHtml) {
+		const html = applyPlaceholders(TEMPLATES.orderInviteHtml, {
+			ACCOMMODATION_TITLE: escapeHtml(input.accommodationTitle),
+			APP_NAME,
+			CURRENT_YEAR,
+			EXPIRES_IN_HOURS: input.expiresInHours.toString(),
+			INVITE_URL: escapeHtml(input.inviteUrl),
+			ORDER_NUMBER: escapeHtml(input.orderNumber),
+		});
+		const text = TEMPLATES.orderInviteText
+			? applyPlaceholders(TEMPLATES.orderInviteText, {
+					ACCOMMODATION_TITLE: input.accommodationTitle,
+					APP_NAME,
+					CURRENT_YEAR,
+					EXPIRES_IN_HOURS: input.expiresInHours.toString(),
+					INVITE_URL: input.inviteUrl,
+					ORDER_NUMBER: input.orderNumber,
+				})
+			: orderInviteFallbackText(input);
+		return { html, subject, text };
+	}
+
+	const text = orderInviteFallbackText(input);
+	return { html: orderInviteFallbackHtml(input), subject, text };
+}
+
+function orderInviteFallbackText(input: OrderInviteEmailInput): string {
+	return [
+		"Hi,",
+		"",
+		`You've been invited to join booking ${input.orderNumber} for ${input.accommodationTitle} with ${APP_NAME}.`,
+		`Open your booking to message us and add your guest details: ${input.inviteUrl}`,
+		"",
+		`This invitation link expires in ${input.expiresInHours} hours. If it lapses, ask whoever booked to resend it.`,
+		"",
+		`The ${APP_NAME} team`,
+	].join("\n");
 }
 
 export interface VerificationEmail {
