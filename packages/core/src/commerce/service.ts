@@ -6980,24 +6980,36 @@ export class CommerceService {
 	}
 
 	#buildConfirmationFacts(context: SagaContext): OrderConfirmationFacts {
-		const [first] = context.bookings;
 		return {
-			accommodationImage: first?.imageUrlSnapshot ?? null,
-			accommodationTitle: first?.titleSnapshot ?? "Your Alojamento Ideal stay",
 			amountPaidMinor: context.order.amountPaidMinor,
 			billingAddress: context.contact?.billingAddress ?? {},
-			checkIn: first?.checkIn ?? "To be confirmed",
-			checkOut: first?.checkOut ?? "To be confirmed",
 			contactPhone: context.contact?.phoneE164 ?? "",
 			currency: context.order.currency,
 			email: context.contact?.email ?? "",
-			guests: first?.guests ?? 0,
 			name: context.contact?.name ?? "",
 			orderId: context.order.id,
 			paymentMethod: paymentMethodFromOrderRow(context.order),
 			publicReference: context.order.publicReference,
+			stays: context.bookings.map((booking) => ({
+				checkIn: booking.checkIn,
+				checkOut: booking.checkOut,
+				guests: booking.guests,
+				imageUrl: booking.imageUrlSnapshot,
+				nights: nightsBetweenStayDates(booking.checkIn, booking.checkOut),
+				title: booking.titleSnapshot ?? "Your Alojamento Ideal stay",
+			})),
 		};
 	}
+}
+
+/** Nights between two `YYYY-MM-DD` stay dates; 0 when either is malformed. */
+function nightsBetweenStayDates(checkIn: string, checkOut: string): number {
+	const inMs = Date.parse(`${checkIn}T00:00:00Z`);
+	const outMs = Date.parse(`${checkOut}T00:00:00Z`);
+	if (Number.isNaN(inMs) || Number.isNaN(outMs)) {
+		return 0;
+	}
+	return Math.max(0, Math.round((outMs - inMs) / 86_400_000));
 }
 
 function constantTimeEquals(a: string, b: string): boolean {

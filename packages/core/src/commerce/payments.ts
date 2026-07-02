@@ -142,26 +142,33 @@ export type OrderCompensationEmailKind = Exclude<
 	"confirmation"
 >;
 
+/** One booked stay as rendered in the order emails. */
+export interface OrderConfirmationStay {
+	checkIn: string;
+	checkOut: string;
+	guests: number;
+	imageUrl: string | null;
+	nights: number;
+	title: string;
+}
+
 /**
  * Contact + amount facts needed to send a single order-confirmation email.
  * Returned only on the first draft -> confirmed transition so re-delivered
- * webhooks never trigger a duplicate email.
+ * webhooks never trigger a duplicate email. `stays` carries every booking on
+ * the order (a multi-stay cart purchase produces several).
  */
 export interface OrderConfirmationFacts {
-	accommodationImage: string | null;
-	accommodationTitle: string;
 	amountPaidMinor: number;
 	billingAddress: OrderBillingAddressSnapshot;
-	checkIn: string;
-	checkOut: string;
 	contactPhone: string;
 	currency: string;
 	email: string;
-	guests: number;
 	name: string;
 	orderId: string;
 	paymentMethod: OrderPaymentMethodSummary | null;
 	publicReference: string;
+	stays: OrderConfirmationStay[];
 }
 
 /** A money amount in minor units paired with its ISO currency. */
