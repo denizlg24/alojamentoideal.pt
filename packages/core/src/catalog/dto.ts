@@ -6,7 +6,10 @@ import type {
 } from "@workspace/db";
 import { hostifyPropertyTypeLabel } from "../hostify-property-types";
 import { publicAmenityGroupForInput } from "../listing-cache/amenity-groups";
-import { LISTING_DESCRIPTION_SECTIONS } from "../listing-cache/localization";
+import {
+	cleanDescriptionSectionBody,
+	LISTING_DESCRIPTION_SECTIONS,
+} from "../listing-cache/localization";
 import type { CatalogLocale } from "./params";
 
 export interface CatalogAmenityDto {
@@ -251,12 +254,20 @@ function extractDescriptionSections(
 	const sections: CatalogDescriptionSection[] = [];
 
 	for (const { key, label } of LISTING_DESCRIPTION_SECTIONS) {
-		const rawBody = readString(description[key]);
+		const rawBody = cleanDescriptionSectionBody(readString(description[key]));
+		// Skip empty source sections and anything already shown as the lead
+		// paragraph. Processed content is allowed to translate a real source
+		// section, but not to create one from a stale provider translation.
+		if (!rawBody || rawBody === rawLead) {
+			continue;
+		}
+
 		const body =
-			pickLocalized(record.processed.descriptionSections?.[key], locale) ||
-			rawBody;
-		// Skip anything already shown as the lead paragraph.
-		if (body && body !== lead && rawBody !== rawLead) {
+			pickLocalizedSection(
+				record.processed.descriptionSections?.[key],
+				locale,
+			) || rawBody;
+		if (body && body !== lead) {
 			sections.push({ body, key, label: label[locale] });
 		}
 	}
@@ -375,6 +386,13 @@ function pickLocalized(
 	locale: CatalogLocale,
 ): string {
 	return (text?.[locale] || text?.en || text?.pt || text?.es || "").trim();
+}
+
+function pickLocalizedSection(
+	text: LocalizedText | null | undefined,
+	locale: CatalogLocale,
+): string {
+	return cleanDescriptionSectionBody(text?.[locale]);
 }
 
 function roundDistance(value: number | null | undefined): number | null {

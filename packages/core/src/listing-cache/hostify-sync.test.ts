@@ -190,6 +190,37 @@ describe("buildListingCacheProjection description", () => {
 			"Resumo disponível",
 		);
 	});
+
+	test("drops punctuation-only description sections and stale translated copies", () => {
+		const projection = buildListingCacheProjection({
+			amenities: [],
+			description: {
+				notes: ".",
+				summary: "Clean summary",
+			},
+			details: null,
+			fees: [],
+			guestGuide: null,
+			listing: { id: "1", name: "Test" },
+			photos: [],
+			rooms: [],
+			status: "Clean",
+			translations: [
+				{
+					language: "es",
+					notes: "Texto antiguo que ya no existe en la fuente.",
+				},
+			],
+		});
+
+		expect(projection.normalized.descriptionSections?.notes).toBe("");
+		expect(projection.processedFallback.descriptionSections.notes).toEqual({
+			en: "",
+			es: "",
+			pt: "",
+		});
+		expect(projection.processedFallback.guide.en).toBe("");
+	});
 });
 
 describe("HostifyListingCacheSync.pollListings", () => {

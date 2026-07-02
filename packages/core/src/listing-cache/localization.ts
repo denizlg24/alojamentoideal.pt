@@ -294,6 +294,17 @@ export function cleanGuideLocalized(guide: LocalizedText): LocalizedText {
 	};
 }
 
+export function cleanDescriptionSectionBody(
+	value: string | null | undefined,
+): string {
+	const trimmed = value?.trim() ?? "";
+	if (!trimmed) {
+		return "";
+	}
+
+	return /[\p{L}\p{N}]/u.test(trimmed) ? trimmed : "";
+}
+
 /**
  * Calls the OpenAI Responses API, validates the structured output, and returns
  * localized prose with the guide already cleaned. Retries transient failures.
@@ -303,6 +314,9 @@ export async function requestListingLocalization(
 	request: ListingLocalizationRequest,
 ): Promise<LocalizedListingProse> {
 	const body = buildListingLocalizationBody(config.model, request);
+	const sourceSections = normalizeDescriptionSections(
+		request.descriptionSections,
+	);
 	const maxAttempts = config.maxAttempts ?? MAX_ATTEMPTS;
 	const timeoutMs = config.timeoutMs ?? REQUEST_TIMEOUT_MS;
 	let lastError: unknown;
@@ -340,7 +354,10 @@ export async function requestListingLocalization(
 			const parsed = listingProseSchema.parse(JSON.parse(outputText));
 			return {
 				description: parsed.description,
-				descriptionSections: parsed.descriptionSections,
+				descriptionSections: cleanLocalizedDescriptionSections(
+					parsed.descriptionSections,
+					sourceSections,
+				),
 				guide: cleanGuideLocalized(parsed.guide),
 			};
 		} catch (error) {
@@ -376,9 +393,32 @@ function normalizeDescriptionSections(
 	return Object.fromEntries(
 		LISTING_DESCRIPTION_SECTIONS.map(({ key }) => [
 			key,
-			sections?.[key]?.trim() ?? "",
+			cleanDescriptionSectionBody(sections?.[key]),
 		]),
 	) as Record<ListingDescriptionSectionKey, string>;
+}
+
+function cleanLocalizedDescriptionSections(
+	sections: LocalizedDescriptionSections,
+	sourceSections: Record<ListingDescriptionSectionKey, string>,
+): LocalizedDescriptionSections {
+	return Object.fromEntries(
+		LISTING_DESCRIPTION_SECTIONS.map(({ key }) => {
+			if (!sourceSections[key]) {
+				return [key, { en: "", es: "", pt: "" }];
+			}
+
+			const section = sections[key];
+			return [
+				key,
+				{
+					en: cleanDescriptionSectionBody(section.en),
+					es: cleanDescriptionSectionBody(section.es),
+					pt: cleanDescriptionSectionBody(section.pt),
+				},
+			];
+		}),
+	) as LocalizedDescriptionSections;
 }
 
 function isRetryableStatus(status: number): boolean {

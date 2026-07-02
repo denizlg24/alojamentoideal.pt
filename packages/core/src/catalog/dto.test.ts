@@ -319,4 +319,38 @@ describe("toCatalogListingDetail", () => {
 		expect(detail.description).toBe("English desc");
 		expect(detail.title).toBe("Ocean Loft");
 	});
+
+	test("does not render stale translated sections when the source section is empty", () => {
+		const detail = toCatalogListingDetail(
+			record({
+				processed: {
+					...PROCESSED,
+					descriptionSections: {
+						notes: {
+							en: "",
+							es: "Texto antiguo que ya no existe en la fuente.",
+							pt: "",
+						},
+					},
+				},
+				raw: {
+					description: {
+						notes: ".",
+						summary: "English desc",
+					},
+					details: null,
+					fees: null,
+					guestGuide: null,
+					listing: {},
+					photos: [],
+					rooms: [],
+					status: null,
+					translations: null,
+				},
+			}),
+			{ locale: "en" },
+		);
+
+		expect(detail.descriptionSections).toEqual([]);
+	});
 });

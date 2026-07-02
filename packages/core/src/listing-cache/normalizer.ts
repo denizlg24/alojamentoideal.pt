@@ -11,6 +11,7 @@ import { publicAmenityGroupForInput } from "./amenity-groups";
 import { AMENITY_ICON_SET, pickAmenityIcon } from "./amenity-icons";
 import { sanitizeProviderPayload } from "./hash";
 import {
+	cleanDescriptionSectionBody,
 	LISTING_DESCRIPTION_SECTIONS,
 	type LocalizedDescriptionSections,
 } from "./localization";
@@ -246,11 +247,14 @@ function localizedDescriptionSectionsFallback(
 ): LocalizedDescriptionSections {
 	return Object.fromEntries(
 		LISTING_DESCRIPTION_SECTIONS.map(({ key }) => {
-			const localized = repeatLocalized(sections[key]);
-			for (const locale of ["en", "es", "pt"] as const) {
-				localized[locale] =
-					readTranslatedDescriptionField(translations, locale, key) ??
-					localized[locale];
+			const source = cleanDescriptionSectionBody(sections[key]);
+			const localized = repeatLocalized(source);
+			if (source) {
+				for (const locale of ["en", "es", "pt"] as const) {
+					localized[locale] =
+						readTranslatedDescriptionField(translations, locale, key) ??
+						localized[locale];
+				}
 			}
 			return [key, localized];
 		}),
@@ -272,9 +276,9 @@ function readDescriptionSectionField(
 	record: Record<string, unknown>,
 	key: string,
 ): string | null {
-	return (
-		flattenGuideText(record[key]) ?? flattenGuideText(record[`${key}_rtf`])
-	);
+	const text =
+		flattenGuideText(record[key]) ?? flattenGuideText(record[`${key}_rtf`]);
+	return cleanDescriptionSectionBody(text) || null;
 }
 
 function readDescriptionText(record: Record<string, unknown>): string | null {
@@ -450,9 +454,9 @@ function readGuideField(
 	record: Record<string, unknown>,
 	key: string,
 ): string | null {
-	return (
-		flattenGuideText(record[key]) ?? flattenGuideText(record[`${key}_rtf`])
-	);
+	const text =
+		flattenGuideText(record[key]) ?? flattenGuideText(record[`${key}_rtf`]);
+	return cleanDescriptionSectionBody(text) || null;
 }
 
 /** Flattens a guide value (string, list, or nested object) to readable text. */

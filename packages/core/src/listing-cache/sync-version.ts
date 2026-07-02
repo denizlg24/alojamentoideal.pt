@@ -19,7 +19,7 @@ import { stableHash } from "./hash";
  * their next claim start a fresh cycle immediately (bypassing the scheduled
  * interval) so they re-upsert everything under the new version.
  */
-export const DEFAULT_LISTING_SYNC_VERSION = 8;
+export const DEFAULT_LISTING_SYNC_VERSION = 9;
 
 interface ListingSyncVersionEnvironment {
 	LISTING_SYNC_VERSION?: string;
