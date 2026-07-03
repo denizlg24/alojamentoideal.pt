@@ -24,6 +24,20 @@ export const CART_ID_STORAGE_KEY = "ai_cart_id";
  */
 const CART_COUNT_STORAGE_KEY = "ai_cart_count";
 
+/**
+ * localStorage cache of a fingerprint of the cart's active contents. The
+ * `/cart` and `/checkout` routes key their client views on this so a cart
+ * whose contents changed remounts them with fresh data. With cacheComponents,
+ * Next.js keeps visited routes alive with React `<Activity>` instead of
+ * unmounting them, so the bare item count misses content changes that keep
+ * the count stable (remove one stay, add another; edit dates or guests) and
+ * the revived view would keep showing the old cart.
+ */
+const CART_FINGERPRINT_STORAGE_KEY = "ai_cart_fingerprint";
+
+/** Fingerprint of a cart with no active stays. */
+const EMPTY_CART_FINGERPRINT = "0";
+
 /** Same-tab CustomEvent fired whenever a cart mutation settles. */
 export const CART_CHANGED_EVENT = "ai:cart-changed";
 
@@ -44,6 +58,34 @@ export function activeItemCount(cart: CartDto | null): number {
 		return 0;
 	}
 	return cart.items.filter((item) => item.status === "active").length;
+}
+
+/**
+ * Stable, order-insensitive fingerprint of the cart's active stays. Changes
+ * whenever a stay is added, removed or edited (dates or guests); deliberately
+ * ignores price-only quote refreshes so background revalidation does not churn
+ * the route key and force pointless remounts.
+ */
+export function cartContentFingerprint(cart: CartDto | null): string {
+	if (cart?.status !== "draft") {
+		return EMPTY_CART_FINGERPRINT;
+	}
+	const parts = cart.items
+		.filter((item) => item.status === "active")
+		.map((item) =>
+			[
+				item.id,
+				item.listingId,
+				item.checkIn,
+				item.checkOut,
+				item.adults,
+				item.children,
+				item.infants,
+				item.guests,
+			].join("|"),
+		)
+		.sort();
+	return parts.length === 0 ? EMPTY_CART_FINGERPRINT : parts.join(";");
 }
 
 export function readStoredCartId(): string | null {
@@ -79,6 +121,7 @@ export function clearStoredCart(): void {
 	window.localStorage.removeItem(CART_ID_STORAGE_KEY);
 	window.sessionStorage.removeItem(CHECKOUT_CART_STORAGE_KEY);
 	writeCachedItemCount(0);
+	writeCachedFingerprint(EMPTY_CART_FINGERPRINT);
 	dispatchCartChanged(0);
 }
 
@@ -91,8 +134,15 @@ export function readCachedItemCount(): number {
 	return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
 }
 
+/**
+ * Key the cart/checkout route views remount on. Combines the cart id with the
+ * content fingerprint so any cart mutation, including ones that keep the item
+ * count stable, produces a new key. Falls back to the cached count for
+ * visitors whose storage predates the fingerprint.
+ */
 export function readCartRouteKey(): string {
-	return `${readStoredCartId() ?? "empty"}:${readCachedItemCount()}`;
+	const fingerprint = readCachedFingerprint();
+	return `${readStoredCartId() ?? "empty"}:${fingerprint ?? readCachedItemCount()}`;
 }
 
 function writeCachedItemCount(count: number): void {
@@ -103,6 +153,24 @@ function writeCachedItemCount(count: number): void {
 		window.localStorage.setItem(CART_COUNT_STORAGE_KEY, String(count));
 	} else {
 		window.localStorage.removeItem(CART_COUNT_STORAGE_KEY);
+	}
+}
+
+function readCachedFingerprint(): string | null {
+	if (!hasWindow()) {
+		return null;
+	}
+	return window.localStorage.getItem(CART_FINGERPRINT_STORAGE_KEY);
+}
+
+function writeCachedFingerprint(fingerprint: string): void {
+	if (!hasWindow()) {
+		return;
+	}
+	if (fingerprint === EMPTY_CART_FINGERPRINT) {
+		window.localStorage.removeItem(CART_FINGERPRINT_STORAGE_KEY);
+	} else {
+		window.localStorage.setItem(CART_FINGERPRINT_STORAGE_KEY, fingerprint);
 	}
 }
 
@@ -121,6 +189,7 @@ function dispatchCartChanged(itemCount: number): void {
 export function notifyCartChanged(cart: CartDto | null): void {
 	const count = activeItemCount(cart);
 	writeCachedItemCount(count);
+	writeCachedFingerprint(cartContentFingerprint(cart));
 	dispatchCartChanged(count);
 }
 

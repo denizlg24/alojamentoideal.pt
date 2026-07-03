@@ -21,6 +21,11 @@ import { CheckoutAlert } from "@/components/checkout/checkout-alert";
 import { capacityForGuests } from "@/lib/catalog/guests";
 import * as api from "@/lib/checkout/api-client";
 import {
+	type CartRecoveryNotice,
+	cartNoticeBody,
+	takeCartNotice,
+} from "@/lib/checkout/cart-notice";
+import {
 	clearStoredCart,
 	loadStoredCart,
 	notifyCartChanged,
@@ -191,6 +196,8 @@ export function CartView() {
 	const [cart, setCart] = useState<CartDto | null>(null);
 	const [failures, setFailures] = useState<Map<string, string>>(new Map());
 	const [notice, setNotice] = useState<string | null>(null);
+	// Failure handed off by checkout when a purchase attempt stopped early.
+	const [recovery, setRecovery] = useState<CartRecoveryNotice | null>(null);
 	const [dialog, setDialog] = useState<ItemDialog | null>(null);
 	const [pendingItemId, setPendingItemId] = useState<string | null>(null);
 	const [constraints, setConstraints] = useState<
@@ -217,6 +224,12 @@ export function CartView() {
 		bootstrapStarted.current = true;
 
 		const run = async () => {
+			// Surface a purchase failure checkout handed off before it sent the
+			// guest back here; read-and-clear so it shows exactly once.
+			const handoff = takeCartNotice();
+			if (handoff) {
+				setRecovery(handoff);
+			}
 			const loaded = await loadStoredCart();
 			if (!loaded || activeItems(loaded).length === 0) {
 				setCart(loaded);
@@ -357,9 +370,24 @@ export function CartView() {
 		return <CartLoading />;
 	}
 
+	const recoveryAlert = recovery ? (
+		<CheckoutAlert title="We could not complete your booking" variant="error">
+			{cartNoticeBody(recovery)}
+		</CheckoutAlert>
+	) : null;
+
 	const items = activeItems(cart);
 	if (!cart || items.length === 0) {
-		return <EmptyCart />;
+		// Keep the failure visible even when the rebuild dropped every stay,
+		// otherwise the guest lands on an empty cart with no explanation.
+		return recoveryAlert ? (
+			<div className="flex flex-col gap-4">
+				{recoveryAlert}
+				<EmptyCart />
+			</div>
+		) : (
+			<EmptyCart />
+		);
 	}
 
 	const dialogItem = dialog
@@ -373,6 +401,7 @@ export function CartView() {
 	return (
 		<div className="grid w-full grid-cols-1 gap-8 lg:grid-cols-[minmax(0,1fr)_minmax(320px,380px)]">
 			<div className="flex flex-col gap-4">
+				{recoveryAlert}
 				{notice && (
 					<CheckoutAlert title="Heads up" variant="info">
 						{notice}

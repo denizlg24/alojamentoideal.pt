@@ -137,10 +137,18 @@ function conversationSubtitle(detail: OrderDetail): string {
 	}
 }
 
+/**
+ * Progress copy for the guest-registration row. `guestProgress` is already
+ * scoped to the viewer by `readOrderDetail`: the owner counts every slot in the
+ * order, an invited member only the slots bound to them, so the numbers here
+ * always match what the guests section shows.
+ */
 function guestsSubtitle(detail: OrderDetail): string {
 	const { total, verified } = detail.guestProgress;
 	if (total === 0) {
-		return "Add guest registration details";
+		return detail.role === "owner"
+			? "Add guest registration details"
+			: "No guest slot is assigned to you yet";
 	}
 	if (verified >= total) {
 		return "All guest details are complete";

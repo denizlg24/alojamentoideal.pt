@@ -1,6 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import type { BookingGuestIdentityStatus } from "@workspace/db";
 import {
+	scopeGuestRowsToViewer,
+	scopeOrderItemsToViewer,
 	summarizeConversationAvailability,
 	summarizeGuestProgress,
 } from "./order-detail";
@@ -44,6 +46,68 @@ describe("summarizeGuestProgress", () => {
 			total: 6,
 			verified: 1,
 		});
+	});
+});
+
+describe("scopeGuestRowsToViewer", () => {
+	const rows = [
+		{ id: "slot-a1", orderMemberId: null },
+		{ id: "slot-a2", orderMemberId: "member-1" },
+		{ id: "slot-b1", orderMemberId: "member-2" },
+	];
+
+	test("the owner counts every slot in the order", () => {
+		expect(scopeGuestRowsToViewer(rows, "owner", null)).toEqual(rows);
+		expect(scopeGuestRowsToViewer(rows, "owner", "member-9")).toEqual(rows);
+	});
+
+	test("a member counts only the slots bound to their membership", () => {
+		expect(scopeGuestRowsToViewer(rows, "member", "member-1")).toEqual([
+			{ id: "slot-a2", orderMemberId: "member-1" },
+		]);
+	});
+
+	test("a member with no bound slot counts nothing", () => {
+		expect(scopeGuestRowsToViewer(rows, "member", "member-9")).toEqual([]);
+	});
+
+	test("a member without a member row counts nothing", () => {
+		expect(scopeGuestRowsToViewer(rows, "member", null)).toEqual([]);
+	});
+});
+
+describe("scopeOrderItemsToViewer", () => {
+	const items = [
+		{ bookingId: "booking-a", id: "item-1" },
+		{ bookingId: "booking-b", id: "item-2" },
+		{ bookingId: null, id: "item-activity" },
+	];
+
+	test("the owner sees every item, bookable or not", () => {
+		expect(scopeOrderItemsToViewer(items, "owner", new Set())).toEqual(items);
+	});
+
+	test("a member only sees the stays their slots are bound to", () => {
+		expect(
+			scopeOrderItemsToViewer(items, "member", new Set(["booking-a"])),
+		).toEqual([{ bookingId: "booking-a", id: "item-1" }]);
+	});
+
+	test("a member invited to several bookings sees each of those stays", () => {
+		expect(
+			scopeOrderItemsToViewer(
+				items,
+				"member",
+				new Set(["booking-a", "booking-b"]),
+			),
+		).toEqual([
+			{ bookingId: "booking-a", id: "item-1" },
+			{ bookingId: "booking-b", id: "item-2" },
+		]);
+	});
+
+	test("a member with no bound booking sees nothing", () => {
+		expect(scopeOrderItemsToViewer(items, "member", new Set())).toEqual([]);
 	});
 });
 

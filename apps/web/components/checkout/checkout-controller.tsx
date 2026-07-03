@@ -16,6 +16,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSession } from "@/lib/auth/client";
 import { trackCheckoutEvent } from "@/lib/checkout/analytics";
 import * as api from "@/lib/checkout/api-client";
+import { writeCartNotice } from "@/lib/checkout/cart-notice";
 import {
 	clearStoredCart,
 	notifyCartChanged,
@@ -288,15 +289,15 @@ export function CheckoutController({ seed }: CheckoutControllerProps) {
 	 * Creates a fresh mutable cart holding the given stays. Used when the current
 	 * cart is frozen (converted into a draft order) and must be edited or retried.
 	 * Stays whose dates went unavailable in the meantime are skipped rather than
-	 * failing the whole rebuild; the caller reports how many were dropped.
+	 * failing the whole rebuild; the caller reports which stays were dropped.
 	 */
 	const rebuildCartFromItems = useCallback(
 		async (
 			stays: StayKeyInput[],
-		): Promise<{ cart: CartDto; skipped: number }> => {
+		): Promise<{ cart: CartDto; skippedStays: StayKeyInput[] }> => {
 			const created = (await api.createCart()).cart;
 			storeCartId(created.id);
-			let skipped = 0;
+			const skippedStays: StayKeyInput[] = [];
 			for (const stay of stays) {
 				try {
 					await api.addCartItem(created.id, {
@@ -311,7 +312,7 @@ export function CheckoutController({ seed }: CheckoutControllerProps) {
 						listingId: stay.listingId,
 					});
 				} catch {
-					skipped += 1;
+					skippedStays.push(stay);
 				}
 			}
 			const validated = await api.validateCart(created.id);
@@ -321,7 +322,7 @@ export function CheckoutController({ seed }: CheckoutControllerProps) {
 			setReviewError(null);
 			setTermsAccepted(false);
 			clearResumeState();
-			return { cart: validated.cart, skipped };
+			return { cart: validated.cart, skippedStays };
 		},
 		[applyValidation],
 	);
@@ -329,7 +330,7 @@ export function CheckoutController({ seed }: CheckoutControllerProps) {
 	/** Rebuilds a mutable cart from the current (frozen) cart's stays. */
 	const rebuildCurrentCart = useCallback(async (): Promise<{
 		cart: CartDto;
-		skipped: number;
+		skippedStays: StayKeyInput[];
 	} | null> => {
 		if (items.length === 0) {
 			return null;
@@ -758,17 +759,28 @@ export function CheckoutController({ seed }: CheckoutControllerProps) {
 
 	/**
 	 * Recovers from a stay that failed at draft/hold time: rebuild a fresh
-	 * mutable cart from the frozen one (dropping stays that no longer quote) and
-	 * send the guest to the cart page, where the validation failures are shown
-	 * inline with edit controls.
+	 * mutable cart from the frozen one (dropping stays that no longer quote),
+	 * hand the failure message to the cart page, and send the guest there. The
+	 * cart page shows the message, names any stays the rebuild dropped, and
+	 * flags the remaining failures inline with edit controls.
 	 */
 	const recoverToCart = useCallback(
 		async (message: string) => {
-			await rebuildCurrentCart();
-			setNotice(message);
+			const previousItems = items;
+			const rebuilt = await rebuildCurrentCart();
+			const removedTitles = (rebuilt?.skippedStays ?? [])
+				.map(
+					(stay) =>
+						previousItems.find(
+							(item) =>
+								stayKeyToken(stayInputFromItem(item)) === stayKeyToken(stay),
+						)?.title ?? null,
+				)
+				.filter((title): title is string => title !== null);
+			writeCartNotice({ message, removedTitles });
 			router.push("/cart");
 		},
-		[rebuildCurrentCart, router],
+		[items, rebuildCurrentCart, router],
 	);
 
 	const handleContactSubmit = useCallback(async () => {
