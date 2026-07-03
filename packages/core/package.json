@@ -24,6 +24,10 @@
 			"types": "./src/commerce/index.ts",
 			"default": "./src/commerce/index.ts"
 		},
+		"./compliance": {
+			"types": "./src/compliance/index.ts",
+			"default": "./src/compliance/index.ts"
+		},
 		"./commerce/stay-overlap": {
 			"types": "./src/commerce/stay-overlap.ts",
 			"default": "./src/commerce/stay-overlap.ts"
