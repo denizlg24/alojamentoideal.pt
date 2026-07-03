@@ -6,6 +6,11 @@ import {
 } from "../integrations/hostkit";
 import { countryAlpha3 } from "./country-codes";
 import {
+	GUEST_INFO_REMINDER_MAX_DELAY_MS,
+	GUEST_INFO_REMINDER_MIN_DELAY_MS,
+	nextGuestInfoReminderDelayMs,
+} from "./guest-reminder";
+import {
 	buildHostkitGuest,
 	classifyGuestSubmissionError,
 	mapHostkitDocumentType,
@@ -177,5 +182,36 @@ describe("nextGuestSubmissionDelayMs", () => {
 		expect(nextGuestSubmissionDelayMs(2)).toBe(15 * 60 * 1000);
 		expect(nextGuestSubmissionDelayMs(5)).toBe(360 * 60 * 1000);
 		expect(nextGuestSubmissionDelayMs(11)).toBe(360 * 60 * 1000);
+	});
+});
+
+describe("nextGuestInfoReminderDelayMs", () => {
+	const now = new Date("2026-07-01T12:00:00.000Z");
+
+	it("caps far-away reminders at the quiet maximum", () => {
+		const stayStartsAt = new Date("2026-09-01T12:00:00.000Z");
+		expect(nextGuestInfoReminderDelayMs(now, stayStartsAt)).toBe(
+			GUEST_INFO_REMINDER_MAX_DELAY_MS,
+		);
+	});
+
+	it("halves the remaining time as check-in approaches", () => {
+		const stayStartsAt = new Date("2026-07-09T12:00:00.000Z");
+		expect(nextGuestInfoReminderDelayMs(now, stayStartsAt)).toBe(
+			4 * 24 * 60 * 60 * 1000,
+		);
+	});
+
+	it("keeps a minimum useful delay near arrival", () => {
+		const stayStartsAt = new Date("2026-07-01T20:00:00.000Z");
+		expect(nextGuestInfoReminderDelayMs(now, stayStartsAt)).toBe(
+			GUEST_INFO_REMINDER_MIN_DELAY_MS,
+		);
+	});
+
+	it("stops scheduling once the minimum delay would land after check-in", () => {
+		const stayStartsAt = new Date("2026-07-01T14:00:00.000Z");
+		expect(nextGuestInfoReminderDelayMs(now, stayStartsAt)).toBeNull();
+		expect(nextGuestInfoReminderDelayMs(stayStartsAt, stayStartsAt)).toBeNull();
 	});
 });

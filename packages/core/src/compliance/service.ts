@@ -4,12 +4,19 @@ import {
 	type Database,
 	type GuestSubmissionJobStatus,
 	guestSubmissionJob as guestSubmissionJobTable,
+	orderContact as orderContactTable,
+	orderItem as orderItemTable,
+	order as orderTable,
 	providerBooking as providerBookingTable,
 } from "@workspace/db";
-import { and, asc, eq, inArray, lte, or, sql } from "drizzle-orm";
+import { and, asc, eq, gt, inArray, lte, or, type SQL, sql } from "drizzle-orm";
 import { decryptIdentityField } from "../account/identity-encryption";
 import type { HostkitClient } from "../integrations/hostkit";
 import { redactHostkitText } from "../integrations/hostkit";
+import {
+	type GuestInfoReminderFacts,
+	nextGuestInfoReminderAt,
+} from "./guest-reminder";
 import {
 	buildHostkitGuest,
 	classifyGuestSubmissionError,
@@ -28,11 +35,11 @@ const DEFAULT_SWEEP_LOOKBACK_DAYS = 30;
 /** Re-check cadence when a listing has no Hostkit key provisioned yet. */
 const UNCONFIGURED_RETRY_DELAY_MS = 6 * 60 * 60 * 1000;
 
-const ACTIVE_JOB_STATUSES: readonly GuestSubmissionJobStatus[] = [
-	"pending",
-	"retrying",
-	"running",
-];
+/** Temporary lease for a reminder email send claim. */
+const GUEST_REMINDER_EMAIL_CLAIM_MS = 15 * 60 * 1000;
+
+/** Transport failure retry cadence; successful reminders use reverse backoff. */
+const GUEST_REMINDER_EMAIL_FAILURE_DELAY_MS = 60 * 60 * 1000;
 
 export interface GuestComplianceServiceOptions {
 	db: Database;
@@ -71,8 +78,19 @@ export interface GuestSubmissionProcessSummary {
 	succeeded: number;
 }
 
+export interface GuestInfoReminderSummary {
+	reminderEmailsFailed: number;
+	reminderEmailsSent: number;
+	reminderEmailsSkipped: number;
+}
+
 export type GuestSubmissionRunSummary = GuestSubmissionProcessSummary &
-	GuestSubmissionSweepSummary;
+	GuestSubmissionSweepSummary &
+	GuestInfoReminderSummary;
+
+export interface GuestComplianceRunOptions {
+	onGuestInfoReminder?: (facts: GuestInfoReminderFacts) => Promise<void>;
+}
 
 interface JobBookingRow {
 	checkIn: string;
@@ -82,6 +100,12 @@ interface JobBookingRow {
 	providerBookingId: string;
 	providerReservationId: string | null;
 	rawOperationalPayload: Record<string, unknown> | null;
+}
+
+interface GuestReminderDispatchTarget {
+	facts: GuestInfoReminderFacts;
+	reminderEmailCount: number;
+	stayStartsAt: Date;
 }
 
 /**
@@ -117,10 +141,17 @@ export class GuestComplianceService {
 	}
 
 	/** Sweep + process in one cron tick. */
-	async run(limit = 20): Promise<GuestSubmissionRunSummary> {
+	async run(
+		limit = 20,
+		options: GuestComplianceRunOptions = {},
+	): Promise<GuestSubmissionRunSummary> {
 		const sweep = await this.sweepEligibleBookings(limit);
 		const process = await this.processDueJobs(limit);
-		return { ...sweep, ...process };
+		const reminders = await this.dispatchDueGuestInfoReminders(
+			limit,
+			options.onGuestInfoReminder,
+		);
+		return { ...sweep, ...process, ...reminders };
 	}
 
 	/**
@@ -252,6 +283,224 @@ export class GuestComplianceService {
 		return summary;
 	}
 
+	/**
+	 * Sends guest-info reminders for confirmed stays whose roster still needs
+	 * user action. The email transport stays outside core; this method only claims
+	 * due bookings and records the next reverse-backoff send time.
+	 */
+	async dispatchDueGuestInfoReminders(
+		limit = 20,
+		onReminder?: (facts: GuestInfoReminderFacts) => Promise<void>,
+	): Promise<GuestInfoReminderSummary> {
+		const summary = emptyGuestInfoReminderSummary();
+		if (!onReminder) {
+			return summary;
+		}
+
+		const now = this.#now();
+		const due = await this.#db
+			.select({ id: providerBookingTable.id })
+			.from(providerBookingTable)
+			.innerJoin(orderTable, eq(orderTable.id, providerBookingTable.orderId))
+			.where(
+				and(
+					eq(providerBookingTable.provider, this.#provider),
+					eq(orderTable.status, "confirmed"),
+					inArray(providerBookingTable.normalizedStatus, [
+						"confirmed",
+						"completed",
+					]),
+					sql`${providerBookingTable.guestReminderEmailNextAt} is not null`,
+					lte(providerBookingTable.guestReminderEmailNextAt, now),
+					gt(providerBookingTable.stayStartsAt, now),
+					hasGuestNeedingReminder(),
+				),
+			)
+			.orderBy(asc(providerBookingTable.guestReminderEmailNextAt))
+			.limit(limit);
+
+		for (const { id } of due) {
+			const claimed = await this.#claimGuestInfoReminder(id, now);
+			if (!claimed) {
+				summary.reminderEmailsSkipped += 1;
+				continue;
+			}
+
+			const target = await this.#loadGuestInfoReminderTarget(id, now);
+			if (!target) {
+				await this.#dismissGuestInfoReminder(id, now);
+				summary.reminderEmailsSkipped += 1;
+				continue;
+			}
+
+			try {
+				await onReminder(target.facts);
+				await this.#markGuestInfoReminderSent(id, target, this.#now());
+				summary.reminderEmailsSent += 1;
+			} catch (error) {
+				await this.#recordGuestInfoReminderFailure(
+					id,
+					describeError(error),
+					this.#now(),
+				);
+				summary.reminderEmailsFailed += 1;
+			}
+		}
+
+		return summary;
+	}
+
+	async #claimGuestInfoReminder(
+		providerBookingId: string,
+		now: Date,
+	): Promise<boolean> {
+		const claimExpiresAt = new Date(
+			now.getTime() + GUEST_REMINDER_EMAIL_CLAIM_MS,
+		);
+		const [updated] = await this.#db
+			.update(providerBookingTable)
+			.set({ guestReminderEmailNextAt: claimExpiresAt, updatedAt: now })
+			.where(
+				and(
+					eq(providerBookingTable.id, providerBookingId),
+					sql`${providerBookingTable.guestReminderEmailNextAt} is not null`,
+					lte(providerBookingTable.guestReminderEmailNextAt, now),
+				),
+			)
+			.returning({ id: providerBookingTable.id });
+		return Boolean(updated);
+	}
+
+	async #loadGuestInfoReminderTarget(
+		providerBookingId: string,
+		now: Date,
+	): Promise<GuestReminderDispatchTarget | null> {
+		const totalGuestCount = sql<number>`(
+			select count(*)::int from ${bookingGuestTable}
+			where ${bookingGuestTable.providerBookingId} = ${providerBookingTable.id}
+		)`;
+		const missingGuestCount = sql<number>`(
+			select count(*)::int from ${bookingGuestTable}
+			where ${bookingGuestTable.providerBookingId} = ${providerBookingTable.id}
+			and ${guestNeedsReminderCondition()}
+		)`;
+
+		const [row] = await this.#db
+			.select({
+				accommodationTitle: orderItemTable.titleSnapshot,
+				checkIn: accommodationItemDetailTable.checkIn,
+				checkOut: accommodationItemDetailTable.checkOut,
+				email: orderContactTable.email,
+				missingGuestCount,
+				orderId: orderTable.id,
+				publicReference: orderTable.publicReference,
+				reminderEmailCount: providerBookingTable.guestReminderEmailCount,
+				stayStartsAt: providerBookingTable.stayStartsAt,
+				totalGuestCount,
+			})
+			.from(providerBookingTable)
+			.innerJoin(orderTable, eq(orderTable.id, providerBookingTable.orderId))
+			.innerJoin(
+				orderContactTable,
+				eq(orderContactTable.orderId, orderTable.id),
+			)
+			.innerJoin(
+				orderItemTable,
+				eq(orderItemTable.id, providerBookingTable.orderItemId),
+			)
+			.innerJoin(
+				accommodationItemDetailTable,
+				eq(
+					accommodationItemDetailTable.orderItemId,
+					providerBookingTable.orderItemId,
+				),
+			)
+			.where(
+				and(
+					eq(providerBookingTable.id, providerBookingId),
+					eq(providerBookingTable.provider, this.#provider),
+					eq(orderTable.status, "confirmed"),
+					inArray(providerBookingTable.normalizedStatus, [
+						"confirmed",
+						"completed",
+					]),
+				),
+			)
+			.limit(1);
+
+		if (!row?.stayStartsAt || row.stayStartsAt.getTime() <= now.getTime()) {
+			return null;
+		}
+
+		const missingCount = Number(row.missingGuestCount);
+		const totalCount = Number(row.totalGuestCount);
+		if (missingCount <= 0 || totalCount <= 0) {
+			return null;
+		}
+
+		return {
+			facts: {
+				accommodationTitle: row.accommodationTitle,
+				checkIn: row.checkIn,
+				checkOut: row.checkOut,
+				email: row.email,
+				missingGuestCount: missingCount,
+				orderId: row.orderId,
+				publicReference: row.publicReference,
+				totalGuestCount: totalCount,
+			},
+			reminderEmailCount: row.reminderEmailCount,
+			stayStartsAt: row.stayStartsAt,
+		};
+	}
+
+	async #markGuestInfoReminderSent(
+		providerBookingId: string,
+		target: GuestReminderDispatchTarget,
+		now: Date,
+	): Promise<void> {
+		await this.#db
+			.update(providerBookingTable)
+			.set({
+				guestReminderEmailCount: target.reminderEmailCount + 1,
+				guestReminderEmailLastError: null,
+				guestReminderEmailLastSentAt: now,
+				guestReminderEmailNextAt: nextGuestInfoReminderAt(
+					now,
+					target.stayStartsAt,
+				),
+				updatedAt: now,
+			})
+			.where(eq(providerBookingTable.id, providerBookingId));
+	}
+
+	async #recordGuestInfoReminderFailure(
+		providerBookingId: string,
+		message: string,
+		now: Date,
+	): Promise<void> {
+		await this.#db
+			.update(providerBookingTable)
+			.set({
+				guestReminderEmailLastError: message.slice(0, 500),
+				guestReminderEmailNextAt: new Date(
+					now.getTime() + GUEST_REMINDER_EMAIL_FAILURE_DELAY_MS,
+				),
+				updatedAt: now,
+			})
+			.where(eq(providerBookingTable.id, providerBookingId));
+	}
+
+	async #dismissGuestInfoReminder(
+		providerBookingId: string,
+		now: Date,
+	): Promise<void> {
+		await this.#db
+			.update(providerBookingTable)
+			.set({ guestReminderEmailNextAt: null, updatedAt: now })
+			.where(eq(providerBookingTable.id, providerBookingId));
+	}
+
 	async #claimJob(jobId: string) {
 		const now = this.#now();
 		const rows = await this.#db
@@ -369,6 +618,15 @@ export class GuestComplianceService {
 		}
 
 		const now = this.#now();
+		await this.#db
+			.update(bookingGuestTable)
+			.set({ identityStatus: "verified", updatedAt: now })
+			.where(
+				and(
+					eq(bookingGuestTable.providerBookingId, job.providerBookingId),
+					eq(bookingGuestTable.identityStatus, "provided"),
+				),
+			);
 		await this.#db
 			.update(guestSubmissionJobTable)
 			.set({
@@ -531,6 +789,41 @@ export class GuestComplianceService {
 
 function decryptGuestField(value: Buffer | Uint8Array | null): string | null {
 	return value ? decryptIdentityField(value) : null;
+}
+
+function emptyGuestInfoReminderSummary(): GuestInfoReminderSummary {
+	return {
+		reminderEmailsFailed: 0,
+		reminderEmailsSent: 0,
+		reminderEmailsSkipped: 0,
+	};
+}
+
+function hasGuestNeedingReminder(): SQL {
+	return sql`exists (
+		select 1 from ${bookingGuestTable}
+		where ${bookingGuestTable.providerBookingId} = ${providerBookingTable.id}
+		and ${guestNeedsReminderCondition()}
+	)`;
+}
+
+function guestNeedsReminderCondition(): SQL {
+	return sql`(
+		${bookingGuestTable.identityStatus} in ('missing', 'requires_input', 'canceled')
+		or (
+			${bookingGuestTable.identityStatus} = 'provided'
+			and (
+				${bookingGuestTable.firstNameEncrypted} is null
+				or ${bookingGuestTable.lastNameEncrypted} is null
+				or ${bookingGuestTable.dateOfBirthEncrypted} is null
+				or ${bookingGuestTable.nationalityEncrypted} is null
+				or ${bookingGuestTable.residenceCountryEncrypted} is null
+				or ${bookingGuestTable.documentNumberEncrypted} is null
+				or ${bookingGuestTable.documentTypeEncrypted} is null
+				or ${bookingGuestTable.documentIssuingCountryEncrypted} is null
+			)
+		)
+	)`;
 }
 
 /** PII-safe error text for the job row: provider/message only, key scrubbed. */

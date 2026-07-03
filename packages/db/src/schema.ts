@@ -1171,6 +1171,16 @@ export const providerBooking = pgTable(
 		lastErrorCode: text("last_error_code"),
 		lastErrorMessage: text("last_error_message"),
 		needsRecovery: boolean("needs_recovery").notNull().default(false),
+		guestReminderEmailCount: integer("guest_reminder_email_count")
+			.notNull()
+			.default(0),
+		guestReminderEmailLastError: text("guest_reminder_email_last_error"),
+		guestReminderEmailLastSentAt: timestampWithTimezone(
+			"guest_reminder_email_last_sent_at",
+		),
+		guestReminderEmailNextAt: timestampWithTimezone(
+			"guest_reminder_email_next_at",
+		).defaultNow(),
 		createdAt: timestampWithTimezone("created_at").notNull().defaultNow(),
 		updatedAt: timestampWithTimezone("updated_at").notNull().defaultNow(),
 	},
@@ -1210,6 +1220,9 @@ export const providerBooking = pgTable(
 		index("provider_bookings_pending_next_attempt_idx")
 			.on(table.nextAttemptAt)
 			.where(sql`${table.normalizedStatus} = 'pending'`),
+		index("provider_bookings_guest_reminder_due_idx")
+			.on(table.guestReminderEmailNextAt)
+			.where(sql`${table.guestReminderEmailNextAt} is not null`),
 		check(
 			"provider_bookings_status_check",
 			sql`${table.normalizedStatus} in ('pending', 'confirmed', 'cancelled', 'failed', 'completed')`,
@@ -1217,6 +1230,10 @@ export const providerBooking = pgTable(
 		check(
 			"provider_bookings_attempt_count_nonneg",
 			sql`${table.attemptCount} >= 0`,
+		),
+		check(
+			"provider_bookings_guest_reminder_count_nonneg",
+			sql`${table.guestReminderEmailCount} >= 0`,
 		),
 		foreignKey({
 			columns: [table.orderItemId, table.orderId],

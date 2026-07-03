@@ -57,6 +57,12 @@ const templates: TemplateEntry[] = [
 		textFile: "order-invite.txt",
 		exportName: "orderInvite",
 	},
+	{
+		name: "order-guest-reminder",
+		htmlFile: "order-guest-reminder.html",
+		textFile: "order-guest-reminder.txt",
+		exportName: "orderGuestReminder",
+	},
 ];
 
 function loadFile(filePath: string): string | null {
