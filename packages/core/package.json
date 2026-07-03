@@ -52,6 +52,10 @@
 			"types": "./src/integrations/hostify/index.ts",
 			"default": "./src/integrations/hostify/index.ts"
 		},
+		"./integrations/hostkit": {
+			"types": "./src/integrations/hostkit/index.ts",
+			"default": "./src/integrations/hostkit/index.ts"
+		},
 		"./integrations/bokun": {
 			"types": "./src/integrations/bokun/index.ts",
 			"default": "./src/integrations/bokun/index.ts"
