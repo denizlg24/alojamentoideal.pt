@@ -438,10 +438,10 @@ function BookingWidgetInner({
 					type="button"
 				>
 					<ShoppingCart className="size-4" />
-					{selectedStayOverlapsCart
-						? "Already in cart"
-						: added
-							? "Added to cart"
+					{added
+						? "Added to cart"
+						: selectedStayOverlapsCart
+							? "Already in cart"
 							: adding
 								? "Adding"
 								: "Add to cart"}

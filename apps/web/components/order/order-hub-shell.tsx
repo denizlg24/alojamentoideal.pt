@@ -38,7 +38,7 @@ function multiStaySummary(items: OrderDetail["items"]): string | null {
 	if (!first || !last) {
 		return null;
 	}
-	return `${items.length} homes · ${formatStayRangeLong(first, last)}`;
+	return `${items.filter((item) => !!item.listingExternalId).length} homes · ${formatStayRangeLong(first, last)}`;
 }
 
 /**

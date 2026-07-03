@@ -1,12 +1,9 @@
-import { findOverlappingStay } from "@workspace/core/commerce/stay-overlap";
+import {
+	findOverlappingStay,
+	type StayDateRange,
+} from "@workspace/core/commerce/stay-overlap";
 
-export interface StayDateSelection {
-	checkIn: string;
-	checkOut: string;
-	listingId: string;
-}
-
-interface CartStayItem extends StayDateSelection {
+interface CartStayItem extends StayDateRange {
 	status: string;
 }
 
@@ -17,7 +14,7 @@ interface CartStayCollection {
 
 export function cartHasOverlappingStay(
 	cart: CartStayCollection | null,
-	stay: StayDateSelection,
+	stay: StayDateRange,
 ): boolean {
 	if (cart?.status !== "draft") {
 		return false;

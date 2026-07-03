@@ -280,9 +280,7 @@ export function CheckoutController({ seed }: CheckoutControllerProps) {
 			),
 		);
 		const first = validated.failures[0];
-		if (first) {
-			setNotice(first.message);
-		}
+		setNotice(first ? first.message : null);
 	}, []);
 
 	/**
@@ -487,11 +485,12 @@ export function CheckoutController({ seed }: CheckoutControllerProps) {
 					loaded = null;
 				}
 
-				if (!loaded || loaded.status !== "draft") {
+				if (loaded?.status !== "draft") {
 					loaded = (await api.createCart()).cart;
 					storeCartId(loaded.id);
 				}
 
+				let seedOverlapNotice: string | null = null;
 				for (const stay of carryStays) {
 					try {
 						loaded = (
@@ -514,19 +513,27 @@ export function CheckoutController({ seed }: CheckoutControllerProps) {
 				}
 
 				if (seedStay && seedToken && !cartHasStay(loaded, seedToken)) {
-					loaded = (
-						await api.addCartItem(loaded.id, {
-							adults: seedStay.adults,
-							checkIn: seedStay.checkIn,
-							checkOut: seedStay.checkOut,
-							children: seedStay.children,
-							clientMutationId: cartItemClientMutationId(seedStay),
-							guests: seedStay.guests,
-							idempotencyKey: cartItemIdempotencyKey(seedStay),
-							infants: seedStay.infants,
-							listingId: seedStay.listingId,
-						})
-					).cart;
+					try {
+						loaded = (
+							await api.addCartItem(loaded.id, {
+								adults: seedStay.adults,
+								checkIn: seedStay.checkIn,
+								checkOut: seedStay.checkOut,
+								children: seedStay.children,
+								clientMutationId: cartItemClientMutationId(seedStay),
+								guests: seedStay.guests,
+								idempotencyKey: cartItemIdempotencyKey(seedStay),
+								infants: seedStay.infants,
+								listingId: seedStay.listingId,
+							})
+						).cart;
+					} catch (error) {
+						const err = toCheckoutError(error);
+						if (err.code !== "cart_item_overlap") {
+							throw err;
+						}
+						seedOverlapNotice = err.message;
+					}
 				}
 
 				if (activeItemsOf(loaded).length === 0) {
@@ -537,6 +544,9 @@ export function CheckoutController({ seed }: CheckoutControllerProps) {
 				}
 
 				applyValidation(await api.validateCart(loaded.id));
+				if (seedOverlapNotice) {
+					setNotice(seedOverlapNotice);
+				}
 				setPhase("ready");
 				trackCheckoutEvent("checkout_started", {
 					currency: loaded.currency,

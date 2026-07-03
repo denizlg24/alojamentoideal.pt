@@ -1501,13 +1501,7 @@ export class CommerceService {
 				)
 				.limit(1);
 			if (slotInBooking) {
-				throw new CommerceError(
-					"order_member_exists",
-					emailMember.status === "active"
-						? "That guest already has a spot on this stay."
-						: "That guest is already invited to this stay.",
-					409,
-				);
+				throw guestAlreadyInStayError(emailMember.status);
 			}
 			// Reassigning a slot whose pending invite belongs to someone else onto
 			// an existing membership would silently strand that pending member, so
@@ -1532,39 +1526,49 @@ export class CommerceService {
 				// failure leaves the member's current link working.
 				await deliver({ email, token: rebindToken });
 			}
-			await this.#db.transaction(async (tx) => {
-				const [locked] = await tx
-					.select(bookingGuestSelection)
-					.from(bookingGuestTable)
-					.where(
-						and(
-							eq(bookingGuestTable.id, input.bookingGuestId),
-							eq(bookingGuestTable.providerBookingId, input.providerBookingId),
-						),
-					)
-					.limit(1)
-					.for("update");
-				if (!locked) {
-					throw new CommerceError(
-						"booking_guest_not_found",
-						"Guest not found.",
-						404,
-					);
-				}
-				if (rebindToken && rebindExpiresAt) {
+			try {
+				await this.#db.transaction(async (tx) => {
+					const [locked] = await tx
+						.select(bookingGuestSelection)
+						.from(bookingGuestTable)
+						.where(
+							and(
+								eq(bookingGuestTable.id, input.bookingGuestId),
+								eq(
+									bookingGuestTable.providerBookingId,
+									input.providerBookingId,
+								),
+							),
+						)
+						.limit(1)
+						.for("update");
+					if (!locked) {
+						throw new CommerceError(
+							"booking_guest_not_found",
+							"Guest not found.",
+							404,
+						);
+					}
+					if (rebindToken && rebindExpiresAt) {
+						await tx
+							.update(orderMemberTable)
+							.set({
+								accessTokenHash: hashMemberToken(rebindToken),
+								expiresAt: rebindExpiresAt,
+							})
+							.where(eq(orderMemberTable.id, emailMember.id));
+					}
 					await tx
-						.update(orderMemberTable)
-						.set({
-							accessTokenHash: hashMemberToken(rebindToken),
-							expiresAt: rebindExpiresAt,
-						})
-						.where(eq(orderMemberTable.id, emailMember.id));
+						.update(bookingGuestTable)
+						.set({ orderMemberId: emailMember.id, updatedAt: new Date() })
+						.where(eq(bookingGuestTable.id, input.bookingGuestId));
+				});
+			} catch (error) {
+				if (isBookingGuestMemberConflict(error)) {
+					throw guestAlreadyInStayError(emailMember.status);
 				}
-				await tx
-					.update(bookingGuestTable)
-					.set({ orderMemberId: emailMember.id, updatedAt: new Date() })
-					.where(eq(bookingGuestTable.id, input.bookingGuestId));
-			});
+				throw error;
+			}
 			trackEvent({
 				metadata: {
 					bookingGuestId: input.bookingGuestId,
@@ -7308,6 +7312,24 @@ function isProviderHoldIdentityConflict(error: unknown): boolean {
 		pgError?.code === "23505" &&
 		(pgError.constraint === undefined ||
 			PROVIDER_HOLD_IDENTITY_CONSTRAINTS.has(pgError.constraint))
+	);
+}
+
+function isBookingGuestMemberConflict(error: unknown): boolean {
+	const pgError = findPostgresError(error);
+	return (
+		pgError?.code === "23505" &&
+		pgError.constraint === "booking_guests_booking_member_uidx"
+	);
+}
+
+function guestAlreadyInStayError(status: OrderMemberStatus): CommerceError {
+	return new CommerceError(
+		"order_member_exists",
+		status === "active"
+			? "That guest already has a spot on this stay."
+			: "That guest is already invited to this stay.",
+		409,
 	);
 }
 

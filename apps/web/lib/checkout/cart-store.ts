@@ -1,6 +1,7 @@
 import type { CartDto } from "@workspace/core/commerce";
 import * as api from "./api-client";
 import { CHECKOUT_CART_STORAGE_KEY } from "./api-client";
+import { toCheckoutError } from "./errors";
 import {
 	cartItemClientMutationId,
 	cartItemIdempotencyKey,
@@ -216,8 +217,11 @@ export async function loadStoredCart(
 			notifyCartChanged(cart);
 		}
 		return cart;
-	} catch {
-		clearStoredCart();
+	} catch (error) {
+		const err = toCheckoutError(error);
+		if (err.code === "cart_expired" || err.code === "cart_not_found") {
+			clearStoredCart();
+		}
 		return null;
 	}
 }

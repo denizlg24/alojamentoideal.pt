@@ -310,11 +310,11 @@ export function CartView() {
 			try {
 				await mutation();
 				applyValidation(await api.validateCart(cart.id));
+				setDialog(null);
 			} catch (error) {
 				setNotice(toCheckoutError(error).message);
 			} finally {
 				setPendingItemId(null);
-				setDialog(null);
 			}
 		},
 		[applyValidation, cart],
