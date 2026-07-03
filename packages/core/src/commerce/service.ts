@@ -79,6 +79,8 @@ import {
 	type OrderDetailCharge,
 	type OrderDetailItem,
 	type OrderDetailMember,
+	scopeGuestRowsToViewer,
+	scopeOrderItemsToViewer,
 	summarizeConversationAvailability,
 	summarizeGuestProgress,
 } from "./order-detail";
@@ -133,6 +135,7 @@ import type {
 	UpdateCartItemBody,
 } from "./schemas";
 import { assertMutableCart, toCartStatus } from "./state";
+import { findOverlappingStay } from "./stay-overlap";
 import { computeDiscountMinor, sumCartTotals } from "./totals";
 import type {
 	CartDto,
@@ -336,6 +339,21 @@ interface InviteMemberResult {
 	expiresAt: Date;
 	memberId: string;
 	token: string;
+}
+
+/**
+ * Outcome of inviting a guest to a slot. Usually a fresh or rotated `invited`
+ * membership carrying the raw token for the magic-link email; when the email
+ * already holds `active` access on the order (the same person invited to
+ * another booking of a multi-stay order) the slot binds to that membership
+ * untouched, so there is no token or expiry to deliver.
+ */
+interface InviteGuestResult {
+	email: string;
+	expiresAt: Date | null;
+	memberId: string;
+	status: "active" | "invited";
+	token: string | null;
 }
 
 /**
@@ -1262,7 +1280,8 @@ export class CommerceService {
 			// needs no counting. Only gate the invited -> active transition; a re-redeem
 			// of an already-active token is idempotent. Still reject a signed-in account
 			// that already holds another active membership on this order, so one person
-			// never ends up bound to two slots.
+			// never ends up holding two memberships (a member invited to several stays
+			// holds one membership with several slots bound to it).
 			if (member.status !== "active") {
 				const duplicateMatchers = [eq(orderMemberTable.email, member.email)];
 				if (options.userId) {
@@ -1418,15 +1437,19 @@ export class CommerceService {
 	/**
 	 * Invites a guest to an order (owner only). Mints an `invited` member with a
 	 * 24h token returned once for the magic-link email. Invitations are unbounded
-	 * and short-lived; capacity is enforced at acceptance, not here. Rejects a
-	 * recipient who already holds active access so a duplicate invite cannot shadow
-	 * a real member.
+	 * and short-lived; capacity is enforced at acceptance, not here. An email the
+	 * order already knows joins through its existing membership instead of being
+	 * rejected: the extra slot binds to that member (so one person invited to
+	 * several stays of a multi-booking order sees them all), a still-pending
+	 * member gets a rotated link that covers every bound slot on redemption, and
+	 * an active member keeps their live access untouched. The same email can
+	 * never hold two slots on one stay.
 	 */
 	async inviteGuest(
 		access: ResolvedOrderAccess,
 		input: { bookingGuestId: string; email: string; providerBookingId: string },
 		deliver: InviteDelivery,
-	): Promise<InviteMemberResult> {
+	): Promise<InviteGuestResult> {
 		this.#assertOrderPermission(access, "invite_members");
 		const email = input.email.trim().toLowerCase();
 		if (!EMAIL_ADDRESS_PATTERN.test(email)) {
@@ -1465,13 +1488,104 @@ export class CommerceService {
 			)
 			.limit(1);
 		if (emailMember && emailMember.id !== currentMember?.id) {
-			throw new CommerceError(
-				"order_member_exists",
-				emailMember.status === "active"
-					? "That guest already has access to this booking."
-					: "That guest is already invited to this booking.",
-				409,
-			);
+			// The same email may join several bookings of a multi-stay order, but
+			// never the same booking twice.
+			const [slotInBooking] = await this.#db
+				.select({ id: bookingGuestTable.id })
+				.from(bookingGuestTable)
+				.where(
+					and(
+						eq(bookingGuestTable.providerBookingId, input.providerBookingId),
+						eq(bookingGuestTable.orderMemberId, emailMember.id),
+					),
+				)
+				.limit(1);
+			if (slotInBooking) {
+				throw guestAlreadyInStayError(emailMember.status);
+			}
+			// Reassigning a slot whose pending invite belongs to someone else onto
+			// an existing membership would silently strand that pending member, so
+			// make the owner cancel it explicitly first.
+			if (currentMember) {
+				throw new CommerceError(
+					"order_member_exists",
+					"That guest slot has a pending invite. Cancel it first.",
+					409,
+				);
+			}
+
+			// Bind the extra slot to the membership the order already has for this
+			// email. A still-pending member gets a rotated link (rotate-on-resend:
+			// redemption grants every slot bound to them); an active member already
+			// holds live access, so their token is left alone and no email is sent.
+			const rebindToken =
+				emailMember.status === "invited" ? generateMemberToken() : null;
+			const rebindExpiresAt = rebindToken ? memberInviteExpiresAt() : null;
+			if (rebindToken) {
+				// Deliver before persisting, mirroring the fresh-invite path: a mail
+				// failure leaves the member's current link working.
+				await deliver({ email, token: rebindToken });
+			}
+			try {
+				await this.#db.transaction(async (tx) => {
+					const [locked] = await tx
+						.select(bookingGuestSelection)
+						.from(bookingGuestTable)
+						.where(
+							and(
+								eq(bookingGuestTable.id, input.bookingGuestId),
+								eq(
+									bookingGuestTable.providerBookingId,
+									input.providerBookingId,
+								),
+							),
+						)
+						.limit(1)
+						.for("update");
+					if (!locked) {
+						throw new CommerceError(
+							"booking_guest_not_found",
+							"Guest not found.",
+							404,
+						);
+					}
+					if (rebindToken && rebindExpiresAt) {
+						await tx
+							.update(orderMemberTable)
+							.set({
+								accessTokenHash: hashMemberToken(rebindToken),
+								expiresAt: rebindExpiresAt,
+							})
+							.where(eq(orderMemberTable.id, emailMember.id));
+					}
+					await tx
+						.update(bookingGuestTable)
+						.set({ orderMemberId: emailMember.id, updatedAt: new Date() })
+						.where(eq(bookingGuestTable.id, input.bookingGuestId));
+				});
+			} catch (error) {
+				if (isBookingGuestMemberConflict(error)) {
+					throw guestAlreadyInStayError(emailMember.status);
+				}
+				throw error;
+			}
+			trackEvent({
+				metadata: {
+					bookingGuestId: input.bookingGuestId,
+					memberId: emailMember.id,
+					orderId: access.order.id,
+				},
+				name: "order_member_invited",
+				provider: this.#provider,
+				type: "integration",
+			});
+			return {
+				email,
+				expiresAt: rebindExpiresAt,
+				memberId: emailMember.id,
+				status: emailMember.status === "active" ? "active" : "invited",
+				token: rebindToken,
+			};
 		}
 
 		// Reuse this slot's still-pending invite row (rotating its token, and its
@@ -1549,7 +1663,7 @@ export class CommerceService {
 			provider: this.#provider,
 			type: "integration",
 		});
-		return { email, expiresAt, memberId, token };
+		return { email, expiresAt, memberId, status: "invited", token };
 	}
 
 	/**
@@ -2801,7 +2915,9 @@ export class CommerceService {
 	 * Role drives visibility: the `owner` sees pricing, the tax/billing contact,
 	 * the member roster, and per-item money/charges; a `member` sees only the
 	 * non-sensitive booking shape (dates, property, statuses, guest-progress
-	 * counts). Authorization is the caller's responsibility — pass the result of
+	 * counts) and only for the stays whose guest slots are bound to their
+	 * membership — never the other bookings of a multi-stay order. Authorization
+	 * is the caller's responsibility — pass the result of
 	 * {@link resolveOrderAccess}; this never re-checks the token.
 	 */
 	async readOrderDetail(access: ResolvedOrderAccess): Promise<OrderDetail> {
@@ -2877,24 +2993,43 @@ export class CommerceService {
 			? await this.#db
 					.select({
 						identityStatus: bookingGuestTable.identityStatus,
+						orderMemberId: bookingGuestTable.orderMemberId,
 						providerBookingId: bookingGuestTable.providerBookingId,
 					})
 					.from(bookingGuestTable)
 					.where(inArray(bookingGuestTable.providerBookingId, bookingIds))
 			: [];
 
+		// Progress counts follow the viewer's guest-management scope: the owner
+		// counts every slot, an invited member only the slots bound to them, so the
+		// hub never advertises totals the guests section will not show.
+		const visibleGuestRows = scopeGuestRowsToViewer(
+			guestRows,
+			access.role,
+			access.member?.id ?? null,
+		);
+
+		// An invited member's hub only shows the stays they were invited to: the
+		// bookings holding a slot bound to their membership (several when the same
+		// email was invited to more than one booking in the order).
+		const visibleItemRows = scopeOrderItemsToViewer(
+			itemRows,
+			access.role,
+			new Set(visibleGuestRows.map((guest) => guest.providerBookingId)),
+		);
+
 		const statusesByBooking = new Map<
 			string,
 			(typeof guestRows)[number]["identityStatus"][]
 		>();
-		for (const guest of guestRows) {
+		for (const guest of visibleGuestRows) {
 			const bucket = statusesByBooking.get(guest.providerBookingId) ?? [];
 			bucket.push(guest.identityStatus);
 			statusesByBooking.set(guest.providerBookingId, bucket);
 		}
 
 		const chargesByItem = new Map<string, OrderDetailCharge[]>();
-		if (isOwner && itemRows.length > 0) {
+		if (isOwner && visibleItemRows.length > 0) {
 			const chargeRows = await this.#db
 				.select({
 					grossMinor: orderItemChargeTable.grossMinor,
@@ -2909,7 +3044,7 @@ export class CommerceService {
 				.where(
 					inArray(
 						orderItemChargeTable.orderItemId,
-						itemRows.map((row) => row.id),
+						visibleItemRows.map((row) => row.id),
 					),
 				)
 				.orderBy(asc(orderItemChargeTable.position));
@@ -2927,7 +3062,7 @@ export class CommerceService {
 			}
 		}
 
-		const items: OrderDetailItem[] = itemRows.map((row) => ({
+		const items: OrderDetailItem[] = visibleItemRows.map((row) => ({
 			adults: row.adults,
 			charges: isOwner ? (chargesByItem.get(row.id) ?? []) : null,
 			checkIn: row.checkIn,
@@ -2966,7 +3101,7 @@ export class CommerceService {
 		}));
 
 		const orderGuestProgress = summarizeGuestProgress(
-			guestRows.map((guest) => guest.identityStatus),
+			visibleGuestRows.map((guest) => guest.identityStatus),
 		);
 
 		let contact: OrderContactSummary | null = null;
@@ -3894,6 +4029,10 @@ export class CommerceService {
 			: null;
 		const itemId = existing?.id ?? crypto.randomUUID();
 
+		await this.#assertNoOverlappingCartStay(tx, cartId, snapshot, {
+			excludeItemId: itemId,
+		});
+
 		if (existing) {
 			await tx
 				.update(cartItemTable)
@@ -3941,6 +4080,10 @@ export class CommerceService {
 		if (item?.status !== "active") {
 			throw new CommerceError("item_not_found", "Cart item not found.", 404);
 		}
+
+		await this.#assertNoOverlappingCartStay(tx, cartId, snapshot, {
+			excludeItemId: itemId,
+		});
 
 		await this.#insertQuoteSnapshot(tx, snapshot);
 		await tx
@@ -4607,6 +4750,53 @@ export class CommerceService {
 			.limit(1);
 
 		return row ?? null;
+	}
+
+	async #assertNoOverlappingCartStay(
+		tx: Transaction,
+		cartId: string,
+		stay: NormalizedAccommodationQuoteSnapshot,
+		options: { excludeItemId?: string } = {},
+	): Promise<void> {
+		const rows = await tx
+			.select({
+				checkIn: accommodationQuoteSnapshotTable.checkIn,
+				checkOut: accommodationQuoteSnapshotTable.checkOut,
+				itemId: cartItemTable.id,
+				listingId: accommodationQuoteSnapshotTable.listingExternalId,
+			})
+			.from(cartItemTable)
+			.innerJoin(
+				accommodationQuoteSnapshotTable,
+				eq(cartItemTable.quoteSnapshotId, accommodationQuoteSnapshotTable.id),
+			)
+			.where(
+				and(
+					eq(cartItemTable.cartId, cartId),
+					eq(cartItemTable.status, "active"),
+					eq(
+						accommodationQuoteSnapshotTable.listingExternalId,
+						stay.listingExternalId,
+					),
+				),
+			);
+
+		const overlapping = findOverlappingStay(
+			rows.filter((row) => row.itemId !== options.excludeItemId),
+			{
+				checkIn: stay.checkIn,
+				checkOut: stay.checkOut,
+				listingId: stay.listingExternalId,
+			},
+		);
+
+		if (overlapping) {
+			throw new CommerceError(
+				"cart_item_overlap",
+				"This stay overlaps dates already in your cart.",
+				409,
+			);
+		}
 	}
 
 	async #nextCartPosition(tx: Transaction, cartId: string): Promise<number> {
@@ -6980,24 +7170,36 @@ export class CommerceService {
 	}
 
 	#buildConfirmationFacts(context: SagaContext): OrderConfirmationFacts {
-		const [first] = context.bookings;
 		return {
-			accommodationImage: first?.imageUrlSnapshot ?? null,
-			accommodationTitle: first?.titleSnapshot ?? "Your Alojamento Ideal stay",
 			amountPaidMinor: context.order.amountPaidMinor,
 			billingAddress: context.contact?.billingAddress ?? {},
-			checkIn: first?.checkIn ?? "To be confirmed",
-			checkOut: first?.checkOut ?? "To be confirmed",
 			contactPhone: context.contact?.phoneE164 ?? "",
 			currency: context.order.currency,
 			email: context.contact?.email ?? "",
-			guests: first?.guests ?? 0,
 			name: context.contact?.name ?? "",
 			orderId: context.order.id,
 			paymentMethod: paymentMethodFromOrderRow(context.order),
 			publicReference: context.order.publicReference,
+			stays: context.bookings.map((booking) => ({
+				checkIn: booking.checkIn,
+				checkOut: booking.checkOut,
+				guests: booking.guests,
+				imageUrl: booking.imageUrlSnapshot,
+				nights: nightsBetweenStayDates(booking.checkIn, booking.checkOut),
+				title: booking.titleSnapshot ?? "Your Alojamento Ideal stay",
+			})),
 		};
 	}
+}
+
+/** Nights between two `YYYY-MM-DD` stay dates; 0 when either is malformed. */
+function nightsBetweenStayDates(checkIn: string, checkOut: string): number {
+	const inMs = Date.parse(`${checkIn}T00:00:00Z`);
+	const outMs = Date.parse(`${checkOut}T00:00:00Z`);
+	if (Number.isNaN(inMs) || Number.isNaN(outMs)) {
+		return 0;
+	}
+	return Math.max(0, Math.round((outMs - inMs) / 86_400_000));
 }
 
 function constantTimeEquals(a: string, b: string): boolean {
@@ -7110,6 +7312,24 @@ function isProviderHoldIdentityConflict(error: unknown): boolean {
 		pgError?.code === "23505" &&
 		(pgError.constraint === undefined ||
 			PROVIDER_HOLD_IDENTITY_CONSTRAINTS.has(pgError.constraint))
+	);
+}
+
+function isBookingGuestMemberConflict(error: unknown): boolean {
+	const pgError = findPostgresError(error);
+	return (
+		pgError?.code === "23505" &&
+		pgError.constraint === "booking_guests_booking_member_uidx"
+	);
+}
+
+function guestAlreadyInStayError(status: OrderMemberStatus): CommerceError {
+	return new CommerceError(
+		"order_member_exists",
+		status === "active"
+			? "That guest already has a spot on this stay."
+			: "That guest is already invited to this stay.",
+		409,
 	);
 }
 

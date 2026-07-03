@@ -18,6 +18,7 @@ type CheckoutEventData = {
 	currency?: string;
 	listingId?: string;
 	amountMinor?: number;
+	itemCount?: number;
 	kind?: string;
 	step?: string;
 };

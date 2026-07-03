@@ -8,8 +8,10 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useEffect, useState } from "react";
 import * as api from "@/lib/checkout/api-client";
+import { clearStoredCart } from "@/lib/checkout/cart-store";
 import { toCheckoutError } from "@/lib/checkout/errors";
 import { formatMinor } from "@/lib/checkout/format";
+import { clearResumeState } from "@/lib/checkout/resume";
 
 type ViewState =
 	| { status: "error"; message: string }
@@ -61,7 +63,7 @@ function present(order: OrderStatusResponse): Presentation {
 	switch (order.bookingStatus) {
 		case "confirmed":
 			return {
-				body: "Your stay is confirmed. We've emailed your booking details, and you can manage your reservation any time.",
+				body: "Your booking is confirmed. We've emailed your booking details, and you can manage your reservation any time.",
 				tone: "success",
 				title: "Booking confirmed",
 			};
@@ -205,6 +207,27 @@ export function BookingCompleteView() {
 			}
 		};
 	}, [publicReference]);
+
+	// Once money has settled on this order, the converted cart it came from is
+	// spent: drop the stored cart id (zeroing the header badge) and the resume
+	// metadata. A still-payable order (e.g. a declined card) keeps both so the
+	// guest can resume checkout.
+	useEffect(() => {
+		if (state.status !== "ready") {
+			return;
+		}
+		const { order } = state;
+		const moneySettled =
+			order.bookingStatus === "confirmed" ||
+			order.provisioningSubState === "paid-confirming" ||
+			order.provisioningSubState === "refunded" ||
+			order.paymentStatus === "succeeded" ||
+			order.paymentStatus === "processing";
+		if (moneySettled) {
+			clearStoredCart();
+			clearResumeState();
+		}
+	}, [state]);
 
 	if (state.status === "loading") {
 		return (

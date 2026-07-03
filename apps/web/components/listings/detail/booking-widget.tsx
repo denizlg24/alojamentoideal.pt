@@ -1,6 +1,5 @@
 "use client";
 
-import type { CartDto } from "@workspace/core/commerce";
 import {
 	Accordion,
 	AccordionContent,
@@ -27,21 +26,17 @@ import { format } from "date-fns";
 import { ChevronDown, ShoppingCart } from "lucide-react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useEffect, useRef, useState } from "react";
+import { type MouseEvent, useEffect, useRef, useState } from "react";
 import type { DateRange } from "react-day-picker";
 import { nightsBetween, parseIsoDate, toIsoDate } from "@/lib/catalog/dates";
 import { capacityForGuests, MAX_INFANTS } from "@/lib/catalog/guests";
 import { formatListingMoney } from "@/lib/catalog/pricing-display";
+import { cartHasOverlappingStay } from "@/lib/checkout/cart-matching";
 import {
-	addCartItem,
-	CHECKOUT_CART_STORAGE_KEY,
-	createCart,
-	getCart,
-} from "@/lib/checkout/api-client";
-import {
-	cartItemClientMutationId,
-	cartItemIdempotencyKey,
-} from "@/lib/checkout/idempotency";
+	addStayToCart,
+	CART_CHANGED_EVENT,
+	loadStoredCart,
+} from "@/lib/checkout/cart-store";
 import { GuestFields } from "../../search/guest-selector";
 import { ListingCalendar } from "./listing-calendar";
 import { useBookingAvailability } from "./use-booking-availability";
@@ -58,6 +53,15 @@ interface BookingWidgetProps {
 	listingId: string;
 	maxGuests: number | null;
 	minNights: number;
+}
+
+interface CartFlyIcon {
+	active: boolean;
+	id: string;
+	startX: number;
+	startY: number;
+	targetX: number;
+	targetY: number;
 }
 
 function intParam(
@@ -132,7 +136,10 @@ function BookingWidgetInner({
 	}));
 	const [added, setAdded] = useState(false);
 	const [adding, setAdding] = useState(false);
+	const [selectedStayOverlapsCart, setSelectedStayOverlapsCart] =
+		useState(false);
 	const [datesOpen, setDatesOpen] = useState(false);
+	const [cartFlyIcons, setCartFlyIcons] = useState<CartFlyIcon[]>([]);
 
 	const availabilityState = useBookingAvailability(listingId, minNights);
 	const availability =
@@ -194,6 +201,35 @@ function BookingWidgetInner({
 		!minStayError &&
 		reserveHref !== null;
 
+	useEffect(() => {
+		if (!checkIn || !checkOut) {
+			setSelectedStayOverlapsCart(false);
+			return;
+		}
+
+		let cancelled = false;
+		const selectedStay = { checkIn, checkOut, listingId };
+		const refresh = async () => {
+			const loaded = await loadStoredCart({ notify: false });
+			if (!cancelled) {
+				setSelectedStayOverlapsCart(
+					cartHasOverlappingStay(loaded, selectedStay),
+				);
+			}
+		};
+
+		setSelectedStayOverlapsCart(false);
+		void refresh();
+		window.addEventListener(CART_CHANGED_EVENT, refresh);
+		window.addEventListener("storage", refresh);
+
+		return () => {
+			cancelled = true;
+			window.removeEventListener(CART_CHANGED_EVENT, refresh);
+			window.removeEventListener("storage", refresh);
+		};
+	}, [checkIn, checkOut, listingId]);
+
 	// Warm the checkout route once the stay is stable and bookable so navigation
 	// overlaps the click. The Reserve <Link> only auto-prefetches in the viewport,
 	// which on mobile is hidden inside the reserve drawer until it is opened.
@@ -203,27 +239,66 @@ function BookingWidgetInner({
 		}
 	}, [canReserve, reserveHref, router]);
 
-	const handleAddToCart = async () => {
-		if (!checkIn || !checkOut || adding) {
+	const launchCartFlyIcon = (source: HTMLElement) => {
+		if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
 			return;
 		}
+
+		const sourceRect = source.getBoundingClientRect();
+		const target = Array.from(
+			document.querySelectorAll<HTMLElement>("[data-cart-button-target]"),
+		).find((element) => {
+			const rect = element.getBoundingClientRect();
+			return rect.width > 0 && rect.height > 0;
+		});
+		if (!target) {
+			return;
+		}
+
+		const targetRect = target.getBoundingClientRect();
+		const id = crypto.randomUUID();
+		const icon: CartFlyIcon = {
+			active: false,
+			id,
+			startX: sourceRect.left + sourceRect.width / 2,
+			startY: sourceRect.top + sourceRect.height / 2,
+			targetX: targetRect.left + targetRect.width / 2,
+			targetY: targetRect.top + targetRect.height / 2,
+		};
+
+		setCartFlyIcons((current) => [...current, icon]);
+		requestAnimationFrame(() => {
+			setCartFlyIcons((current) =>
+				current.map((item) =>
+					item.id === id ? { ...item, active: true } : item,
+				),
+			);
+		});
+		window.setTimeout(() => {
+			setCartFlyIcons((current) => current.filter((item) => item.id !== id));
+		}, 760);
+	};
+
+	const handleAddToCart = async (event: MouseEvent<HTMLButtonElement>) => {
+		if (!checkIn || !checkOut || adding || selectedStayOverlapsCart) {
+			return;
+		}
+		const source = event.currentTarget;
 		setAdding(true);
 		try {
-			let cart: CartDto | null = null;
-			const storedId = sessionStorage.getItem(CHECKOUT_CART_STORAGE_KEY);
-			if (storedId) {
-				try {
-					cart = (await getCart(storedId)).cart;
-				} catch {
-					sessionStorage.removeItem(CHECKOUT_CART_STORAGE_KEY);
-				}
+			const selectedStay = { checkIn, checkOut, listingId };
+			if (
+				cartHasOverlappingStay(
+					await loadStoredCart({ notify: false }),
+					selectedStay,
+				)
+			) {
+				setSelectedStayOverlapsCart(true);
+				return;
 			}
-			if (cart?.status !== "draft") {
-				cart = (await createCart()).cart;
-				sessionStorage.setItem(CHECKOUT_CART_STORAGE_KEY, cart.id);
-			}
-
-			const stayKey = {
+			// The shared cart store dedupes an identical stay server-side and
+			// broadcasts the new count to the header badge.
+			await addStayToCart({
 				adults: guests.adults,
 				checkIn,
 				checkOut,
@@ -231,26 +306,9 @@ function BookingWidgetInner({
 				guests: guestCapacity,
 				infants: guests.infants,
 				listingId,
-			};
-			const alreadyInCart = cart.items.some(
-				(entry) =>
-					entry.status === "active" &&
-					entry.listingId === listingId &&
-					entry.checkIn === checkIn &&
-					entry.checkOut === checkOut &&
-					entry.adults === guests.adults &&
-					entry.children === guests.children &&
-					entry.infants === guests.infants &&
-					entry.guests === guestCapacity,
-			);
-			if (!alreadyInCart) {
-				await addCartItem(cart.id, {
-					...stayKey,
-					clientMutationId: cartItemClientMutationId(stayKey),
-					idempotencyKey: cartItemIdempotencyKey(stayKey),
-				});
-			}
-
+			});
+			setSelectedStayOverlapsCart(true);
+			launchCartFlyIcon(source);
 			setAdded(true);
 			setTimeout(() => setAdded(false), 2000);
 		} catch {
@@ -376,11 +434,17 @@ function BookingWidgetInner({
 					size="lg"
 					className="w-full"
 					onClick={handleAddToCart}
-					disabled={!canReserve || adding}
+					disabled={!canReserve || adding || selectedStayOverlapsCart}
 					type="button"
 				>
 					<ShoppingCart className="size-4" />
-					{added ? "Added to cart" : adding ? "Adding" : "Add to cart"}
+					{added
+						? "Added to cart"
+						: selectedStayOverlapsCart
+							? "Already in cart"
+							: adding
+								? "Adding"
+								: "Add to cart"}
 				</Button>
 			</div>
 			<p className="text-center text-muted-foreground text-xs">
@@ -402,6 +466,19 @@ function BookingWidgetInner({
 
 	return (
 		<>
+			{cartFlyIcons.map((icon) => (
+				<span
+					aria-hidden
+					className="pointer-events-none fixed z-[100] flex size-8 items-center justify-center rounded-full bg-primary text-primary-foreground opacity-95 shadow-lg shadow-primary/25 transition-[transform,opacity] duration-700 ease-out"
+					key={icon.id}
+					style={{
+						opacity: icon.active ? 0 : 0.95,
+						transform: `translate3d(${(icon.active ? icon.targetX : icon.startX) - 16}px, ${(icon.active ? icon.targetY : icon.startY) - 16}px, 0) scale(${icon.active ? 0.45 : 1})`,
+					}}
+				>
+					<ShoppingCart className="size-4" />
+				</span>
+			))}
 			<div className="hidden lg:block">
 				<div className="sticky top-24 rounded-2xl border bg-card p-6 shadow-lg">
 					<div className="flex flex-col gap-4">

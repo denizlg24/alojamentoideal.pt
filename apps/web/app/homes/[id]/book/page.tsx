@@ -1,4 +1,3 @@
-import { getAccommodationsConfig } from "@workspace/core/accommodations";
 import type { CatalogListingDetailDto } from "@workspace/core/catalog";
 import { Separator } from "@workspace/ui/components/separator";
 import { Skeleton } from "@workspace/ui/components/skeleton";
@@ -8,7 +7,7 @@ import { notFound } from "next/navigation";
 import { Suspense } from "react";
 import { CheckoutController } from "@/components/checkout/checkout-controller";
 import { CheckoutHeader } from "@/components/checkout/checkout-header";
-import type { InitialListing, InitialStay } from "@/components/checkout/types";
+import type { CheckoutSeed } from "@/components/checkout/types";
 import { getCachedCatalogDetail } from "@/lib/catalog/cache";
 import { capacityForGuests, MAX_INFANTS } from "@/lib/catalog/guests";
 import {
@@ -66,26 +65,10 @@ function locationLabelOf(listing: CatalogListingDetailDto): string | null {
 }
 
 /**
- * Cached listing facts the checkout shell shares with the live controller. Read
- * through the same `use cache` entry as the controller, so this prerenders.
- */
-async function loadListing(id: string): Promise<CatalogListingDetailDto> {
-	const listing = await getCachedCatalogDetail(
-		id,
-		getListingCatalogScope(),
-		"en",
-	);
-	if (!listing) {
-		notFound();
-	}
-	return listing;
-}
-
-/**
  * Prerendered shell shown while the interactive checkout streams in. Mirrors
- * the live `ReservationSummary` header (cover, title, rating) so the swap is
- * seamless; the stay/price rows are the only placeholders, since those depend
- * on the request's search params.
+ * the live cart summary header (cover, title, rating) so the swap is seamless;
+ * the stay/price rows are the only placeholders, since those depend on the
+ * request's search params.
  */
 async function CheckoutShell({ id }: { id: string }) {
 	const listing = await getCachedCatalogDetail(
@@ -144,8 +127,9 @@ async function CheckoutShell({ id }: { id: string }) {
 }
 
 /**
- * Request-time island: reads the stay from search params and hands the live
- * listing facts plus stay seed to the interactive controller.
+ * Request-time island: reads the stay from search params and hands the seed to
+ * the shared-cart checkout controller, which ensures this stay is in the cart
+ * (alongside anything already added) before payment.
  */
 async function CheckoutDynamic({
 	id,
@@ -154,9 +138,15 @@ async function CheckoutDynamic({
 	id: string;
 	searchParams: BookPageProps["searchParams"];
 }) {
-	const listing = await loadListing(id);
+	const listing = await getCachedCatalogDetail(
+		id,
+		getListingCatalogScope(),
+		"en",
+	);
+	if (!listing) {
+		notFound();
+	}
 	const query = await searchParams;
-	const config = getAccommodationsConfig();
 
 	const adults = readInt(query.adults, 1, 1, 30);
 	const children = readInt(query.children, 0, 0, 30);
@@ -168,26 +158,14 @@ async function CheckoutDynamic({
 		30,
 	);
 
-	const initialListing: InitialListing = {
-		coverPhotoUrl: listing.coverPhoto?.url ?? null,
-		currency: config.currency,
-		id: listing.id,
-		locationLabel: locationLabelOf(listing),
-		maxGuests: listing.capacity.guests,
-		minNights: listing.minNights,
-		petsAllowed: false,
-		reviewAverage: listing.reviews.average,
-		reviewCount: listing.reviews.count,
-		title: listing.title,
-	};
-
-	const initialStay: InitialStay = {
+	const seed: CheckoutSeed = {
 		adults,
 		checkIn: readString(query.checkIn),
 		checkOut: readString(query.checkOut),
 		children,
 		guests,
 		infants,
+		listingId: listing.id,
 	};
 
 	// Key the live controller on the stay so a navigation that lands here with
@@ -196,21 +174,15 @@ async function CheckoutDynamic({
 	// still holding the previous stay.
 	const stayKey = [
 		id,
-		initialStay.checkIn ?? "",
-		initialStay.checkOut ?? "",
-		initialStay.adults,
-		initialStay.children,
-		initialStay.infants,
-		initialStay.guests,
+		seed.checkIn ?? "",
+		seed.checkOut ?? "",
+		seed.adults,
+		seed.children,
+		seed.infants,
+		seed.guests,
 	].join("|");
 
-	return (
-		<CheckoutController
-			key={stayKey}
-			initialListing={initialListing}
-			initialStay={initialStay}
-		/>
-	);
+	return <CheckoutController key={stayKey} seed={seed} />;
 }
 
 export default async function BookPage(props: BookPageProps) {

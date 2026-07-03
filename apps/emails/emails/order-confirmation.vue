@@ -49,7 +49,7 @@
         <Spacer class="h-5" />
 
         <Text class="m-0 text-[16px] leading-7 text-[#6a5d52]">
-          Your stay at <Raw>__ACCOMMODATION_TITLE__</Raw> is confirmed. Here is everything you need, all in one place.
+          <Raw>__STAYS_INTRO__</Raw> Here is everything you need, all in one place.
         </Text>
 
         <Spacer class="h-8" />
@@ -76,9 +76,10 @@
         </table>
       </Section>
 
+      <Raw>__STAYS_START__</Raw>
       <Section class="bg-[#fffdf9]">
         <Img
-          src="__ACCOMMODATION_IMAGE__"
+          src="__STAY_IMAGE__"
           alt="Accommodation photo"
           width="600"
           class="block w-full max-w-full"
@@ -90,7 +91,7 @@
           level="2"
           class="m-0 font-bricolage-grotesque text-[24px] font-semibold leading-8 text-[#2b211b]"
         >
-          <Raw>__ACCOMMODATION_TITLE__</Raw>
+          <Raw>__STAY_TITLE__</Raw>
         </Heading>
 
         <Spacer class="h-6" />
@@ -102,7 +103,7 @@
                 Check-in
               </Text>
               <Text class="m-0 mt-1 text-[16px] font-medium leading-6 text-[#2b211b]">
-                <Raw>__CHECK_IN__</Raw>
+                <Raw>__STAY_CHECK_IN__</Raw>
               </Text>
             </td>
             <td class="w-1/2 border-t border-[#ece1cf] py-4 pl-4 align-top">
@@ -110,7 +111,7 @@
                 Check-out
               </Text>
               <Text class="m-0 mt-1 text-[16px] font-medium leading-6 text-[#2b211b]">
-                <Raw>__CHECK_OUT__</Raw>
+                <Raw>__STAY_CHECK_OUT__</Raw>
               </Text>
             </td>
           </tr>
@@ -120,22 +121,23 @@
                 Guests
               </Text>
               <Text class="m-0 mt-1 text-[16px] font-medium leading-6 text-[#2b211b]">
-                <Raw>__GUESTS__</Raw>
+                <Raw>__STAY_GUESTS__</Raw>
               </Text>
             </td>
             <td class="border-t border-[#ece1cf] py-4 pl-4 align-top">
               <Text class="m-0 text-[13px] leading-5 text-[#94826f]">
-                Payment
+                Nights
               </Text>
               <Text class="m-0 mt-1 text-[16px] font-medium leading-6 text-[#2b211b]">
-                <Raw>__PAYMENT_METHOD__</Raw><Raw>__CARD_LAST_FOUR__</Raw>
+                <Raw>__STAY_NIGHTS__</Raw>
               </Text>
             </td>
           </tr>
         </table>
+      </Section>
+      <Raw>__STAYS_END__</Raw>
 
-        <Spacer class="h-8" />
-
+      <Section class="bg-[#fffdf9] px-9 pt-1 pb-8 sm:px-6">
         <Button
           href="__MANAGE_URL__"
           variant="solid"
@@ -192,6 +194,16 @@
               </Text>
               <Text class="m-0 mt-1 text-[15px] leading-6 text-[#2b211b]">
                 <Raw>__BILLING_ADDRESS__</Raw>
+              </Text>
+            </td>
+          </tr>
+          <tr>
+            <td class="border-t border-[#e3d5c1] py-3 align-top">
+              <Text class="m-0 text-[13px] leading-5 text-[#94826f]">
+                Payment
+              </Text>
+              <Text class="m-0 mt-1 text-[15px] leading-6 text-[#2b211b]">
+                <Raw>__PAYMENT_METHOD__</Raw><Raw>__CARD_LAST_FOUR__</Raw>
               </Text>
             </td>
           </tr>

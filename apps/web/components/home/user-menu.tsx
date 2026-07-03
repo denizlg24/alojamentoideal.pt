@@ -51,6 +51,7 @@ export function UserMenu({ opaque }: { opaque: boolean }) {
 	const router = useRouter();
 	const mounted = useMounted();
 	const user = session?.user;
+	const authPending = mounted ? isPending : undefined;
 
 	const triggerClasses = cn(
 		"rounded-full",
@@ -64,7 +65,7 @@ export function UserMenu({ opaque }: { opaque: boolean }) {
 			<Button
 				aria-label="Sign in"
 				className={triggerClasses}
-				disabled={!mounted || isPending}
+				disabled={authPending}
 				onClick={() => openAuth({ view: "login" })}
 				size="icon"
 				variant="ghost"

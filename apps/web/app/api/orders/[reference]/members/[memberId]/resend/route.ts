@@ -6,7 +6,10 @@ import {
 	resolveOrderAccessContext,
 } from "@/lib/api/commerce";
 import { withApiRoute } from "@/lib/api/route";
-import { sendOrderInviteEmail } from "@/lib/email/order-invite";
+import {
+	orderInviteTitle,
+	sendOrderInviteEmail,
+} from "@/lib/email/order-invite";
 
 interface OrderMemberRouteContext {
 	params: Promise<{ memberId: string; reference: string }>;
@@ -29,7 +32,7 @@ export const POST = withApiRoute<OrderMemberRouteContext>(
 			const service = commerceService();
 			const access = await service.resolveOrderAccess(reference, accessContext);
 			const detail = await service.readOrderDetail(access);
-			const accommodationTitle = detail.items[0]?.title ?? "your stay";
+			const accommodationTitle = orderInviteTitle(detail.items);
 			const invite = await service.resendMemberInvite(
 				access,
 				memberId,

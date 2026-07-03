@@ -23,7 +23,10 @@ function readEmail(body: unknown): string | null {
  * Invites a person to fill a specific guest slot (owner only). The invite binds
  * the slot at creation, so the owner no longer registers that guest and the
  * invitee lands on exactly this slot. A 24h magic-link token is emailed and
- * never returned to the browser.
+ * never returned to the browser. An email already on the order (invited to
+ * another stay of a multi-booking order) joins through its existing membership
+ * and sees every stay bound to it; an already-active member gains the slot
+ * silently, with no new link.
  */
 export const POST = withApiRoute<OrderGuestInviteRouteContext>(
 	{ name: "orders.guest_invite", rateLimit: { bucket: "mutation" } },
@@ -62,10 +65,10 @@ export const POST = withApiRoute<OrderGuestInviteRouteContext>(
 				{
 					member: {
 						email: invite.email,
-						expiresAt: invite.expiresAt.toISOString(),
+						expiresAt: invite.expiresAt ? invite.expiresAt.toISOString() : null,
 						id: invite.memberId,
 						role: "member",
-						status: "invited",
+						status: invite.status,
 					},
 				},
 				{ status: 201 },

@@ -120,6 +120,20 @@ export function updateCartItem(
 	);
 }
 
+export function removeCartItem(
+	cartId: string,
+	itemId: string,
+	idempotencyKey?: string,
+): Promise<CartResponse> {
+	const query = idempotencyKey
+		? `?idempotencyKey=${encodeURIComponent(idempotencyKey)}`
+		: "";
+	return request<CartResponse>(
+		`/api/cart/${segment(cartId)}/items/${segment(itemId)}${query}`,
+		{ method: "DELETE" },
+	);
+}
+
 export function validateCart(cartId: string): Promise<CartValidationResponse> {
 	return request<CartValidationResponse>(
 		`/api/cart/${segment(cartId)}/validate`,

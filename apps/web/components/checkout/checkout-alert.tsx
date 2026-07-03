@@ -1,8 +1,8 @@
 import { cn } from "@workspace/ui/lib/utils";
-import { AlertCircle, CheckCircle2, Info } from "lucide-react";
+import { AlertCircle, AlertTriangle, CheckCircle2, Info } from "lucide-react";
 import type { ReactNode } from "react";
 
-type AlertVariant = "error" | "info" | "success";
+type AlertVariant = "error" | "info" | "success" | "warning";
 
 interface CheckoutAlertProps {
 	children: ReactNode;
@@ -15,12 +15,15 @@ const VARIANT_STYLES: Record<AlertVariant, string> = {
 	info: "border-border bg-muted text-foreground",
 	success:
 		"border-emerald-500/30 bg-emerald-50 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-200",
+	warning:
+		"border-amber-500/30 bg-amber-50 text-amber-800 dark:bg-amber-950 dark:text-amber-200",
 };
 
 const VARIANT_ICON: Record<AlertVariant, typeof Info> = {
 	error: AlertCircle,
 	info: Info,
 	success: CheckCircle2,
+	warning: AlertTriangle,
 };
 
 /** Normalized inline notice for checkout errors and quote-refresh messages. */

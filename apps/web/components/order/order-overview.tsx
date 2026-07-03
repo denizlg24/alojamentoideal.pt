@@ -27,7 +27,7 @@ function isConfirmationDelayed(detail: OrderDetail): boolean {
 function statusBody(detail: OrderDetail): ReactNode {
 	switch (detail.provisioningSubState) {
 		case "confirmed":
-			return "Your stay is confirmed. We've emailed your booking details and you can manage everything here.";
+			return "Your booking is confirmed. We've emailed your booking details and you can manage everything here.";
 		case "paid-confirming":
 			if (isConfirmationDelayed(detail)) {
 				return (
@@ -137,10 +137,18 @@ function conversationSubtitle(detail: OrderDetail): string {
 	}
 }
 
+/**
+ * Progress copy for the guest-registration row. `guestProgress` is already
+ * scoped to the viewer by `readOrderDetail`: the owner counts every slot in the
+ * order, an invited member only the slots bound to them, so the numbers here
+ * always match what the guests section shows.
+ */
 function guestsSubtitle(detail: OrderDetail): string {
 	const { total, verified } = detail.guestProgress;
 	if (total === 0) {
-		return "Add guest registration details";
+		return detail.role === "owner"
+			? "Add guest registration details"
+			: "No guest slot is assigned to you yet";
 	}
 	if (verified >= total) {
 		return "All guest details are complete";
@@ -234,7 +242,9 @@ export function OrderOverview({ detail }: { detail: OrderDetail }) {
 			{body && <p className="text-sm leading-relaxed">{body}</p>}
 
 			<section className="flex flex-col gap-2">
-				<h2 className="font-heading font-medium text-base">Your stay</h2>
+				<h2 className="font-heading font-medium text-base">
+					{detail.items.length === 1 ? "Your stay" : "Your stays"}
+				</h2>
 				<dl className="divide-y divide-border/60">
 					{detail.items.map((item) => (
 						<div className="py-2 first:pt-0" key={item.id}>

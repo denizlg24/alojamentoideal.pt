@@ -9,15 +9,20 @@ import type {
 } from "@workspace/core/commerce";
 import { Button } from "@workspace/ui/components/button";
 import { Skeleton } from "@workspace/ui/components/skeleton";
+import { ShoppingCart } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSession } from "@/lib/auth/client";
-import { nightsBetween } from "@/lib/catalog/dates";
-import { capacityForGuests } from "@/lib/catalog/guests";
 import { trackCheckoutEvent } from "@/lib/checkout/analytics";
 import * as api from "@/lib/checkout/api-client";
-import { CHECKOUT_CART_STORAGE_KEY } from "@/lib/checkout/api-client";
+import { writeCartNotice } from "@/lib/checkout/cart-notice";
+import {
+	clearStoredCart,
+	notifyCartChanged,
+	readStoredCartId,
+	storeCartId,
+} from "@/lib/checkout/cart-store";
 import { toCheckoutError } from "@/lib/checkout/errors";
 import {
 	formatMinor,
@@ -38,11 +43,7 @@ import {
 	stayKeyToken,
 	writeResumeState,
 } from "@/lib/checkout/resume";
-import { ChangeDatesDialog } from "./change-dates-dialog";
-import {
-	ChangeGuestsDialog,
-	type GuestSelection,
-} from "./change-guests-dialog";
+import { CartSummary } from "./cart-summary";
 import { CheckoutAlert } from "./checkout-alert";
 import { CheckoutAuthPrompt } from "./checkout-auth-prompt";
 import { CheckoutLayout } from "./checkout-layout";
@@ -54,25 +55,18 @@ import { PayTimingStep } from "./pay-timing-step";
 import { CheckoutPaymentElement } from "./payment-element";
 import { PaymentMethodStep } from "./payment-method-step";
 import { PriceBreakdownDialog } from "./price-breakdown-dialog";
-import {
-	ReservationSummary,
-	type ReservationSummaryItem,
-} from "./reservation-summary";
 import { ReviewReservationStep } from "./review-reservation-step";
 import { StripePaymentForm } from "./stripe-payment-form";
 import {
 	applyProfileToContactDraft,
+	type CheckoutSeed,
 	type ContactDraft,
 	contactDraftFromOrderContact,
 	emptyContactDraft,
 	hasBillingDetails,
-	type InitialListing,
-	type InitialStay,
 	profileInputFromContactDraft,
 } from "./types";
 import { usePendingMessages } from "./use-pending-messages";
-
-const CART_STORAGE_KEY = CHECKOUT_CART_STORAGE_KEY;
 
 /**
  * Reserved height for the payment area, shared by the loading skeleton and the
@@ -112,7 +106,7 @@ const PAYMENT_ELEMENT_MESSAGES = [
 	"Connecting to Stripe.",
 ] as const;
 
-type DialogKind = "currency" | "dates" | "guests" | "price" | null;
+type DialogKind = "currency" | "price" | null;
 
 /** Local reference to the frozen draft order; never the client secret. */
 interface DraftOrderRef {
@@ -122,15 +116,19 @@ interface DraftOrderRef {
 }
 
 interface CheckoutControllerProps {
-	initialListing: InitialListing;
-	initialStay: InitialStay;
+	/**
+	 * When set (the `/homes/[id]/book` "Reserve" entry), this stay is ensured in
+	 * the shared cart before checkout renders. The `/checkout` route passes null
+	 * and checks out whatever the cart already holds.
+	 */
+	seed: CheckoutSeed | null;
 }
 
-function activeItemOf(cart: CartDto | null): CartItemDto | null {
-	return cart?.items.find((entry) => entry.status === "active") ?? null;
+function activeItemsOf(cart: CartDto | null): CartItemDto[] {
+	return cart?.items.filter((entry) => entry.status === "active") ?? [];
 }
 
-function stayKeyFromItem(listingId: string, item: CartItemDto): StayKeyInput {
+function stayInputFromItem(item: CartItemDto): StayKeyInput {
 	return {
 		adults: item.adults,
 		checkIn: item.checkIn,
@@ -138,30 +136,14 @@ function stayKeyFromItem(listingId: string, item: CartItemDto): StayKeyInput {
 		children: item.children,
 		guests: item.guests,
 		infants: item.infants,
-		listingId,
+		listingId: item.listingId,
 	};
 }
 
-function pendingSummaryItemOf(
-	stay: InitialStay,
-): ReservationSummaryItem | null {
-	if (!stay.checkIn || !stay.checkOut) {
-		return null;
-	}
-
-	const nights = nightsBetween(stay.checkIn, stay.checkOut);
-	if (!Number.isFinite(nights) || nights < 1) {
-		return null;
-	}
-
-	return {
-		adults: stay.adults,
-		checkIn: stay.checkIn,
-		checkOut: stay.checkOut,
-		children: stay.children,
-		infants: stay.infants,
-		nights,
-	};
+function cartHasStay(cart: CartDto, stayToken: string): boolean {
+	return activeItemsOf(cart).some(
+		(item) => stayKeyToken(stayInputFromItem(item)) === stayToken,
+	);
 }
 
 /**
@@ -228,10 +210,7 @@ function CheckoutBootstrapLoading() {
 	);
 }
 
-export function CheckoutController({
-	initialListing,
-	initialStay,
-}: CheckoutControllerProps) {
+export function CheckoutController({ seed }: CheckoutControllerProps) {
 	const router = useRouter();
 	const pathname = usePathname();
 	const searchParams = useSearchParams();
@@ -240,9 +219,12 @@ export function CheckoutController({
 	// (the auth dialog opened from checkout) updates the booking without a reload.
 	const sessionUserId = session?.user?.id ?? null;
 
-	const [phase, setPhase] = useState<"error" | "loading" | "ready">("loading");
+	const [phase, setPhase] = useState<"empty" | "error" | "loading" | "ready">(
+		"loading",
+	);
 	const [fatalError, setFatalError] = useState<string | null>(null);
 	const [cart, setCart] = useState<CartDto | null>(null);
+	const [failures, setFailures] = useState<Map<string, string>>(new Map());
 	const [contact, setContact] = useState<ContactDraft>(emptyContactDraft);
 	const [contactPrefilled, setContactPrefilled] = useState(false);
 	const [signedIn, setSignedIn] = useState(false);
@@ -267,43 +249,21 @@ export function CheckoutController({
 	const [reviewError, setReviewError] = useState<string | null>(null);
 	const [notice, setNotice] = useState<string | null>(null);
 	const [dialog, setDialog] = useState<DialogKind>(null);
-	const [savingStay, setSavingStay] = useState(false);
-	// Optimistic stay shown in the summary the moment a date/guest edit is
-	// confirmed, so the dialog can close and the stay rows update immediately
-	// while the price re-quote settles. Cleared once the cart catches up.
-	const [optimisticStay, setOptimisticStay] =
-		useState<ReservationSummaryItem | null>(null);
 
 	const bootstrapStarted = useRef(false);
 	// Last profile fetched during prefill; reused so a "save to account" write
 	// preserves residence/nationality the checkout form never collects.
 	const accountProfileRef = useRef<AccountProfile | null>(null);
 
-	const item = activeItemOf(cart);
-	// `prepared`: a draft order exists, so the cart is frozen and any stay or
+	const items = activeItemsOf(cart);
+	// `prepared`: a draft order exists, so the cart is frozen and any cart or
 	// discount edit must rebuild a fresh cart. `hasPayment`: a PaymentIntent (or
 	// zero-total response) exists, so the payment + review steps are shown.
 	const prepared = draftOrder !== null;
 	const hasPayment = payment !== null;
-	const currency = cart?.currency ?? initialListing.currency;
+	const currency = cart?.currency ?? "EUR";
 	const totalLabel = cart ? formatMinor(cart.totalMinor, currency) : "";
-	const pendingSummaryItem = pendingSummaryItemOf(initialStay);
-
-	const stayKey = useMemo(
-		() =>
-			stayKeyToken({
-				adults: initialStay.adults,
-				// Dates may be absent; the bootstrap errors out before resume runs, so
-				// the token value for a dateless stay is never matched against.
-				checkIn: initialStay.checkIn ?? "",
-				checkOut: initialStay.checkOut ?? "",
-				children: initialStay.children,
-				guests: initialStay.guests,
-				infants: initialStay.infants,
-				listingId: initialListing.id,
-			}),
-		[initialListing.id, initialStay],
-	);
+	const hasFailures = failures.size > 0;
 
 	// Same-origin path the auth pages return to after sign-in.
 	const authNext = useMemo(() => {
@@ -311,8 +271,74 @@ export function CheckoutController({
 		return query ? `${pathname}?${query}` : pathname;
 	}, [pathname, searchParams]);
 
-	// --- Bootstrap: load or create the cart, ensure the stay item, validate. ---
-	// biome-ignore lint/correctness/useExhaustiveDependencies: bootstrap must run exactly once on mount; the bootstrapStarted ref guards re-entry and the seed props are stable for the instance.
+	const applyValidation = useCallback((validated: CartValidationResponse) => {
+		setCart(validated.cart);
+		notifyCartChanged(validated.cart);
+		setFailures(
+			new Map(
+				validated.failures.map((failure) => [failure.itemId, failure.message]),
+			),
+		);
+		const first = validated.failures[0];
+		setNotice(first ? first.message : null);
+	}, []);
+
+	/**
+	 * Creates a fresh mutable cart holding the given stays. Used when the current
+	 * cart is frozen (converted into a draft order) and must be edited or retried.
+	 * Stays whose dates went unavailable in the meantime are skipped rather than
+	 * failing the whole rebuild; the caller reports which stays were dropped.
+	 */
+	const rebuildCartFromItems = useCallback(
+		async (
+			stays: StayKeyInput[],
+		): Promise<{ cart: CartDto; skippedStays: StayKeyInput[] }> => {
+			const created = (await api.createCart()).cart;
+			storeCartId(created.id);
+			const skippedStays: StayKeyInput[] = [];
+			for (const stay of stays) {
+				try {
+					await api.addCartItem(created.id, {
+						adults: stay.adults,
+						checkIn: stay.checkIn,
+						checkOut: stay.checkOut,
+						children: stay.children,
+						clientMutationId: cartItemClientMutationId(stay),
+						guests: stay.guests,
+						idempotencyKey: cartItemIdempotencyKey(stay),
+						infants: stay.infants,
+						listingId: stay.listingId,
+					});
+				} catch {
+					skippedStays.push(stay);
+				}
+			}
+			const validated = await api.validateCart(created.id);
+			applyValidation(validated);
+			setDraftOrder(null);
+			setPayment(null);
+			setReviewError(null);
+			setTermsAccepted(false);
+			clearResumeState();
+			return { cart: validated.cart, skippedStays };
+		},
+		[applyValidation],
+	);
+
+	/** Rebuilds a mutable cart from the current (frozen) cart's stays. */
+	const rebuildCurrentCart = useCallback(async (): Promise<{
+		cart: CartDto;
+		skippedStays: StayKeyInput[];
+	} | null> => {
+		if (items.length === 0) {
+			return null;
+		}
+		return rebuildCartFromItems(items.map(stayInputFromItem));
+	}, [items, rebuildCartFromItems]);
+
+	// --- Bootstrap: resume a payable order, or converge the shared cart and the
+	// seeded stay (when arriving from "Reserve"), then validate. ---
+	// biome-ignore lint/correctness/useExhaustiveDependencies: bootstrap must run exactly once on mount; the bootstrapStarted ref guards re-entry and the seed prop is stable for the instance.
 	useEffect(() => {
 		if (bootstrapStarted.current) {
 			return;
@@ -320,13 +346,26 @@ export function CheckoutController({
 		bootstrapStarted.current = true;
 
 		const run = async () => {
-			if (!initialStay.checkIn || !initialStay.checkOut) {
+			if (seed && (!seed.checkIn || !seed.checkOut)) {
 				setFatalError(
 					"This booking is missing its dates. Please choose your dates on the home page.",
 				);
 				setPhase("error");
 				return;
 			}
+			const seedStay: StayKeyInput | null =
+				seed?.checkIn && seed.checkOut
+					? {
+							adults: seed.adults,
+							checkIn: seed.checkIn,
+							checkOut: seed.checkOut,
+							children: seed.children,
+							guests: seed.guests,
+							infants: seed.infants,
+							listingId: seed.listingId,
+						}
+					: null;
+			const seedToken = seedStay ? stayKeyToken(seedStay) : null;
 
 			// Adopts a recovered draft order + PaymentIntent into checkout state,
 			// keeping the Payment Element mounted on the review step.
@@ -335,7 +374,7 @@ export function CheckoutController({
 				intent: PaymentIntentResponse,
 			) => {
 				setCart(resumedCart);
-				sessionStorage.setItem(CART_STORAGE_KEY, resumedCart.id);
+				storeCartId(resumedCart.id);
 				setDraftOrder({
 					checkoutExpiresAt: intent.checkoutExpiresAt,
 					orderId: intent.orderId,
@@ -348,7 +387,6 @@ export function CheckoutController({
 					checkoutExpiresAt: intent.checkoutExpiresAt,
 					orderId: intent.orderId,
 					publicReference: intent.publicReference,
-					stayKey,
 				});
 				setNotice("Your payment step is ready. Please review your details.");
 			};
@@ -386,14 +424,23 @@ export function CheckoutController({
 			};
 
 			try {
-				// 1) Resume an in-progress payment for this exact stay from stored,
-				//    non-secret metadata before touching the cart.
+				const storedId = readStoredCartId();
+
+				// 1) Resume an in-progress payment from stored, non-secret metadata
+				//    before touching the cart. Only when it still points at the shared
+				//    cart (a later cart replaces it) and, when a stay was seeded, the
+				//    resumed order actually contains that stay.
 				const resume = readResumeState();
 				if (resume) {
-					if (isResumeUsable(resume, stayKey, Date.now())) {
+					const matchesSharedCart =
+						storedId === null || storedId === resume.cartId;
+					if (matchesSharedCart && isResumeUsable(resume, Date.now())) {
 						try {
 							const resumedCart = (await api.getCart(resume.cartId)).cart;
-							if (await tryResume(resumedCart, resume.orderId)) {
+							if (
+								(seedToken === null || cartHasStay(resumedCart, seedToken)) &&
+								(await tryResume(resumedCart, resume.orderId))
+							) {
 								setPhase("ready");
 								return;
 							}
@@ -403,31 +450,26 @@ export function CheckoutController({
 							}
 							clearResumeState();
 						}
-					} else {
+					} else if (!matchesSharedCart) {
 						clearResumeState();
 					}
 				}
 
-				// 2) Load the stored cart, if any.
+				// 2) Load the shared cart, if any. Keep a converted cart around long
+				//    enough to recover its payable order (covers lost resume metadata).
 				let loaded: CartDto | null = null;
-				const storedId = sessionStorage.getItem(CART_STORAGE_KEY);
 				if (storedId) {
 					try {
 						loaded = (await api.getCart(storedId)).cart;
 					} catch {
-						sessionStorage.removeItem(CART_STORAGE_KEY);
+						clearStoredCart();
 					}
 				}
 
-				// A stored cart already converted to an order: recover its order for
-				// the same stay before discarding it (covers lost resume metadata).
+				// Stays to carry into a fresh cart when the stored one is frozen.
+				let carryStays: StayKeyInput[] = [];
 				if (loaded && loaded.status === "converted") {
-					const convertedItem = activeItemOf(loaded);
-					const matchesStay =
-						convertedItem != null &&
-						stayKeyToken(stayKeyFromItem(initialListing.id, convertedItem)) ===
-							stayKey;
-					if (matchesStay) {
+					if (seedToken === null || cartHasStay(loaded, seedToken)) {
 						try {
 							if (await tryResume(loaded, undefined)) {
 								setPhase("ready");
@@ -439,70 +481,77 @@ export function CheckoutController({
 							}
 						}
 					}
+					carryStays = activeItemsOf(loaded).map(stayInputFromItem);
 					loaded = null;
 				}
 
-				const staySeed: StayKeyInput = {
-					adults: initialStay.adults,
-					checkIn: initialStay.checkIn,
-					checkOut: initialStay.checkOut,
-					children: initialStay.children,
-					guests: initialStay.guests,
-					infants: initialStay.infants,
-					listingId: initialListing.id,
-				};
-				const targetStayKey = stayKeyToken(staySeed);
-
 				if (loaded?.status !== "draft") {
 					loaded = (await api.createCart()).cart;
-					sessionStorage.setItem(CART_STORAGE_KEY, loaded.id);
+					storeCartId(loaded.id);
 				}
 
-				// `/book` books a single stay; the multi-item cart (multiple stays +
-				// experiences in one purchase) is a separate, future concept. Reuse the
-				// stored draft only when it already holds exactly this stay (e.g. a page
-				// refresh). Otherwise start clean, so a stale stay from an earlier
-				// reserve never lingers as a second active item, which would surface its
-				// guest count in the summary and inflate the cart total by summing both.
-				const activeItems = loaded.items.filter(
-					(entry) => entry.status === "active",
-				);
-				const [firstActive] = activeItems;
-				const alreadyExactStay =
-					activeItems.length === 1 &&
-					firstActive !== undefined &&
-					stayKeyToken(stayKeyFromItem(initialListing.id, firstActive)) ===
-						targetStayKey;
-
-				if (!alreadyExactStay) {
-					if (activeItems.length > 0) {
-						loaded = (await api.createCart()).cart;
-						sessionStorage.setItem(CART_STORAGE_KEY, loaded.id);
+				let seedOverlapNotice: string | null = null;
+				for (const stay of carryStays) {
+					try {
+						loaded = (
+							await api.addCartItem(loaded.id, {
+								adults: stay.adults,
+								checkIn: stay.checkIn,
+								checkOut: stay.checkOut,
+								children: stay.children,
+								clientMutationId: cartItemClientMutationId(stay),
+								guests: stay.guests,
+								idempotencyKey: cartItemIdempotencyKey(stay),
+								infants: stay.infants,
+								listingId: stay.listingId,
+							})
+						).cart;
+					} catch {
+						// A carried stay whose dates went unavailable is dropped; the
+						// validation notice below covers the rest.
 					}
-					loaded = (
-						await api.addCartItem(loaded.id, {
-							adults: initialStay.adults,
-							checkIn: initialStay.checkIn,
-							checkOut: initialStay.checkOut,
-							children: initialStay.children,
-							clientMutationId: cartItemClientMutationId(staySeed),
-							guests: initialStay.guests,
-							idempotencyKey: cartItemIdempotencyKey(staySeed),
-							infants: initialStay.infants,
-							listingId: initialListing.id,
-						})
-					).cart;
 				}
 
-				const validated = await api.validateCart(loaded.id);
-				setCart(validated.cart);
-				if (!validated.valid) {
-					handleValidationFailure(validated);
+				if (seedStay && seedToken && !cartHasStay(loaded, seedToken)) {
+					try {
+						loaded = (
+							await api.addCartItem(loaded.id, {
+								adults: seedStay.adults,
+								checkIn: seedStay.checkIn,
+								checkOut: seedStay.checkOut,
+								children: seedStay.children,
+								clientMutationId: cartItemClientMutationId(seedStay),
+								guests: seedStay.guests,
+								idempotencyKey: cartItemIdempotencyKey(seedStay),
+								infants: seedStay.infants,
+								listingId: seedStay.listingId,
+							})
+						).cart;
+					} catch (error) {
+						const err = toCheckoutError(error);
+						if (err.code !== "cart_item_overlap") {
+							throw err;
+						}
+						seedOverlapNotice = err.message;
+					}
+				}
+
+				if (activeItemsOf(loaded).length === 0) {
+					setCart(loaded);
+					notifyCartChanged(loaded);
+					setPhase("empty");
+					return;
+				}
+
+				applyValidation(await api.validateCart(loaded.id));
+				if (seedOverlapNotice) {
+					setNotice(seedOverlapNotice);
 				}
 				setPhase("ready");
 				trackCheckoutEvent("checkout_started", {
-					currency: validated.cart.currency,
-					listingId: initialListing.id,
+					currency: loaded.currency,
+					itemCount: activeItemsOf(loaded).length,
+					...(seedStay ? { listingId: seedStay.listingId } : {}),
 				});
 			} catch (error) {
 				setFatalError(toCheckoutError(error).message);
@@ -611,20 +660,6 @@ export function CheckoutController({
 		4500,
 	);
 
-	const handleValidationFailure = useCallback(
-		(result: CartValidationResponse) => {
-			const failure = result.failures[0];
-			if (!failure) {
-				return;
-			}
-			setNotice(failure.message);
-			if (/date|unavailable|quote/i.test(failure.code)) {
-				setDialog("dates");
-			}
-		},
-		[],
-	);
-
 	const buildContactInput = useCallback((): api.CheckoutContactInput => {
 		const address: api.CheckoutBillingAddress = {};
 		if (contact.line1.trim()) address.line1 = contact.line1.trim();
@@ -655,119 +690,9 @@ export function CheckoutController({
 		};
 	}, [contact]);
 
-	// Creates a fresh cart with the given stay (used to edit after the cart has
-	// been converted by draft-order creation, which freezes the original cart).
-	const rebuildCart = useCallback(
-		async (stay: StayKeyInput): Promise<CartDto> => {
-			const created = (await api.createCart()).cart;
-			sessionStorage.setItem(CART_STORAGE_KEY, created.id);
-			await api.addCartItem(created.id, {
-				adults: stay.adults,
-				checkIn: stay.checkIn,
-				checkOut: stay.checkOut,
-				children: stay.children,
-				clientMutationId: cartItemClientMutationId(stay),
-				guests: stay.guests,
-				idempotencyKey: cartItemIdempotencyKey(stay),
-				infants: stay.infants,
-				listingId: stay.listingId,
-			});
-			const validated = await api.validateCart(created.id);
-			setCart(validated.cart);
-			setDraftOrder(null);
-			setPayment(null);
-			setReviewError(null);
-			setTermsAccepted(false);
-			clearResumeState();
-			return validated.cart;
-		},
-		[],
-	);
-
-	const applyStayChange = useCallback(
-		async (next: Partial<StayKeyInput>) => {
-			if (!cart || !item) {
-				return;
-			}
-			const base = stayKeyFromItem(initialListing.id, item);
-			const merged: StayKeyInput = { ...base, ...next };
-
-			// Reflect the new stay in the summary and close the dialog immediately;
-			// only the price re-quote stays pending (the price rows skeleton out).
-			// On failure the `finally` clears this, reverting to the cart's stay.
-			const nights = nightsBetween(merged.checkIn, merged.checkOut);
-			if (Number.isFinite(nights) && nights >= 1) {
-				setOptimisticStay({
-					adults: merged.adults,
-					checkIn: merged.checkIn,
-					checkOut: merged.checkOut,
-					children: merged.children,
-					infants: merged.infants,
-					nights,
-				});
-			}
-			setDialog(null);
-			setSavingStay(true);
-			setReviewError(null);
-			try {
-				if (prepared) {
-					await rebuildCart(merged);
-					setNotice(
-						"Your stay was updated. Please re-enter your payment details.",
-					);
-				} else {
-					await api.updateCartItem(cart.id, item.id, {
-						adults: merged.adults,
-						checkIn: merged.checkIn,
-						checkOut: merged.checkOut,
-						children: merged.children,
-						guests: merged.guests,
-						idempotencyKey: randomIdempotencyKey("stay"),
-						infants: merged.infants,
-					});
-					const validated = await api.validateCart(cart.id);
-					setCart(validated.cart);
-					if (!validated.valid) {
-						handleValidationFailure(validated);
-					}
-				}
-			} catch (error) {
-				setNotice(toCheckoutError(error).message);
-			} finally {
-				setSavingStay(false);
-				setOptimisticStay(null);
-			}
-		},
-		[
-			cart,
-			handleValidationFailure,
-			initialListing.id,
-			item,
-			prepared,
-			rebuildCart,
-		],
-	);
-
-	const handleSaveDates = useCallback(
-		(next: { checkIn: string; checkOut: string }) =>
-			applyStayChange({ checkIn: next.checkIn, checkOut: next.checkOut }),
-		[applyStayChange],
-	);
-
-	const handleSaveGuests = useCallback(
-		(next: GuestSelection) =>
-			applyStayChange({
-				adults: next.adults,
-				children: next.children,
-				guests: capacityForGuests(next.adults, next.children),
-				infants: next.infants,
-			}),
-		[applyStayChange],
-	);
-
 	const handleApplyDiscount = useCallback(
 		async (code: string) => {
-			if (!cart || !item) {
+			if (!cart) {
 				return;
 			}
 			setDiscountPending(true);
@@ -775,8 +700,11 @@ export function CheckoutController({
 			try {
 				let cartId = cart.id;
 				if (prepared) {
-					cartId = (await rebuildCart(stayKeyFromItem(initialListing.id, item)))
-						.id;
+					const rebuilt = await rebuildCurrentCart();
+					if (!rebuilt) {
+						return;
+					}
+					cartId = rebuilt.cart.id;
 				}
 				const result = await api.applyDiscount(cartId, {
 					code,
@@ -789,18 +717,18 @@ export function CheckoutController({
 				setDiscountPending(false);
 			}
 		},
-		[cart, initialListing.id, item, prepared, rebuildCart],
+		[cart, prepared, rebuildCurrentCart],
 	);
 
 	const handleRemoveDiscount = useCallback(async () => {
-		if (!cart || !item) {
+		if (!cart) {
 			return;
 		}
 		setDiscountPending(true);
 		setDiscountError(null);
 		try {
 			if (prepared) {
-				await rebuildCart(stayKeyFromItem(initialListing.id, item));
+				await rebuildCurrentCart();
 			} else {
 				const result = await api.removeDiscount(cart.id);
 				setCart(result.cart);
@@ -810,7 +738,7 @@ export function CheckoutController({
 		} finally {
 			setDiscountPending(false);
 		}
-	}, [cart, initialListing.id, item, prepared, rebuildCart]);
+	}, [cart, prepared, rebuildCurrentCart]);
 
 	// Best-effort: persist the entered contact/billing to the account profile
 	// when the guest opted in. Never blocks checkout; failures (e.g. a phone the
@@ -839,8 +767,40 @@ export function CheckoutController({
 		}
 	}, [contact, saveToAccount, signedIn]);
 
+	/**
+	 * Recovers from a stay that failed at draft/hold time: rebuild a fresh
+	 * mutable cart from the frozen one (dropping stays that no longer quote),
+	 * hand the failure message to the cart page, and send the guest there. The
+	 * cart page shows the message, names any stays the rebuild dropped, and
+	 * flags the remaining failures inline with edit controls.
+	 */
+	const recoverToCart = useCallback(
+		async (message: string) => {
+			const previousItems = items;
+			const rebuilt = await rebuildCurrentCart();
+			const removedTitles = (rebuilt?.skippedStays ?? [])
+				.map(
+					(stay) =>
+						previousItems.find(
+							(item) =>
+								stayKeyToken(stayInputFromItem(item)) === stayKeyToken(stay),
+						)?.title ?? null,
+				)
+				.filter((title): title is string => title !== null);
+			writeCartNotice({ message, removedTitles });
+			router.push("/cart");
+		},
+		[items, rebuildCurrentCart, router],
+	);
+
 	const handleContactSubmit = useCallback(async () => {
 		if (!cart) {
+			return;
+		}
+		if (hasFailures) {
+			setContactError(
+				"Some stays in your cart need attention. Please review your cart before paying.",
+			);
 			return;
 		}
 		setPreparing(true);
@@ -880,7 +840,6 @@ export function CheckoutController({
 					checkoutExpiresAt: intent.checkoutExpiresAt,
 					orderId: intent.orderId,
 					publicReference: intent.publicReference,
-					stayKey,
 				});
 			}
 
@@ -893,34 +852,36 @@ export function CheckoutController({
 			void saveContactToAccount();
 		} catch (error) {
 			const err = toCheckoutError(error);
-			// Reserve-first: the provider hold was rejected (dates gone) before any
-			// charge, and the order was failed server-side. Rebuild a fresh cart for
-			// the same stay and prompt new dates instead of stranding the guest.
-			if (err.code === "reservation_unavailable" && item) {
-				await rebuildCart(stayKeyFromItem(initialListing.id, item));
-				setDialog("dates");
-				setNotice(err.message);
+			// Reserve-first: a provider hold was rejected (dates gone) before any
+			// charge, and the order was failed server-side. Rebuild a fresh cart
+			// and let the guest fix the affected stay on the cart page.
+			if (err.code === "reservation_unavailable") {
+				await recoverToCart(err.message);
 				return;
 			}
 			// The cached quote no longer holds: revalidation at draft-order creation
-			// found the dates/price changed, so the guest must adjust before paying.
+			// found the dates/price changed. The cart is still mutable, so re-run
+			// validation to flag the affected stays.
 			if (
-				(err.code === "quote_revalidation_failed" ||
-					err.code === "dates_unavailable") &&
-				item
+				err.code === "quote_revalidation_failed" ||
+				err.code === "dates_unavailable"
 			) {
 				trackCheckoutEvent("checkout_validation_failed", {
-					listingId: initialListing.id,
+					itemCount: items.length,
 				});
-				setDialog("dates");
+				try {
+					applyValidation(await api.validateCart(cart.id));
+				} catch {
+					// The notice below still explains what happened.
+				}
 				setNotice(err.message);
 				return;
 			}
-			if (ORDER_RESTART_CODES.has(err.code) && item) {
+			if (ORDER_RESTART_CODES.has(err.code)) {
 				clearResumeState();
 				setDraftOrder(null);
 				setPayment(null);
-				await rebuildCart(stayKeyFromItem(initialListing.id, item));
+				await rebuildCurrentCart();
 				setNotice(
 					"Your payment session expired. We refreshed your cart so you can continue.",
 				);
@@ -931,14 +892,15 @@ export function CheckoutController({
 			setPreparing(false);
 		}
 	}, [
+		applyValidation,
 		buildContactInput,
 		cart,
 		draftOrder,
-		initialListing.id,
+		hasFailures,
+		items.length,
+		rebuildCurrentCart,
+		recoverToCart,
 		saveContactToAccount,
-		stayKey,
-		item,
-		rebuildCart,
 	]);
 
 	// Edits the contact on the existing draft order in place. The contact does
@@ -981,7 +943,7 @@ export function CheckoutController({
 			});
 			if (refreshed.kind !== "payment_intent") {
 				setReviewError(
-					"This payment session could not be confirmed. Please start again from the home.",
+					"This payment session could not be confirmed. Please start again from your cart.",
 				);
 				return false;
 			}
@@ -1010,28 +972,25 @@ export function CheckoutController({
 				checkoutExpiresAt: hold.checkoutExpiresAt,
 				orderId: hold.orderId,
 				publicReference: hold.publicReference,
-				stayKey,
 			});
 			return true;
 		} catch (error) {
 			const err = toCheckoutError(error);
 			trackCheckoutEvent("payment_failed", {
-				listingId: initialListing.id,
+				itemCount: items.length,
 			});
 			// The provider hold became unavailable before charging: rebuild a fresh
-			// cart for the same stay and prompt new dates.
-			if (err.code === "reservation_unavailable" && item) {
-				await rebuildCart(stayKeyFromItem(initialListing.id, item));
-				setDialog("dates");
-				setNotice(err.message);
+			// cart and let the guest fix the affected stay on the cart page.
+			if (err.code === "reservation_unavailable") {
+				await recoverToCart(err.message);
 				return false;
 			}
 			// A genuinely non-payable order (expired/cancelled checkout window) can no
-			// longer be charged. Rebuild a fresh, mutable cart for the same stay so the
-			// guest restarts cleanly instead of being stranded on the frozen, converted
-			// cart; rebuildCart clears payment/draftOrder/resume.
-			if (ORDER_RESTART_CODES.has(err.code) && item) {
-				await rebuildCart(stayKeyFromItem(initialListing.id, item));
+			// longer be charged. Rebuild a fresh, mutable cart with the same stays so
+			// the guest restarts cleanly instead of being stranded on the frozen,
+			// converted cart; rebuildCurrentCart clears payment/draftOrder/resume.
+			if (ORDER_RESTART_CODES.has(err.code)) {
+				await rebuildCurrentCart();
 				setNotice(
 					"Your payment session expired. We refreshed your cart so you can continue.",
 				);
@@ -1043,17 +1002,19 @@ export function CheckoutController({
 	}, [
 		cart,
 		draftOrder,
-		initialListing.id,
-		item,
+		items.length,
 		payment,
-		rebuildCart,
-		stayKey,
+		rebuildCurrentCart,
+		recoverToCart,
 	]);
 
 	const navigateToCompletion = useCallback(() => {
 		if (!payment) {
 			return;
 		}
+		// The cart is converted into the order at this point; drop the stored id
+		// so the header badge zeroes and the next visit starts a fresh cart.
+		clearStoredCart();
 		router.push(
 			`/booking/complete?order=${encodeURIComponent(payment.publicReference)}`,
 		);
@@ -1084,8 +1045,8 @@ export function CheckoutController({
 			);
 		} catch (error) {
 			const err = toCheckoutError(error);
-			if (ORDER_RESTART_CODES.has(err.code) && item) {
-				await rebuildCart(stayKeyFromItem(initialListing.id, item));
+			if (ORDER_RESTART_CODES.has(err.code)) {
+				await rebuildCurrentCart();
 				setNotice(
 					"Your booking session expired. We refreshed your cart so you can continue.",
 				);
@@ -1096,10 +1057,8 @@ export function CheckoutController({
 	}, [
 		cart,
 		draftOrder,
-		initialListing.id,
-		item,
 		navigateToCompletion,
-		rebuildCart,
+		rebuildCurrentCart,
 		termsAccepted,
 	]);
 
@@ -1120,12 +1079,32 @@ export function CheckoutController({
 				</h1>
 				<p className="text-muted-foreground text-sm">{fatalError}</p>
 				<Button asChild>
-					<Link href={`/homes/${initialListing.id}`}>Back to the home</Link>
+					<Link href={seed ? `/homes/${seed.listingId}` : "/homes"}>
+						{seed ? "Back to the home" : "Browse homes"}
+					</Link>
 				</Button>
 			</div>
 		);
 	}
 
+	if (phase === "empty") {
+		return (
+			<div className="mx-auto flex w-full max-w-md flex-col items-center gap-4 px-4 py-16 text-center">
+				<ShoppingCart className="size-10 text-muted-foreground" />
+				<h1 className="font-heading font-semibold text-xl">
+					Your cart is empty
+				</h1>
+				<p className="text-muted-foreground text-sm">
+					Find a home you love and add your stay to book it here.
+				</p>
+				<Button asChild>
+					<Link href="/homes">Browse homes</Link>
+				</Button>
+			</div>
+		);
+	}
+
+	const multipleStays = items.length > 1;
 	const payTimingState = payTimingDone ? "complete" : "active";
 	// Step 2 stays active through payment collection so the Stripe Payment
 	// Element stays mounted until `confirmPayment` runs; it never collapses to a
@@ -1223,7 +1202,7 @@ export function CheckoutController({
 				onError={(message) => {
 					setReviewError(message);
 					trackCheckoutEvent("payment_failed", {
-						listingId: initialListing.id,
+						itemCount: items.length,
 					});
 				}}
 				onValidate={validateBeforePay}
@@ -1241,6 +1220,23 @@ export function CheckoutController({
 			</Button>
 		);
 
+	const staySummary = (
+		<div className="flex flex-col gap-1.5">
+			{items.map((item) => (
+				<span key={item.id}>
+					{multipleStays ? `${item.title}: ` : ""}
+					{formatStayRangeLong(item.checkIn, item.checkOut)} ·{" "}
+					{nightsLabel(item.nights)} ·{" "}
+					{guestSummaryLabel({
+						adults: item.adults,
+						children: item.children,
+						infants: item.infants,
+					})}
+				</span>
+			))}
+		</div>
+	);
+
 	const stepsTail = (
 		<>
 			<PaymentMethodStep onEdit={() => setPayment(null)} state={paymentState}>
@@ -1248,7 +1244,11 @@ export function CheckoutController({
 			</PaymentMethodStep>
 			{showReview && (
 				<ReviewReservationStep
-					cancellationSummary="Free cancellation windows and refund terms follow this home's policy. The Alojamento Ideal team will share confirmation details by email."
+					cancellationSummary={
+						multipleStays
+							? "Free cancellation windows and refund terms follow each home's policy. The Alojamento Ideal team will share confirmation details by email."
+							: "Free cancellation windows and refund terms follow this home's policy. The Alojamento Ideal team will share confirmation details by email."
+					}
 					confirmSlot={confirmSlot}
 					contactSummary={
 						<span>
@@ -1258,6 +1258,7 @@ export function CheckoutController({
 						</span>
 					}
 					error={reviewError}
+					multipleStays={multipleStays}
 					onEdit={() => setEditingContact(true)}
 					onTermsChange={setTermsAccepted}
 					paymentSummary={
@@ -1266,19 +1267,7 @@ export function CheckoutController({
 							: "No payment required"
 					}
 					state={reviewState}
-					staySummary={
-						item ? (
-							<span>
-								{formatStayRangeLong(item.checkIn, item.checkOut)} ·{" "}
-								{nightsLabel(item.nights)} ·{" "}
-								{guestSummaryLabel({
-									adults: item.adults,
-									children: item.children,
-									infants: item.infants,
-								})}
-							</span>
-						) : null
-					}
+					staySummary={staySummary}
 					termsAccepted={termsAccepted}
 				/>
 			)}
@@ -1290,6 +1279,17 @@ export function CheckoutController({
 			{notice && (
 				<CheckoutAlert title="Heads up" variant="info">
 					{notice}
+				</CheckoutAlert>
+			)}
+			{hasFailures && (
+				<CheckoutAlert title="Some stays need attention" variant="warning">
+					<span>
+						A stay in your cart is no longer available as selected.{" "}
+						<Link className="underline" href="/cart">
+							Review your cart
+						</Link>{" "}
+						to fix or remove it before paying.
+					</span>
 				</CheckoutAlert>
 			)}
 			<PayTimingStep
@@ -1318,15 +1318,13 @@ export function CheckoutController({
 		</>
 	);
 
-	const hasReadyItem = cart !== null && item !== null;
-	const summaryItem = item ?? (phase === "loading" ? pendingSummaryItem : null);
 	const summary = (
-		<ReservationSummary
-			canChangeStay={hasReadyItem && !savingStay}
-			canOpenPriceDetails={hasReadyItem && !savingStay}
-			cart={cart}
+		<CartSummary
+			canEditCart={!prepared && phase === "ready"}
+			canOpenPriceDetails={phase === "ready" && items.length > 0}
+			cart={phase === "loading" ? null : cart}
 			discountSlot={
-				hasReadyItem ? (
+				phase === "ready" && items.length > 0 ? (
 					<DiscountCodeForm
 						appliedCode={cart?.appliedDiscount?.promotionCode ?? null}
 						error={discountError}
@@ -1336,13 +1334,9 @@ export function CheckoutController({
 					/>
 				) : null
 			}
-			item={optimisticStay ?? summaryItem}
-			listing={initialListing}
-			onChangeDates={() => setDialog("dates")}
-			onChangeGuests={() => setDialog("guests")}
+			items={items}
 			onOpenCurrency={() => setDialog("currency")}
 			onOpenPriceDetails={() => setDialog("price")}
-			pricePending={savingStay}
 		/>
 	);
 
@@ -1353,35 +1347,14 @@ export function CheckoutController({
 				summary={summary}
 			/>
 
-			{cart && item && (
+			{cart && items.length > 0 && (
 				<PriceBreakdownDialog
 					cart={cart}
-					item={item}
+					items={items}
 					onOpenChange={(open) => setDialog(open ? "price" : null)}
 					open={dialog === "price"}
 				/>
 			)}
-			<ChangeDatesDialog
-				listingId={initialListing.id}
-				minNights={initialListing.minNights}
-				onOpenChange={(open) => setDialog(open ? "dates" : null)}
-				onSave={handleSaveDates}
-				open={dialog === "dates"}
-				saving={savingStay}
-				value={item ? { checkIn: item.checkIn, checkOut: item.checkOut } : null}
-			/>
-			<ChangeGuestsDialog
-				maxGuests={initialListing.maxGuests}
-				onOpenChange={(open) => setDialog(open ? "guests" : null)}
-				onSave={handleSaveGuests}
-				open={dialog === "guests"}
-				saving={savingStay}
-				value={{
-					adults: item?.adults ?? initialStay.adults,
-					children: item?.children ?? initialStay.children,
-					infants: item?.infants ?? initialStay.infants,
-				}}
-			/>
 			<CurrencyDialog
 				currency={currency}
 				onOpenChange={(open) => setDialog(open ? "currency" : null)}

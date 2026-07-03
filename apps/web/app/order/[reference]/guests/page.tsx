@@ -1,4 +1,5 @@
 import * as Sentry from "@sentry/nextjs";
+import { CommerceError } from "@workspace/core/commerce";
 import { logger } from "@workspace/core/observability";
 import type { Metadata } from "next";
 import { Suspense } from "react";
@@ -56,9 +57,24 @@ async function OrderGuestsRoute({ params }: OrderGuestsPageProps) {
 					title: item.title,
 					unavailable: false,
 				};
-			} catch {
-				// A member with no slot left (or a provider hiccup) should still see the
-				// section rather than a 500; the slot simply reads as unavailable.
+			} catch (error) {
+				const unavailable = {
+					bookingId: item.providerBooking.id,
+					guests: [],
+					title: item.title,
+					unavailable: true,
+				};
+				// An invited member is scoped to the slot they were invited to fill, so
+				// a booking with no slot for them is an expected access boundary, not a
+				// failure; it simply reads as unavailable.
+				if (
+					error instanceof CommerceError &&
+					(error.code === "order_full" || error.code === "order_access_denied")
+				) {
+					return unavailable;
+				}
+				// A genuine read failure should still render the section rather than a
+				// 500, but it does get logged.
 				logger.error(
 					`Failed to read guests for booking ${item.providerBooking.id} in order ${reference}.`,
 					{
@@ -78,12 +94,7 @@ async function OrderGuestsRoute({ params }: OrderGuestsPageProps) {
 						level: "error",
 					},
 				);
-				return {
-					bookingId: item.providerBooking.id,
-					guests: [],
-					title: item.title,
-					unavailable: true,
-				};
+				return unavailable;
 			}
 		}),
 	);

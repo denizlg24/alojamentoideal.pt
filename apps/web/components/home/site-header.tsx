@@ -14,6 +14,7 @@ import { KeyRound, Menu } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
 import { useEffect, useState } from "react";
+import { CartButton } from "@/components/cart/cart-button";
 import logo from "@/public/alojamento-ideal-logo.png";
 import { MobileAuthSection, UserMenu } from "./user-menu";
 
@@ -79,52 +80,56 @@ export function SiteHeader({ solid = false }: { solid?: boolean }) {
 						</Link>
 					</Button>
 
+					<CartButton opaque={opaque} />
 					<UserMenu opaque={opaque} />
 				</nav>
 
-				<Sheet>
-					<SheetTrigger asChild>
-						<Button
-							variant="ghost"
-							size="icon"
-							aria-label="Open menu"
-							className={cn(
-								"rounded-full md:hidden",
-								opaque
-									? "text-foreground hover:text-foreground"
-									: "text-white hover:bg-white/15 hover:text-white",
-							)}
-						>
-							<Menu className="size-5" />
-						</Button>
-					</SheetTrigger>
-					<SheetContent side="right" className="w-72">
-						<SheetHeader>
-							<SheetTitle>Menu</SheetTitle>
-						</SheetHeader>
-						<nav className="flex flex-col gap-1 px-2">
-							{NAV_ITEMS.map((item) => (
-								<SheetClose asChild key={item.href}>
-									<Link
-										href={item.href}
-										className="rounded-md px-3 py-2 font-medium text-foreground/90 transition-colors hover:bg-accent hover:text-foreground"
-									>
-										{item.label}
-									</Link>
+				<div className="flex items-center gap-1 md:hidden">
+					<CartButton opaque={opaque} />
+					<Sheet>
+						<SheetTrigger asChild>
+							<Button
+								variant="ghost"
+								size="icon"
+								aria-label="Open menu"
+								className={cn(
+									"rounded-full",
+									opaque
+										? "text-foreground hover:text-foreground"
+										: "text-white hover:bg-white/15 hover:text-white",
+								)}
+							>
+								<Menu className="size-5" />
+							</Button>
+						</SheetTrigger>
+						<SheetContent side="right" className="w-72">
+							<SheetHeader>
+								<SheetTitle>Menu</SheetTitle>
+							</SheetHeader>
+							<nav className="flex flex-col gap-1 px-2">
+								{NAV_ITEMS.map((item) => (
+									<SheetClose asChild key={item.href}>
+										<Link
+											href={item.href}
+											className="rounded-md px-3 py-2 font-medium text-foreground/90 transition-colors hover:bg-accent hover:text-foreground"
+										>
+											{item.label}
+										</Link>
+									</SheetClose>
+								))}
+								<MobileAuthSection />
+								<SheetClose asChild>
+									<Button asChild className="mt-2 rounded-full">
+										<Link href="/owner">
+											<KeyRound className="size-4" />
+											I&apos;m a property owner
+										</Link>
+									</Button>
 								</SheetClose>
-							))}
-							<MobileAuthSection />
-							<SheetClose asChild>
-								<Button asChild className="mt-2 rounded-full">
-									<Link href="/owner">
-										<KeyRound className="size-4" />
-										I&apos;m a property owner
-									</Link>
-								</Button>
-							</SheetClose>
-						</nav>
-					</SheetContent>
-				</Sheet>
+							</nav>
+						</SheetContent>
+					</Sheet>
+				</div>
 			</div>
 		</header>
 	);

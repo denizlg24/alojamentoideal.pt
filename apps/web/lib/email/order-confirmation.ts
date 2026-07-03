@@ -102,10 +102,18 @@ function formatPaymentMethod(method: OrderConfirmationFacts["paymentMethod"]): {
 	return { label: titleCasePaymentPart(method.type) || "Online payment" };
 }
 
+function formatNights(nights: number): string {
+	if (nights <= 0) {
+		return "To be confirmed";
+	}
+	return `${nights} ${nights === 1 ? "night" : "nights"}`;
+}
+
 /**
  * Maps the durable order facts to the transport-layer email input, formatting
  * money, dates and the payment method for display. Shared by the confirmation
- * and pending-notice emails so both render identical booking details.
+ * and pending-notice emails so both render identical booking details. Every
+ * booking on the order becomes one stay block in the email.
  */
 export function toOrderEmailInput(
 	facts: OrderConfirmationFacts,
@@ -114,19 +122,22 @@ export function toOrderEmailInput(
 	const paymentMethod = formatPaymentMethod(facts.paymentMethod);
 
 	return {
-		accommodationImage: facts.accommodationImage ?? FALLBACK_IMAGE_URL,
-		accommodationTitle: facts.accommodationTitle,
 		billingAddress: formatBillingAddress(facts.billingAddress),
 		cardLastFour: paymentMethod.cardLastFour,
-		checkIn: formatDate(facts.checkIn),
-		checkOut: formatDate(facts.checkOut),
 		contactEmail: facts.email,
 		contactPhone: facts.contactPhone || "Not provided",
 		email: facts.email,
-		guests: formatGuests(facts.guests),
 		manageUrl,
 		orderNumber: facts.publicReference,
 		paymentMethod: paymentMethod.label,
+		stays: facts.stays.map((stay) => ({
+			checkIn: formatDate(stay.checkIn),
+			checkOut: formatDate(stay.checkOut),
+			guests: formatGuests(stay.guests),
+			image: stay.imageUrl ?? FALLBACK_IMAGE_URL,
+			nights: formatNights(stay.nights),
+			title: stay.title,
+		})),
 		totalPrice: formatAmount(facts.amountPaidMinor, facts.currency),
 	};
 }

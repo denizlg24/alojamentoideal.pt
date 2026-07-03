@@ -39,7 +39,6 @@ describe("parseResumeState", () => {
 		checkoutExpiresAt: "2026-07-01T10:00:00.000Z",
 		orderId: "order-1",
 		publicReference: "AI-123",
-		stayKey: stayKeyToken(STAY),
 	};
 
 	test("round-trips valid metadata", () => {
@@ -64,31 +63,25 @@ describe("parseResumeState", () => {
 });
 
 describe("isResumeUsable", () => {
-	const stayKey = stayKeyToken(STAY);
 	const now = Date.parse("2026-07-01T09:00:00.000Z");
 	const base: CheckoutResumeState = {
 		cartId: "cart-1",
 		checkoutExpiresAt: "2026-07-01T10:00:00.000Z",
 		orderId: "order-1",
 		publicReference: "AI-123",
-		stayKey,
 	};
 
-	test("is usable for the same stay before expiry", () => {
-		expect(isResumeUsable(base, stayKey, now)).toBe(true);
-	});
-
-	test("is unusable for a different stay", () => {
-		expect(isResumeUsable(base, "other-stay", now)).toBe(false);
+	test("is usable before expiry", () => {
+		expect(isResumeUsable(base, now)).toBe(true);
 	});
 
 	test("is unusable once the checkout window has closed", () => {
 		const expired = { ...base, checkoutExpiresAt: "2026-07-01T08:00:00.000Z" };
-		expect(isResumeUsable(expired, stayKey, now)).toBe(false);
+		expect(isResumeUsable(expired, now)).toBe(false);
 	});
 
 	test("defers to the server when no expiry is stored", () => {
 		const noExpiry = { ...base, checkoutExpiresAt: null };
-		expect(isResumeUsable(noExpiry, stayKey, now)).toBe(true);
+		expect(isResumeUsable(noExpiry, now)).toBe(true);
 	});
 });

@@ -12,6 +12,8 @@ interface ReviewReservationStepProps {
 	confirmSlot: ReactNode;
 	contactSummary: ReactNode;
 	error: string | null;
+	/** Pluralizes the stay wording when the order holds several bookings. */
+	multipleStays?: boolean;
 	onEdit: () => void;
 	onTermsChange: (accepted: boolean) => void;
 	paymentSummary: string;
@@ -41,6 +43,7 @@ export function ReviewReservationStep({
 	confirmSlot,
 	contactSummary,
 	error,
+	multipleStays = false,
 	onEdit,
 	onTermsChange,
 	paymentSummary,
@@ -56,7 +59,9 @@ export function ReviewReservationStep({
 			title="Review your reservation"
 		>
 			<div className="flex flex-col gap-5">
-				<ReviewBlock title="Your stay">{staySummary}</ReviewBlock>
+				<ReviewBlock title={multipleStays ? "Your stays" : "Your stay"}>
+					{staySummary}
+				</ReviewBlock>
 				<Separator />
 				<ReviewBlock title="Contact">{contactSummary}</ReviewBlock>
 				<Separator />
@@ -77,8 +82,8 @@ export function ReviewReservationStep({
 						className="font-normal text-sm leading-snug"
 						htmlFor="checkout-terms"
 					>
-						I agree to the booking terms and the cancellation policy for this
-						stay with Alojamento Ideal.
+						I agree to the booking terms and the cancellation policy for{" "}
+						{multipleStays ? "these stays" : "this stay"} with Alojamento Ideal.
 					</Label>
 				</div>
 

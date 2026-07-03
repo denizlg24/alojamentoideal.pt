@@ -5,7 +5,7 @@ import type {
 	OrderMemberStatus,
 	ProviderBookingStatus,
 } from "@workspace/db";
-import type { OrderRole } from "./order-access";
+import { type OrderRole, orderRoleCan } from "./order-access";
 import type {
 	OrderBookingStatus,
 	OrderPaymentMethodSummary,
@@ -162,6 +162,47 @@ export function summarizeGuestProgress(
 		total: statuses.length,
 		verified,
 	};
+}
+
+/**
+ * Narrows an order's guest slots to the ones a viewer may count. The owner
+ * (`manage_all_guests`) counts every slot in the order; an invited member only
+ * ever counts the slots bound to their own membership, so the hub's progress
+ * numbers mirror exactly what the guests section lets them read and edit. A
+ * viewer with neither grant counts nothing. Pure.
+ */
+export function scopeGuestRowsToViewer<
+	T extends { orderMemberId: string | null },
+>(rows: readonly T[], role: OrderRole, viewerMemberId: string | null): T[] {
+	if (orderRoleCan(role, "manage_all_guests")) {
+		return [...rows];
+	}
+	if (!viewerMemberId) {
+		return [];
+	}
+	return rows.filter((row) => row.orderMemberId === viewerMemberId);
+}
+
+/**
+ * Narrows an order's items to the ones a viewer may see. The owner sees every
+ * item; an invited member only sees the stays whose booking holds a guest slot
+ * bound to their membership — one stay in the common case, several when the
+ * same email was invited to more than one booking, never the whole order.
+ * Items without a provider booking (e.g. activities) are owner-only. Keyed on
+ * the same grant as {@link scopeGuestRowsToViewer} so the stays a member sees
+ * always match the guest slots they can read. Pure.
+ */
+export function scopeOrderItemsToViewer<T extends { bookingId: string | null }>(
+	items: readonly T[],
+	role: OrderRole,
+	viewerBookingIds: ReadonlySet<string>,
+): T[] {
+	if (orderRoleCan(role, "manage_all_guests")) {
+		return [...items];
+	}
+	return items.filter(
+		(item) => item.bookingId !== null && viewerBookingIds.has(item.bookingId),
+	);
 }
 
 export function summarizeConversationAvailability(
