@@ -1557,6 +1557,80 @@ export const orderItemCharge = pgTable(
 	],
 );
 
+export type OrderInvoiceKind = "credit_note" | "invoice";
+export type OrderInvoiceStatus = "draft" | "failed" | "issued";
+
+/**
+ * Fiscal documents (invoices / credit notes) issued through Hostkit against
+ * one order item. The Hostkit invoicing account is property-scoped, so a
+ * multi-stay order carries one invoice per item, never one per order. The row
+ * is created as `draft` before any provider call (the partial unique index is
+ * the double-issuance guard), promoted to `issued` once Hostkit closes the
+ * document, or parked at `failed` with a redacted error for operator review.
+ */
+export const orderInvoice = pgTable(
+	"order_invoices",
+	{
+		id: text("id").primaryKey(),
+		orderId: text("order_id")
+			.notNull()
+			.references(() => order.id, { onDelete: "cascade" }),
+		orderItemId: text("order_item_id")
+			.notNull()
+			.references(() => orderItem.id, { onDelete: "cascade" }),
+		kind: text("kind").$type<OrderInvoiceKind>().notNull().default("invoice"),
+		status: text("status")
+			.$type<OrderInvoiceStatus>()
+			.notNull()
+			.default("draft"),
+		// Credit notes reference the local invoice row they void.
+		refInvoiceId: text("ref_invoice_id").references(
+			(): AnyPgColumn => orderInvoice.id,
+			{ onDelete: "set null" },
+		),
+		// Hostkit identifiers: document id within a series of an invoicing NIF.
+		hostkitInvoiceId: text("hostkit_invoice_id"),
+		hostkitSeries: text("hostkit_series"),
+		invoicingNif: text("invoicing_nif"),
+		// Provider reservation code the document was attached to.
+		reservationCode: text("reservation_code"),
+		documentUrl: text("document_url"),
+		currency: text("currency").notNull(),
+		totalMinor: bigint("total_minor", { mode: "number" }).notNull(),
+		lastErrorMessage: text("last_error_message"),
+		issuedAt: timestampWithTimezone("issued_at"),
+		createdAt: timestampWithTimezone("created_at").notNull().defaultNow(),
+		updatedAt: timestampWithTimezone("updated_at").notNull().defaultNow(),
+	},
+	(table) => [
+		index("order_invoices_order_idx").on(table.orderId),
+		index("order_invoices_order_item_idx").on(table.orderItemId),
+		index("order_invoices_ref_invoice_idx").on(table.refInvoiceId),
+		// One live (draft or issued) invoice per order item; failed rows do not
+		// block a retry, credit notes are unlimited.
+		uniqueIndex("order_invoices_active_invoice_uidx")
+			.on(table.orderItemId)
+			.where(
+				sql`${table.kind} = 'invoice' and ${table.status} in ('draft', 'issued')`,
+			),
+		check(
+			"order_invoices_kind_check",
+			sql`${table.kind} in ('credit_note', 'invoice')`,
+		),
+		check(
+			"order_invoices_status_check",
+			sql`${table.status} in ('draft', 'failed', 'issued')`,
+		),
+		foreignKey({
+			columns: [table.orderItemId, table.orderId],
+			foreignColumns: [orderItem.id, orderItem.orderId],
+			name: "order_invoices_order_item_order_fk",
+		}).onDelete("cascade"),
+	],
+);
+
+export type OrderInvoice = typeof orderInvoice.$inferSelect;
+
 export const apiIdempotencyKey = pgTable(
 	"api_idempotency_keys",
 	{
@@ -1610,5 +1684,6 @@ export const schema = {
 	guestSubmissionJob,
 	accommodationItemDetail,
 	orderItemCharge,
+	orderInvoice,
 	apiIdempotencyKey,
 };

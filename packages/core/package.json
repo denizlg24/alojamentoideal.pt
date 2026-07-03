@@ -28,6 +28,10 @@
 			"types": "./src/compliance/index.ts",
 			"default": "./src/compliance/index.ts"
 		},
+		"./invoicing": {
+			"types": "./src/invoicing/index.ts",
+			"default": "./src/invoicing/index.ts"
+		},
 		"./commerce/stay-overlap": {
 			"types": "./src/commerce/stay-overlap.ts",
 			"default": "./src/commerce/stay-overlap.ts"
