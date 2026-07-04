@@ -217,15 +217,32 @@ export class InvoicingService {
 			});
 			providerDraftClosed = true;
 
-			const now = this.#now();
-			await this.#updateRecord(record.id, {
-				documentUrl: closed.invoice_url ?? null,
-				issuedAt: now,
-				status: "issued",
-			});
-			return await this.#loadRecord(record.id);
+			// Provider draft is now closed; persist the issued state as a separate
+			// step so DB failures are handled distinctly from API failures.
+			try {
+				const now = this.#now();
+				await this.#updateRecord(record.id, {
+					documentUrl: closed.invoice_url ?? null,
+					issuedAt: now,
+					status: "issued",
+				});
+				return await this.#loadRecord(record.id);
+			} catch (persistError) {
+				// The Hostkit invoice was successfully closed, but we failed to
+				// persist the issued state. Wrap the error to surface this state
+				// so operators know the provider has the closed invoice even if
+				// our DB record is stuck as draft. A reconciliation job or manual
+				// fix-up (SELECT invoices WHERE status='draft' AND
+				// hostkitInvoiceId IS NOT NULL) can recover these orphans.
+				const message = describeError(persistError);
+				throw new InvoicingError(
+					"provider_closed_but_persistence_failed",
+					`Hostkit invoice ${hostkitInvoiceId} was successfully closed, but recording the issued state failed: ${message}. The invoice exists on the provider; the local draft record needs manual reconciliation.`,
+				);
+			}
 		} catch (error) {
 			if (providerDraftClosed) {
+				// Re-throw persistence errors wrapped above; they already have context.
 				throw error;
 			}
 
@@ -320,24 +337,42 @@ export class InvoicingService {
 			}
 			const creditNoteId = String(created.id);
 			providerCreditNoteCreated = true;
-			const documentUrl = await this.#findCreditNoteUrl(
-				client,
-				invoice.hostkitSeries,
-				invoice.hostkitInvoiceId,
-				invoice.invoicingNif,
-			);
 
-			const now = this.#now();
-			await this.#updateRecord(record.id, {
-				documentUrl,
-				hostkitInvoiceId: creditNoteId,
-				issuedAt: now,
-				lastErrorMessage: null,
-				status: "issued",
-			});
-			return await this.#loadRecord(record.id);
+			// Provider credit note is now created; persist the issued state as a
+			// separate step so DB failures are handled distinctly from API failures.
+			try {
+				const documentUrl = await this.#findCreditNoteUrl(
+					client,
+					invoice.hostkitSeries,
+					invoice.hostkitInvoiceId,
+					invoice.invoicingNif,
+				);
+
+				const now = this.#now();
+				await this.#updateRecord(record.id, {
+					documentUrl,
+					hostkitInvoiceId: creditNoteId,
+					issuedAt: now,
+					lastErrorMessage: null,
+					status: "issued",
+				});
+				return await this.#loadRecord(record.id);
+			} catch (persistError) {
+				// The Hostkit credit note was successfully created, but we failed
+				// to persist the issued state. Wrap the error to surface this state
+				// so operators know the provider has the credit note even if our DB
+				// record is stuck as draft. A reconciliation job or manual fix-up
+				// (SELECT invoices WHERE status='draft' AND hostkitInvoiceId IS NOT
+				// NULL AND kind='credit_note') can recover these orphans.
+				const message = describeError(persistError);
+				throw new InvoicingError(
+					"provider_closed_but_persistence_failed",
+					`Hostkit credit note ${creditNoteId} was successfully created, but recording the issued state failed: ${message}. The credit note exists on the provider; the local draft record needs manual reconciliation.`,
+				);
+			}
 		} catch (error) {
 			if (providerCreditNoteCreated) {
+				// Re-throw persistence errors wrapped above; they already have context.
 				throw error;
 			}
 

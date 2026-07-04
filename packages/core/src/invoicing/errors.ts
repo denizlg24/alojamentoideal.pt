@@ -10,6 +10,7 @@ export type InvoicingErrorCode =
 	| "order_not_found"
 	| "order_not_paid"
 	| "property_unconfigured"
+	| "provider_closed_but_persistence_failed"
 	| "provider_error"
 	| "reservation_code_unavailable";
 
