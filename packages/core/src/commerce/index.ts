@@ -8,6 +8,7 @@ export * from "./order-guests";
 export * from "./orders";
 export * from "./payments";
 export * from "./refunds";
+export * from "./reservation-admin";
 export * from "./reservations";
 export * from "./schemas";
 export * from "./service";

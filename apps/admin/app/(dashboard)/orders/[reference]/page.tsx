@@ -23,6 +23,7 @@ import { GuestEditDialog } from "./guest-edit-dialog";
 import { InvoiceDialog } from "./invoice-dialog";
 import { OrderActions } from "./order-actions";
 import { RefundPanel } from "./refund-panel";
+import { ReservationActions } from "./reservation-actions";
 
 interface OrderDetailPageProps {
 	params: Promise<{ reference: string }>;
@@ -225,17 +226,32 @@ export default async function OrderDetailPage({
 									</div>
 								</div>
 
-								{item.type === "accommodation" &&
-								row.status === "confirmed" &&
-								!activeInvoiceItemIds.has(item.id) ? (
-									<div className="mt-3">
-										<InvoiceDialog
-											currency={currency}
-											invoicingEnabled={invoicingIsEnabled}
-											itemId={item.id}
-											itemTitle={item.title}
-											reference={row.publicReference}
-										/>
+								{booking ||
+								(item.type === "accommodation" &&
+									row.status === "confirmed" &&
+									!activeInvoiceItemIds.has(item.id)) ? (
+									<div className="mt-3 flex flex-wrap items-center gap-2">
+										{booking ? (
+											<ReservationActions
+												bookingId={booking.id}
+												checkIn={item.checkIn}
+												checkOut={item.checkOut}
+												currentStatus={booking.status}
+												guests={item.guests}
+												reference={row.publicReference}
+											/>
+										) : null}
+										{item.type === "accommodation" &&
+										row.status === "confirmed" &&
+										!activeInvoiceItemIds.has(item.id) ? (
+											<InvoiceDialog
+												currency={currency}
+												invoicingEnabled={invoicingIsEnabled}
+												itemId={item.id}
+												itemTitle={item.title}
+												reference={row.publicReference}
+											/>
+										) : null}
 									</div>
 								) : null}
 

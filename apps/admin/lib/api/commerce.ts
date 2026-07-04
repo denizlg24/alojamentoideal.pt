@@ -13,6 +13,7 @@ import {
 	mapStripePaymentStatus,
 	OrderRefundService,
 	type ProviderReservationGateway,
+	ReservationAdminService,
 	type ResolvedOrderAccess,
 	StubReservationGateway,
 } from "@workspace/core/commerce";
@@ -148,6 +149,18 @@ export function orderRefundService(): OrderRefundService {
 		refundPayment: stripe
 			? (request) => createRefund(stripe, request)
 			: undefined,
+	});
+}
+
+/**
+ * Request-scoped service for per-reservation Hostify management (status,
+ * dates, guest count). In the HOSTIFY_BOOKINGS_ENABLED=false dry-run it gets a
+ * null client and only syncs local booking state, mirroring the saga.
+ */
+export function reservationAdminService(): ReservationAdminService {
+	return new ReservationAdminService({
+		db: getDb(),
+		hostify: hostifyBookingsEnabled ? createHostifyClientFromEnv() : null,
 	});
 }
 

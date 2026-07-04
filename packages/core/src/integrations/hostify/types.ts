@@ -476,6 +476,8 @@ export interface HostifyUpdateReservationInput {
 	check_in?: HostifyDate;
 	check_out?: HostifyDate;
 	cleaning_notes?: string | null;
+	/** Guest count. Hostify does not re-price the reservation on this change. */
+	guests?: number;
 	listing_id?: HostifyId;
 	notes?: string | null;
 	planned_arrival?: string | null;
