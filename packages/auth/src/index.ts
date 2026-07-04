@@ -9,6 +9,7 @@ export {
 	buildOrderAmountMismatchRefundEmail,
 	buildOrderConfirmationEmail,
 	buildOrderCouldNotConfirmEmail,
+	buildOrderGuestReminderEmail,
 	buildOrderInviteEmail,
 	buildOrderPendingConfirmationEmail,
 	type EmailMessage,
@@ -17,6 +18,7 @@ export {
 	getEmailSender,
 	type OrderCompensationEmailInput,
 	type OrderConfirmationEmailInput,
+	type OrderGuestReminderEmailInput,
 	type OrderInviteEmailInput,
 	type OutboundEmail,
 } from "./email";

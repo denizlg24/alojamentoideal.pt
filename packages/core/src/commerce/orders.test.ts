@@ -277,6 +277,41 @@ describe("buildDraftOrderRows", () => {
 		expect(rows.charges.map((charge) => charge.kind)).toEqual(["fee", "fee"]);
 	});
 
+	test("stores fee subtypes for invoice product mapping", () => {
+		const quote = quoteSnapshot();
+		quote.feeLines = [
+			{
+				amountMinor: null,
+				chargeLabel: null,
+				inclusiveTaxMinor: null,
+				isBasePrice: false,
+				name: "Taxa de limpeza",
+				providerPayload: null,
+				quantity: null,
+				totalMinor: 3000,
+				type: "cleaning",
+			},
+		];
+
+		const rows = buildDraftOrderRows(
+			{
+				cartItemId: "item_1",
+				position: 1,
+				quote,
+				snapshot: listingSnapshot(),
+			},
+			contact(),
+		);
+
+		expect(rows.charges[0]).toMatchObject({
+			kind: "fee",
+			rawPayload: {
+				feeSubtype: "cleaning",
+				type: "cleaning",
+			},
+		});
+	});
+
 	test("preserves large monetary values", () => {
 		const quote = quoteSnapshot();
 		quote.totalMinor = 9_999_999_999;

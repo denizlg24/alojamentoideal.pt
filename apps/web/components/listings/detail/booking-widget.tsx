@@ -434,7 +434,9 @@ function BookingWidgetInner({
 					size="lg"
 					className="w-full"
 					onClick={handleAddToCart}
-					disabled={!canReserve || adding || selectedStayOverlapsCart}
+					disabled={
+						!canReserve || adding || selectedStayOverlapsCart || undefined
+					}
 					type="button"
 				>
 					<ShoppingCart className="size-4" />

@@ -120,6 +120,8 @@ interface EmailTemplates {
 	orderAmountMismatchRefundText?: string;
 	orderInviteHtml?: string;
 	orderInviteText?: string;
+	orderGuestReminderHtml?: string;
+	orderGuestReminderText?: string;
 }
 
 async function loadTemplates(): Promise<EmailTemplates> {
@@ -662,6 +664,77 @@ function orderInviteFallbackText(input: OrderInviteEmailInput): string {
 		`Open your booking to message us and add your guest details: ${input.inviteUrl}`,
 		"",
 		`This invitation link expires in ${input.expiresInHours} hours. If it lapses, ask whoever booked to resend it.`,
+		"",
+		`The ${APP_NAME} team`,
+	].join("\n");
+}
+
+export interface OrderGuestReminderEmailInput {
+	accommodationTitle: string;
+	checkIn: string;
+	checkOut: string;
+	manageUrl: string;
+	missingGuestCount: number;
+	orderNumber: string;
+	totalGuestCount: number;
+}
+
+export function buildOrderGuestReminderEmail(
+	input: OrderGuestReminderEmailInput,
+): EmailMessage {
+	const subject = `Guest details needed for booking ${safeSubjectPart(input.orderNumber)}`;
+
+	if (TEMPLATES.orderGuestReminderHtml) {
+		const replacements = {
+			ACCOMMODATION_TITLE: escapeHtml(input.accommodationTitle),
+			APP_NAME,
+			CHECK_IN: escapeHtml(input.checkIn),
+			CHECK_OUT: escapeHtml(input.checkOut),
+			CURRENT_YEAR,
+			MANAGE_URL: escapeHtml(input.manageUrl),
+			MISSING_GUESTS: input.missingGuestCount.toString(),
+			ORDER_NUMBER: escapeHtml(input.orderNumber),
+			TOTAL_GUESTS: input.totalGuestCount.toString(),
+		};
+		const html = applyPlaceholders(
+			TEMPLATES.orderGuestReminderHtml,
+			replacements,
+		);
+		const text = TEMPLATES.orderGuestReminderText
+			? applyPlaceholders(TEMPLATES.orderGuestReminderText, {
+					...replacements,
+					ACCOMMODATION_TITLE: input.accommodationTitle,
+					CHECK_IN: input.checkIn,
+					CHECK_OUT: input.checkOut,
+					MANAGE_URL: input.manageUrl,
+					ORDER_NUMBER: input.orderNumber,
+				})
+			: orderGuestReminderFallbackText(input);
+		return { html, subject, text };
+	}
+
+	const text = orderGuestReminderFallbackText(input);
+	return { html: orderGuestReminderFallbackHtml(input), subject, text };
+}
+
+function orderGuestReminderFallbackHtml(
+	input: OrderGuestReminderEmailInput,
+): string {
+	return `<div style="font-family:system-ui,sans-serif;line-height:1.5"><p>Hi,</p><p>We still need registration details for ${input.missingGuestCount} of ${input.totalGuestCount} guests before your stay at ${escapeHtml(input.accommodationTitle)}.</p><p>Dates: ${escapeHtml(input.checkIn)} to ${escapeHtml(input.checkOut)}.</p><p><a href="${escapeHtml(input.manageUrl)}">Add guest details</a></p><p>Portugal requires guest registration for each stay. It only takes a few minutes, and it helps keep check-in smooth.</p><p>The ${APP_NAME} team</p></div>`;
+}
+
+function orderGuestReminderFallbackText(
+	input: OrderGuestReminderEmailInput,
+): string {
+	return [
+		"Hi,",
+		"",
+		`We still need registration details for ${input.missingGuestCount} of ${input.totalGuestCount} guests before your stay at ${input.accommodationTitle}.`,
+		`Dates: ${input.checkIn} to ${input.checkOut}.`,
+		"",
+		`Add guest details: ${input.manageUrl}`,
+		"",
+		"Portugal requires guest registration for each stay. It only takes a few minutes, and it helps keep check-in smooth.",
 		"",
 		`The ${APP_NAME} team`,
 	].join("\n");

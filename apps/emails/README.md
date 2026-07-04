@@ -102,3 +102,15 @@ but the provider booking still needs one more confirmation pass.
 - `INVITE_URL`: one-time booking access URL
 - `EXPIRES_IN_HOURS`: whole hours until the invite lapses
 - `CURRENT_YEAR`: four-digit year for the footer
+
+### Order guest reminder
+
+- `APP_NAME`: usually `Alojamento Ideal`
+- `ORDER_NUMBER`: guest-facing reservation reference
+- `ACCOMMODATION_TITLE`: apartment title
+- `CHECK_IN`: localized check-in date
+- `CHECK_OUT`: localized check-out date
+- `MISSING_GUESTS`: guest slots still needing registration details
+- `TOTAL_GUESTS`: total guest slots for the stay
+- `MANAGE_URL`: reservation management URL
+- `CURRENT_YEAR`: four-digit year for the footer

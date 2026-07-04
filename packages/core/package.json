@@ -24,6 +24,14 @@
 			"types": "./src/commerce/index.ts",
 			"default": "./src/commerce/index.ts"
 		},
+		"./compliance": {
+			"types": "./src/compliance/index.ts",
+			"default": "./src/compliance/index.ts"
+		},
+		"./invoicing": {
+			"types": "./src/invoicing/index.ts",
+			"default": "./src/invoicing/index.ts"
+		},
 		"./commerce/stay-overlap": {
 			"types": "./src/commerce/stay-overlap.ts",
 			"default": "./src/commerce/stay-overlap.ts"
@@ -51,6 +59,10 @@
 		"./integrations/hostify": {
 			"types": "./src/integrations/hostify/index.ts",
 			"default": "./src/integrations/hostify/index.ts"
+		},
+		"./integrations/hostkit": {
+			"types": "./src/integrations/hostkit/index.ts",
+			"default": "./src/integrations/hostkit/index.ts"
 		},
 		"./integrations/bokun": {
 			"types": "./src/integrations/bokun/index.ts",

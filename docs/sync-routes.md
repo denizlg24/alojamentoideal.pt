@@ -30,6 +30,7 @@ external scheduler that already calls the Hostify syncs.
 | `/api/cron/hostify/pricing` | Advances the rolling nightly advisory price cache by one listing batch. | Every 15 minutes, or at least hourly. | Revalidates advisory pricing used by homes list filters and cards when nights changed. |
 | `/api/cron/commerce/reservations` | Confirms paid provider holds, sends pending-confirmation nudges, retries finalization emails, compensates/refunds failed confirmations, and releases abandoned checkout holds. | Every 5 minutes. This is a release blocker for reserve-first checkout. | Sends confirmation, pending and compensation emails through the route's email handlers. Keep this on the same external scheduler as the Hostify crons. |
 | `/api/cron/commerce/conversations` | Provisions order conversations for confirmed Hostify bookings and imports inbox messages into the local projection. | Every 1 to 5 minutes. | Publishes realtime updates when Pusher is configured; otherwise keeps the polling read model fresh. Keep this on the same external scheduler as the Hostify crons. |
+| `/api/cron/commerce/guest-submissions` | Sweeps confirmed bookings with a complete guest roster into `guest_submission_jobs`, syncs each roster to Hostkit (removeAllGuests, addGuest per guest, validateSIBA; sendSIBA only when `HOSTKIT_SIBA_SEND_ENABLED=true`), and sends guest-info reminder emails for incomplete rosters. | Every 15 to 30 minutes. | Hostkit retries ride reservation-ingestion lag ("Unknown reservation code" retries on a 5m-6h ladder). Guest-info reminders use reverse backoff, halving the remaining time to check-in after each successful email with 4h and 14d bounds. Listings without a `HOSTKIT_API_KEYS` entry park their jobs on a 6h cadence without consuming attempts. |
 
 ## Example pings
 
@@ -53,6 +54,10 @@ curl -fsS \
 curl -fsS \
   -H "Authorization: Bearer $CRON_SECRET" \
   https://alojamentoideal.pt/api/cron/commerce/conversations
+
+curl -fsS \
+  -H "Authorization: Bearer $CRON_SECRET" \
+  https://alojamentoideal.pt/api/cron/commerce/guest-submissions
 ```
 
 ## Notes
@@ -63,6 +68,10 @@ curl -fsS \
   checkout. The Stripe webhook is only the low-latency path.
 - Commerce conversation reconciliation is the durability authority for Hostify
   inbox projection until a Hostify message webhook contract is confirmed.
+- Guest submission has no other trigger: the cron sweep alone enqueues and
+  processes Hostkit/SIBA jobs (including re-enqueueing when a roster changes
+  after a successful submission), so registering this route is what turns the
+  M8 compliance half on.
 - Review and pricing syncs intentionally skip while the listing sync state is not
   `complete`. After a fresh database reset, keep pinging `/api/cron/hostify/listings`
   until it completes before expecting review or pricing data to fill in.

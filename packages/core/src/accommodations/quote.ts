@@ -179,7 +179,7 @@ function buildFeeLines(price: HostifyListingPrice): AccommodationQuoteFee[] {
 			name: "Cleaning fee",
 			quantity: null,
 			total: cleaning,
-			type: "fee",
+			type: "cleaning",
 		});
 	}
 
