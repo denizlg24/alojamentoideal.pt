@@ -1,7 +1,6 @@
 import { Button } from "@workspace/ui/components/button";
 import type { Metadata } from "next";
 import Link from "next/link";
-import { StatusDot } from "@/components/status-dot";
 import { formatDateTime } from "@/lib/format";
 import {
 	isEventSeverity,
