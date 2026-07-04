@@ -61,6 +61,7 @@ const ERROR_STATUS: Record<InvoicingError["code"], number> = {
 	property_unconfigured: 422,
 	provider_error: 502,
 	reservation_code_unavailable: 422,
+	provider_closed_but_persistence_failed: 502,
 };
 
 interface InvoicingAdminRouteOptions extends ApiRouteOptions {
