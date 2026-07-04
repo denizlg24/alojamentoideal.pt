@@ -20,10 +20,10 @@ import {
 import { invoicingEnabled, invoicingService } from "@/lib/api/invoicing";
 import { formatDate, formatDateTime, formatMoneyMinor } from "@/lib/format";
 import { GuestEditDialog } from "./guest-edit-dialog";
-import { InvoiceDialog } from "./invoice-dialog";
+import { InvoicePanel } from "./invoice-panel";
 import { OrderActions } from "./order-actions";
 import { RefundPanel } from "./refund-panel";
-import { ReservationActions } from "./reservation-actions";
+import { ReservationPanel } from "./reservation-panel";
 
 interface OrderDetailPageProps {
 	params: Promise<{ reference: string }>;
@@ -64,9 +64,10 @@ export default async function OrderDetailPage({
 
 	const access = adminOrderAccess(row);
 	const service = commerceService();
+	const invoicing = invoicingService();
 	const [detail, invoices, refunds] = await Promise.all([
 		service.readOrderDetail(access),
-		invoicingService().listOrderInvoices(row.publicReference),
+		invoicing.listOrderInvoices(row.publicReference),
 		orderRefundService().listOrderRefunds(row.id),
 	]);
 
@@ -104,6 +105,28 @@ export default async function OrderDetailPage({
 					(invoice.status === "draft" || invoice.status === "issued"),
 			)
 			.map((invoice) => invoice.orderItemId),
+	);
+	const invoiceableItems =
+		row.status === "confirmed"
+			? detail.items.filter(
+					(item) =>
+						item.type === "accommodation" && !activeInvoiceItemIds.has(item.id),
+				)
+			: [];
+	const invoiceDraftById = new Map(
+		await Promise.all(
+			invoiceableItems.map(async (item) => {
+				try {
+					const draft = await invoicing.buildOrderItemInvoiceDraft({
+						orderItemId: item.id,
+						orderReference: row.publicReference,
+					});
+					return [item.id, draft] as const;
+				} catch {
+					return [item.id, null] as const;
+				}
+			}),
+		),
 	);
 
 	return (
@@ -194,8 +217,9 @@ export default async function OrderDetailPage({
 					{detail.items.map((item) => {
 						const booking = item.providerBooking;
 						const guests = booking ? guestsByBooking.get(booking.id) : null;
+						const invoiceDraft = invoiceDraftById.get(item.id) ?? null;
 						return (
-							<div className="py-4" key={item.id}>
+							<div className="py-6" key={item.id}>
 								<div className="flex items-start justify-between gap-4">
 									<div>
 										<p className="font-medium text-sm">{item.title}</p>
@@ -225,35 +249,6 @@ export default async function OrderDetailPage({
 										) : null}
 									</div>
 								</div>
-
-								{booking ||
-								(item.type === "accommodation" &&
-									row.status === "confirmed" &&
-									!activeInvoiceItemIds.has(item.id)) ? (
-									<div className="mt-3 flex flex-wrap items-center gap-2">
-										{booking ? (
-											<ReservationActions
-												bookingId={booking.id}
-												checkIn={item.checkIn}
-												checkOut={item.checkOut}
-												currentStatus={booking.status}
-												guests={item.guests}
-												reference={row.publicReference}
-											/>
-										) : null}
-										{item.type === "accommodation" &&
-										row.status === "confirmed" &&
-										!activeInvoiceItemIds.has(item.id) ? (
-											<InvoiceDialog
-												currency={currency}
-												invoicingEnabled={invoicingIsEnabled}
-												itemId={item.id}
-												itemTitle={item.title}
-												reference={row.publicReference}
-											/>
-										) : null}
-									</div>
-								) : null}
 
 								{booking && guests && guests.length > 0 ? (
 									<Table className="mt-3">
@@ -296,6 +291,25 @@ export default async function OrderDetailPage({
 											))}
 										</TableBody>
 									</Table>
+								) : null}
+
+								{booking ? (
+									<ReservationPanel
+										bookingId={booking.id}
+										checkIn={item.checkIn}
+										checkOut={item.checkOut}
+										currentStatus={booking.status}
+										guests={item.guests}
+										reference={row.publicReference}
+									/>
+								) : null}
+
+								{invoiceDraft ? (
+									<InvoicePanel
+										draft={invoiceDraft}
+										invoicingEnabled={invoicingIsEnabled}
+										reference={row.publicReference}
+									/>
 								) : null}
 							</div>
 						);
