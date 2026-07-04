@@ -140,6 +140,7 @@ export function normalizedOrderReference(reference: string): string {
 
 export interface AdminOrderRow {
 	amountPaidMinor: number;
+	amountRefundedMinor: number;
 	id: string;
 	publicReference: string;
 	status: string;
@@ -153,6 +154,7 @@ export async function loadAdminOrder(
 	const [row] = await getDb()
 		.select({
 			amountPaidMinor: order.amountPaidMinor,
+			amountRefundedMinor: order.amountRefundedMinor,
 			id: order.id,
 			publicReference: order.publicReference,
 			status: order.status,
@@ -162,6 +164,14 @@ export async function loadAdminOrder(
 		.where(eq(order.publicReference, normalizedOrderReference(reference)))
 		.limit(1);
 	return row ?? null;
+}
+
+export async function deleteAdminOrder(row: AdminOrderRow): Promise<boolean> {
+	const deleted = await getDb()
+		.delete(order)
+		.where(eq(order.id, row.id))
+		.returning({ id: order.id });
+	return deleted.length > 0;
 }
 
 /**

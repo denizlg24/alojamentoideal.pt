@@ -19,13 +19,14 @@ import { StatusDot } from "@/components/status-dot";
 
 interface OrderActionsProps {
 	amountPaidMinor: number;
+	amountRefundedMinor: number;
 	reference: string;
 	status: string;
 }
 
 async function postAction(
 	reference: string,
-	action: "accept" | "cancel",
+	action: "accept" | "cancel" | "delete",
 ): Promise<{ ok: boolean; outcome: string | null; error: string | null }> {
 	const response = await fetch(
 		`/api/admin/orders/${encodeURIComponent(reference)}/${action}`,
@@ -49,6 +50,7 @@ async function postAction(
  */
 export function OrderActions({
 	amountPaidMinor,
+	amountRefundedMinor,
 	reference,
 	status,
 }: OrderActionsProps) {
@@ -61,6 +63,9 @@ export function OrderActions({
 	const canCancel = ["draft", "pending", "confirmed"].includes(
 		optimisticStatus,
 	);
+	const canDelete =
+		!["pending", "confirmed"].includes(optimisticStatus) &&
+		amountPaidMinor <= amountRefundedMinor;
 
 	function run(action: "accept" | "cancel", optimistic: string) {
 		startTransition(async () => {
@@ -86,8 +91,23 @@ export function OrderActions({
 		});
 	}
 
+	function deleteOrder() {
+		startTransition(async () => {
+			const result = await postAction(reference, "delete");
+			if (!result.ok) {
+				toast.error(result.error ?? "Could not delete the order.");
+				router.refresh();
+				return;
+			}
+
+			toast.success("Order deleted.");
+			router.replace("/orders");
+			router.refresh();
+		});
+	}
+
 	return (
-		<div className="flex items-center gap-4">
+		<div className="flex flex-wrap items-center gap-4">
 			<StatusDot className="text-base" status={optimisticStatus} />
 			<div className="flex items-center gap-2">
 				{canAccept ? (
@@ -136,6 +156,30 @@ export function OrderActions({
 									onClick={() => run("cancel", paid ? "cancelled" : "failed")}
 								>
 									{paid ? "Cancel and refund" : "Cancel order"}
+								</AlertDialogAction>
+							</AlertDialogFooter>
+						</AlertDialogContent>
+					</AlertDialog>
+				) : null}
+				{canDelete ? (
+					<AlertDialog>
+						<AlertDialogTrigger asChild>
+							<Button disabled={pending} size="sm" variant="destructive">
+								Delete order
+							</Button>
+						</AlertDialogTrigger>
+						<AlertDialogContent>
+							<AlertDialogHeader>
+								<AlertDialogTitle>Delete this order?</AlertDialogTitle>
+								<AlertDialogDescription>
+									This permanently removes the order and its related local
+									records from the admin database. This cannot be undone.
+								</AlertDialogDescription>
+							</AlertDialogHeader>
+							<AlertDialogFooter>
+								<AlertDialogCancel>Keep order</AlertDialogCancel>
+								<AlertDialogAction onClick={deleteOrder} variant="destructive">
+									Delete permanently
 								</AlertDialogAction>
 							</AlertDialogFooter>
 						</AlertDialogContent>

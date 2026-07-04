@@ -9,7 +9,9 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { type FormEvent, useTransition } from "react";
 
 const SEVERITY_OPTIONS = [
-	{ label: "Warning and above", value: "" },
+	{ label: "All levels", value: "" },
+	{ label: "Debug", value: "debug" },
+	{ label: "Info", value: "info" },
 	{ label: "Warning", value: "warning" },
 	{ label: "Error", value: "error" },
 	{ label: "Critical", value: "critical" },

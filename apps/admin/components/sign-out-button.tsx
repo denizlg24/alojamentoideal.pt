@@ -1,18 +1,19 @@
 "use client";
 
 import { Button } from "@workspace/ui/components/button";
+import { cn } from "@workspace/ui/lib/utils";
 import { LogOut } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useTransition } from "react";
 import { signOut } from "@/lib/auth/client";
 
-export function SignOutButton() {
+export function SignOutButton({ className }: { className?: string }) {
 	const router = useRouter();
 	const [pending, startTransition] = useTransition();
 
 	return (
 		<Button
-			className="text-muted-foreground"
+			className={cn("text-muted-foreground", className)}
 			disabled={pending}
 			onClick={() =>
 				startTransition(async () => {
@@ -25,7 +26,7 @@ export function SignOutButton() {
 			variant="ghost"
 		>
 			<LogOut aria-hidden data-slot="icon" />
-			Sign out
+			<span>Sign out</span>
 		</Button>
 	);
 }

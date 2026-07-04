@@ -1,38 +1,52 @@
 "use client";
 
+import {
+	SidebarGroup,
+	SidebarGroupContent,
+	SidebarMenu,
+	SidebarMenuButton,
+	SidebarMenuItem,
+} from "@workspace/ui/components/sidebar";
 import { cn } from "@workspace/ui/lib/utils";
+import { Activity, ReceiptText, Users } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
 const links = [
-	{ href: "/orders", label: "Orders" },
-	{ href: "/observability", label: "Observability" },
-	{ href: "/users", label: "Users" },
+	{ href: "/orders", icon: ReceiptText, label: "Orders" },
+	{ href: "/observability", icon: Activity, label: "Observability" },
+	{ href: "/users", icon: Users, label: "Users" },
 ] as const;
 
 export function AdminNav({ className }: { className?: string }) {
 	const pathname = usePathname();
 
 	return (
-		<nav className={cn("space-y-1", className)}>
-			{links.map((link) => {
-				const active =
-					pathname === link.href || pathname.startsWith(`${link.href}/`);
-				return (
-					<Link
-						className={cn(
-							"block rounded-md px-2 py-1.5 text-sm transition-colors",
-							active
-								? "font-medium text-foreground"
-								: "text-muted-foreground hover:text-foreground",
-						)}
-						href={link.href}
-						key={link.href}
-					>
-						{link.label}
-					</Link>
-				);
-			})}
-		</nav>
+		<SidebarGroup className={cn("p-2", className)}>
+			<SidebarGroupContent>
+				<SidebarMenu>
+					{links.map((link) => {
+						const active =
+							pathname === link.href || pathname.startsWith(`${link.href}/`);
+						const Icon = link.icon;
+
+						return (
+							<SidebarMenuItem key={link.href}>
+								<SidebarMenuButton
+									asChild
+									isActive={active}
+									tooltip={link.label}
+								>
+									<Link href={link.href}>
+										<Icon aria-hidden />
+										<span>{link.label}</span>
+									</Link>
+								</SidebarMenuButton>
+							</SidebarMenuItem>
+						);
+					})}
+				</SidebarMenu>
+			</SidebarGroupContent>
+		</SidebarGroup>
 	);
 }

@@ -24,7 +24,9 @@ interface ObservabilityPageProps {
 
 const SEVERITY_TEXT: Record<string, string> = {
 	critical: "text-red-600 dark:text-red-400",
+	debug: "text-muted-foreground",
 	error: "text-red-600 dark:text-red-400",
+	info: "text-sky-600 dark:text-sky-400",
 	warning: "text-amber-600 dark:text-amber-500",
 };
 
@@ -79,7 +81,8 @@ export default async function ObservabilityPage({
 						Observability
 					</h1>
 					<p className="mt-1 text-muted-foreground text-sm">
-						Warnings, errors and critical events recorded across the platform.
+						Events recorded across the platform, from debug traces to critical
+						failures.
 					</p>
 				</div>
 				<ObservabilityFilters />

@@ -1,7 +1,13 @@
 import { getDb, observabilityEvent } from "@workspace/db";
 import { and, desc, gte, ilike, inArray, or, type SQL } from "drizzle-orm";
 
-export const EVENT_SEVERITIES = ["warning", "error", "critical"] as const;
+export const EVENT_SEVERITIES = [
+	"debug",
+	"info",
+	"warning",
+	"error",
+	"critical",
+] as const;
 export type EventSeverityFilter = (typeof EVENT_SEVERITIES)[number];
 
 export const EVENT_TYPES = [
@@ -55,10 +61,7 @@ export interface ObservabilityEventListResult {
 
 export const EVENTS_PAGE_SIZE = 50;
 
-/**
- * Warning-and-above events, newest first. Info/debug analytics are deliberately
- * out of scope for the dashboard; this view is the operator's error log.
- */
+/** Event stream, newest first. */
 export async function listObservabilityEvents(filter: {
 	page: number;
 	query: string | null;
@@ -66,11 +69,10 @@ export async function listObservabilityEvents(filter: {
 	type: EventTypeFilter | null;
 	window: EventWindowFilter | null;
 }): Promise<ObservabilityEventListResult> {
-	const conditions: SQL[] = [
-		filter.severity
-			? inArray(observabilityEvent.severity, [filter.severity])
-			: inArray(observabilityEvent.severity, [...EVENT_SEVERITIES]),
-	];
+	const conditions: SQL[] = [];
+	if (filter.severity) {
+		conditions.push(inArray(observabilityEvent.severity, [filter.severity]));
+	}
 	if (filter.type) {
 		conditions.push(inArray(observabilityEvent.type, [filter.type]));
 	}
@@ -108,7 +110,7 @@ export async function listObservabilityEvents(filter: {
 			type: observabilityEvent.type,
 		})
 		.from(observabilityEvent)
-		.where(and(...conditions))
+		.where(conditions.length ? and(...conditions) : undefined)
 		.orderBy(desc(observabilityEvent.occurredAt))
 		.limit(EVENTS_PAGE_SIZE + 1)
 		.offset(filter.page * EVENTS_PAGE_SIZE);

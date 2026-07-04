@@ -93,6 +93,7 @@ export default async function OrderDetailPage({
 				</h1>
 				<OrderActions
 					amountPaidMinor={row.amountPaidMinor}
+					amountRefundedMinor={row.amountRefundedMinor}
 					reference={row.publicReference}
 					status={row.status}
 				/>
