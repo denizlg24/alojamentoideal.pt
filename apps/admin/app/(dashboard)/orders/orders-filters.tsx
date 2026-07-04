@@ -46,6 +46,7 @@ export function OrdersFilters() {
 
 	return (
 		<form
+			key={searchParams.toString()}
 			className="flex items-center gap-3"
 			data-pending={pending || undefined}
 			onSubmit={handleSubmit}

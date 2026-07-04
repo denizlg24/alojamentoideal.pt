@@ -6,10 +6,14 @@ const dateTimeFormat = new Intl.DateTimeFormat("en-GB", {
 const dateFormat = new Intl.DateTimeFormat("en-GB", { dateStyle: "medium" });
 
 export function formatMoneyMinor(minor: number, currency: string): string {
+	const digits = new Intl.NumberFormat("en-GB", {
+		currency,
+		style: "currency",
+	}).resolvedOptions().maximumFractionDigits;
 	return new Intl.NumberFormat("en-GB", {
 		currency,
 		style: "currency",
-	}).format(minor / 100);
+	}).format(minor / 10 ** (digits ?? 1));
 }
 
 export function formatDateTime(value: Date | string): string {

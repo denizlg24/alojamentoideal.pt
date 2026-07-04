@@ -74,7 +74,9 @@ export function withApiRoute<Ctx = unknown>(
 					type: "rate_limit",
 				});
 			}
-			return tooManyRequestsResponse(rateLimitResult);
+			const limitedResponse = tooManyRequestsResponse(rateLimitResult);
+			limitedResponse.headers.set("x-request-id", requestId);
+			return limitedResponse;
 		}
 
 		let response: Response;

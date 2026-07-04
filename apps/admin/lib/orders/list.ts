@@ -74,7 +74,7 @@ export async function listAdminOrders(filter: {
 		.from(order)
 		.leftJoin(orderContact, eq(orderContact.orderId, order.id))
 		.where(conditions.length ? and(...conditions) : undefined)
-		.orderBy(desc(order.createdAt))
+		.orderBy(desc(order.createdAt), desc(order.id))
 		.limit(ORDERS_PAGE_SIZE + 1)
 		.offset(filter.page * ORDERS_PAGE_SIZE);
 

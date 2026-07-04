@@ -95,7 +95,15 @@ export function GuestEditDialog({
 	}
 
 	return (
-		<Dialog onOpenChange={setOpen} open={open}>
+		<Dialog
+			onOpenChange={(next) => {
+				setOpen(next);
+				if (!next) {
+					setError(null);
+				}
+			}}
+			open={open}
+		>
 			<DialogTrigger asChild>
 				<Button size="sm" variant="ghost">
 					Edit

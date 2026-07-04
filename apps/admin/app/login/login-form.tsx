@@ -25,13 +25,17 @@ export function LoginForm({ forbidden }: LoginFormProps) {
 		const password = String(form.get("password") ?? "");
 
 		startTransition(async () => {
-			const result = await signIn.email({ email, password });
-			if (result.error) {
-				setError(result.error.message ?? "Sign in failed.");
-				return;
+			try {
+				const result = await signIn.email({ email, password });
+				if (result.error) {
+					setError(result.error.message ?? "Sign in failed.");
+					return;
+				}
+				router.replace("/");
+				router.refresh();
+			} catch {
+				setError("Sign in failed. Please try again.");
 			}
-			router.replace("/");
-			router.refresh();
 		});
 	}
 
