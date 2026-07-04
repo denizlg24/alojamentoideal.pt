@@ -17,10 +17,12 @@
 		"@workspace/ui": "workspace:*",
 		"better-auth": "^1.6.20",
 		"date-fns": "^4.4.0",
+		"drizzle-orm": "^0.45.2",
 		"lucide-react": "^1.21.0",
 		"next": "16.2.9",
 		"react": "19.2.7",
 		"react-dom": "19.2.7",
+		"sonner": "^2.0.7",
 		"zod": "^4.4.3"
 	},
 	"devDependencies": {
