@@ -36,6 +36,7 @@ describe("chargeVatPercent", () => {
 	it("prefers persisted basis points", () => {
 		expect(
 			chargeVatPercent({
+				feeSubtype: null,
 				grossMinor: 10600,
 				kind: "accommodation",
 				name: "Stay",
@@ -49,6 +50,7 @@ describe("chargeVatPercent", () => {
 	it("derives from amounts when basis points are absent", () => {
 		expect(
 			chargeVatPercent({
+				feeSubtype: "cleaning",
 				grossMinor: 12300,
 				kind: "fee",
 				name: "Cleaning fee",
@@ -62,6 +64,7 @@ describe("chargeVatPercent", () => {
 	it("returns zero for untaxed rows", () => {
 		expect(
 			chargeVatPercent({
+				feeSubtype: null,
 				grossMinor: 400,
 				kind: "tax",
 				name: "City tax",
@@ -76,6 +79,7 @@ describe("chargeVatPercent", () => {
 describe("buildInvoiceLine", () => {
 	it("maps accommodation to the certified AL product", () => {
 		const line = buildInvoiceLine({
+			feeSubtype: null,
 			grossMinor: 10600,
 			kind: "accommodation",
 			name: "4 nights",
@@ -97,6 +101,7 @@ describe("buildInvoiceLine", () => {
 
 	it("maps tourist tax rows to TMT with the exemption code", () => {
 		const line = buildInvoiceLine({
+			feeSubtype: null,
 			grossMinor: 800,
 			kind: "tax",
 			name: "Touristic tax",
@@ -109,11 +114,12 @@ describe("buildInvoiceLine", () => {
 		expect(line.reasonCode).toBe("M99");
 	});
 
-	it("maps cleaning fees by name", () => {
+	it("maps cleaning fees by subtype", () => {
 		const line = buildInvoiceLine({
+			feeSubtype: "cleaning",
 			grossMinor: 4920,
 			kind: "fee",
-			name: "Short-term cleaning fee",
+			name: "Taxa de limpeza",
 			netMinor: 4000,
 			taxMinor: 920,
 			taxRateBasisPoints: 2300,
@@ -122,8 +128,22 @@ describe("buildInvoiceLine", () => {
 		expect(line.vat).toBe(23);
 	});
 
+	it("does not classify fees from mutable names", () => {
+		const line = buildInvoiceLine({
+			feeSubtype: null,
+			grossMinor: 4920,
+			kind: "fee",
+			name: "Short-term cleaning fee",
+			netMinor: 4000,
+			taxMinor: 920,
+			taxRateBasisPoints: 2300,
+		});
+		expect(line.productId).toBe("EXTRAS");
+	});
+
 	it("keeps discount rows negative so the total matches the charge", () => {
 		const line = buildInvoiceLine({
+			feeSubtype: null,
 			grossMinor: -1000,
 			kind: "discount",
 			name: "Promo code",
@@ -140,6 +160,7 @@ describe("invoiceableCharges", () => {
 	it("drops zero-value rows", () => {
 		const rows = invoiceableCharges([
 			{
+				feeSubtype: null,
 				grossMinor: 0,
 				kind: "fee",
 				name: "Waived fee",
@@ -148,6 +169,7 @@ describe("invoiceableCharges", () => {
 				taxRateBasisPoints: null,
 			},
 			{
+				feeSubtype: null,
 				grossMinor: 100,
 				kind: "fee",
 				name: "Real fee",

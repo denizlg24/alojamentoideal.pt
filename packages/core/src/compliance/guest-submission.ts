@@ -108,8 +108,13 @@ export function buildHostkitGuest(
 	if (!documentNumber) {
 		missing.push("documentNumber");
 	} else if (documentNumber.length > HOSTKIT_DOCUMENT_ID_MAX_LENGTH) {
-		// A truncated document number would file a legally wrong bulletin.
 		missing.push("documentNumber(too long)");
+	}
+	if (firstName && firstName.length > HOSTKIT_NAME_MAX_LENGTH) {
+		missing.push("firstName(too long)");
+	}
+	if (lastName && lastName.length > HOSTKIT_NAME_MAX_LENGTH) {
+		missing.push("lastName(too long)");
 	}
 	if (!documentType) {
 		missing.push("documentType");

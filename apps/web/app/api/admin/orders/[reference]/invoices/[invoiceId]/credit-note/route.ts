@@ -1,9 +1,4 @@
-import {
-	invoicingErrorResponse,
-	invoicingService,
-	rejectUnlessInvoicingAdmin,
-} from "@/lib/api/invoicing";
-import { withApiRoute } from "@/lib/api/route";
+import { invoicingService, withInvoicingAdmin } from "@/lib/api/invoicing";
 
 interface AdminCreditNoteRouteContext {
 	params: Promise<{ invoiceId: string; reference: string }>;
@@ -13,32 +8,19 @@ interface AdminCreditNoteRouteContext {
  * Admin-only: issue a Hostkit credit note voiding a previously issued
  * invoice. Same double gate as invoice creation; not wired into any UI.
  */
-export const POST = withApiRoute<AdminCreditNoteRouteContext>(
+export const POST = withInvoicingAdmin<AdminCreditNoteRouteContext>(
 	{
 		name: "admin.orders.invoices.credit_note",
 		rateLimit: { bucket: "mutation" },
 	},
-	async (request: Request, context): Promise<Response> => {
-		const rejection = await rejectUnlessInvoicingAdmin(request, {
-			mutation: true,
-		});
-		if (rejection) {
-			return rejection;
-		}
-
+	async (_: Request, context): Promise<Response> => {
 		const { invoiceId, reference } = await context.params;
-		try {
-			const creditNote = await invoicingService().createCreditNote({
-				invoiceId,
-				orderReference: reference,
-			});
-			return Response.json({ data: { creditNote }, success: true });
-		} catch (error) {
-			const handled = invoicingErrorResponse(error);
-			if (handled) {
-				return handled;
-			}
-			throw error;
-		}
+
+		const creditNote = await invoicingService().createCreditNote({
+			invoiceId,
+			orderReference: reference,
+		});
+
+		return Response.json({ data: { creditNote }, success: true });
 	},
 );

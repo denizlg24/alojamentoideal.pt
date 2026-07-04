@@ -11,6 +11,7 @@ export const FINAL_CONSUMER_CUSTOMER_ID = "999999990";
 const VAT_EXEMPTION_REASON_CODE = "M99";
 
 export interface InvoiceChargeRow {
+	feeSubtype: string | null;
 	grossMinor: number;
 	kind: string;
 	name: string;
@@ -100,26 +101,47 @@ function chargeProduct(charge: InvoiceChargeRow): {
 			break;
 	}
 
-	const name = charge.name.toLowerCase();
-	if (name.includes("cleaning")) {
-		return { productId: "CF", type: "S" };
+	if (charge.kind === "fee") {
+		switch (normalizeFeeSubtype(charge.feeSubtype)) {
+			case "cleaning":
+			case "cleaning_fee":
+				return { productId: "CF", type: "S" };
+			case "breakfast":
+			case "breakfast_fee":
+				return { productId: "PA", type: "P" };
+			case "city_tax":
+			case "municipal_tax":
+			case "tax":
+			case "tourist_tax":
+			case "touristic_tax":
+				return { productId: "TMT", type: "I" };
+			case "administrative":
+			case "administrative_fee":
+			case "booking_fee":
+			case "guest_registration":
+			case "guest_registration_fee":
+			case "hoa":
+			case "hoa_fee":
+			case "management":
+			case "management_fee":
+			case "service":
+			case "service_fee":
+				return { productId: "SAL", type: "S" };
+			default:
+				break;
+		}
 	}
-	if (name.includes("breakfast")) {
-		return { productId: "PA", type: "P" };
-	}
-	if (name.includes("touristic tax") || name.includes("tourist tax")) {
-		return { productId: "TMT", type: "I" };
-	}
-	if (
-		name.includes("management") ||
-		name.includes("administrative") ||
-		name.includes("guest registration") ||
-		name.includes("hoa") ||
-		name.includes("booking fee")
-	) {
-		return { productId: "SAL", type: "S" };
-	}
+
 	return { productId: "EXTRAS", type: "S" };
+}
+
+function normalizeFeeSubtype(value: string | null): string | null {
+	const normalized =
+		value
+			?.trim()
+			.toLowerCase()
+			.replace(/[\s-]+/g, "_") ?? "";
+	return normalized || null;
 }
 
 /** Formats a minor-unit amount as the decimal string Hostkit expects. */

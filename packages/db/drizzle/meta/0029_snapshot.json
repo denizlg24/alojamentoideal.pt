@@ -4933,8 +4933,7 @@
           "name": "guest_reminder_email_next_at",
           "type": "timestamp with time zone",
           "primaryKey": false,
-          "notNull": false,
-          "default": "now()"
+          "notNull": false
         },
         "created_at": {
           "name": "created_at",

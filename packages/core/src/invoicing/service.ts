@@ -123,18 +123,29 @@ export class InvoicingService {
 		}
 
 		const charges = invoiceableCharges(
-			await this.#db
-				.select({
-					grossMinor: orderItemChargeTable.grossMinor,
-					kind: orderItemChargeTable.kind,
-					name: orderItemChargeTable.name,
-					netMinor: orderItemChargeTable.netMinor,
-					taxMinor: orderItemChargeTable.taxMinor,
-					taxRateBasisPoints: orderItemChargeTable.taxRateBasisPoints,
-				})
-				.from(orderItemChargeTable)
-				.where(eq(orderItemChargeTable.orderItemId, item.id))
-				.orderBy(asc(orderItemChargeTable.position)),
+			(
+				await this.#db
+					.select({
+						grossMinor: orderItemChargeTable.grossMinor,
+						kind: orderItemChargeTable.kind,
+						name: orderItemChargeTable.name,
+						netMinor: orderItemChargeTable.netMinor,
+						rawPayload: orderItemChargeTable.rawPayload,
+						taxMinor: orderItemChargeTable.taxMinor,
+						taxRateBasisPoints: orderItemChargeTable.taxRateBasisPoints,
+					})
+					.from(orderItemChargeTable)
+					.where(eq(orderItemChargeTable.orderItemId, item.id))
+					.orderBy(asc(orderItemChargeTable.position))
+			).map((charge) => ({
+				feeSubtype: feeSubtypeFromRawPayload(charge.rawPayload),
+				grossMinor: charge.grossMinor,
+				kind: charge.kind,
+				name: charge.name,
+				netMinor: charge.netMinor,
+				taxMinor: charge.taxMinor,
+				taxRateBasisPoints: charge.taxRateBasisPoints,
+			})),
 		);
 		if (charges.length === 0) {
 			throw new InvoicingError(
@@ -152,6 +163,7 @@ export class InvoicingService {
 		});
 
 		let hostkitInvoiceId: string | null = null;
+		let providerDraftClosed = false;
 		try {
 			const property = await client.property.get();
 			const invoicingNif = property.invoicing_nif ?? null;
@@ -203,6 +215,7 @@ export class InvoicingService {
 				invoicingNif,
 				series,
 			});
+			providerDraftClosed = true;
 
 			const now = this.#now();
 			await this.#updateRecord(record.id, {
@@ -212,6 +225,10 @@ export class InvoicingService {
 			});
 			return await this.#loadRecord(record.id);
 		} catch (error) {
+			if (providerDraftClosed) {
+				throw error;
+			}
+
 			// Leave no half-filled provider draft behind; best-effort only, the
 			// failed local row keeps the trail either way.
 			if (hostkitInvoiceId) {
@@ -277,6 +294,18 @@ export class InvoicingService {
 			);
 		}
 
+		const record = await this.#insertCreditNoteDraftRecord({
+			currency: invoice.currency,
+			invoicingNif: invoice.invoicingNif,
+			orderId: order.id,
+			orderItemId: invoice.orderItemId,
+			refInvoiceId: invoice.id,
+			reservationCode: invoice.reservationCode,
+			series: invoice.hostkitSeries,
+			totalMinor: -invoice.totalMinor,
+		});
+
+		let providerCreditNoteCreated = false;
 		try {
 			const created = await client.invoicing.addCreditNote({
 				invoicingNif: invoice.invoicingNif ?? undefined,
@@ -290,6 +319,7 @@ export class InvoicingService {
 				);
 			}
 			const creditNoteId = String(created.id);
+			providerCreditNoteCreated = true;
 			const documentUrl = await this.#findCreditNoteUrl(
 				client,
 				invoice.hostkitSeries,
@@ -298,31 +328,30 @@ export class InvoicingService {
 			);
 
 			const now = this.#now();
-			const id = crypto.randomUUID();
-			await this.#db.insert(orderInvoiceTable).values({
-				currency: invoice.currency,
+			await this.#updateRecord(record.id, {
 				documentUrl,
 				hostkitInvoiceId: creditNoteId,
-				hostkitSeries: invoice.hostkitSeries,
-				id,
-				invoicingNif: invoice.invoicingNif,
 				issuedAt: now,
-				kind: "credit_note",
-				orderId: order.id,
-				orderItemId: invoice.orderItemId,
-				refInvoiceId: invoice.id,
-				reservationCode: invoice.reservationCode,
+				lastErrorMessage: null,
 				status: "issued",
-				totalMinor: -invoice.totalMinor,
 			});
-			return await this.#loadRecord(id);
+			return await this.#loadRecord(record.id);
 		} catch (error) {
+			if (providerCreditNoteCreated) {
+				throw error;
+			}
+
+			const message = describeError(error);
+			await this.#updateRecord(record.id, {
+				lastErrorMessage: message,
+				status: "failed",
+			});
 			if (error instanceof InvoicingError) {
 				throw error;
 			}
 			throw new InvoicingError(
 				"provider_error",
-				`Hostkit credit note issuance failed: ${describeError(error)}`,
+				`Hostkit credit note issuance failed: ${message}`,
 			);
 		}
 	}
@@ -379,6 +408,33 @@ export class InvoicingService {
 			}
 			throw error;
 		}
+		return { id };
+	}
+
+	async #insertCreditNoteDraftRecord(values: {
+		currency: string;
+		invoicingNif: string | null;
+		orderId: string;
+		orderItemId: string;
+		refInvoiceId: string;
+		reservationCode: string | null;
+		series: string | null;
+		totalMinor: number;
+	}) {
+		const id = crypto.randomUUID();
+		await this.#db.insert(orderInvoiceTable).values({
+			currency: values.currency,
+			hostkitSeries: values.series,
+			id,
+			invoicingNif: values.invoicingNif,
+			kind: "credit_note",
+			orderId: values.orderId,
+			orderItemId: values.orderItemId,
+			refInvoiceId: values.refInvoiceId,
+			reservationCode: values.reservationCode,
+			status: "draft",
+			totalMinor: values.totalMinor,
+		});
 		return { id };
 	}
 
@@ -468,7 +524,7 @@ export class InvoicingService {
 		const contact = rows[0];
 		if (!contact) {
 			throw new InvoicingError(
-				"order_not_found",
+				"billing_contact_missing",
 				"order has no billing contact",
 			);
 		}
@@ -502,6 +558,13 @@ export class InvoicingService {
 
 function stringOrNull(value: unknown): string | null {
 	return typeof value === "string" && value.trim() ? value : null;
+}
+
+function feeSubtypeFromRawPayload(
+	payload: Record<string, unknown> | null,
+): string | null {
+	const value = payload?.feeSubtype ?? payload?.type;
+	return typeof value === "string" && value.trim() ? value.trim() : null;
 }
 
 /** Operator-facing error text: no API keys, no guest identity values. */

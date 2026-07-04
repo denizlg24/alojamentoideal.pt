@@ -127,16 +127,16 @@ describe("buildHostkitGuest", () => {
 		expect(result.missing).toContain("documentNumber(too long)");
 	});
 
-	it("truncates names to 40 characters", () => {
+	it("long names return incomplete", () => {
 		const result = buildHostkitGuest(
 			{ ...COMPLETE_GUEST, firstName: "A".repeat(60) },
 			STAY,
 		);
-		expect(result.kind).toBe("ok");
-		if (result.kind !== "ok") {
+		expect(result.kind).toBe("incomplete");
+		if (result.kind !== "incomplete") {
 			return;
 		}
-		expect(result.guest.firstName).toHaveLength(40);
+		expect(result.missing).toContain("firstName(too long)");
 	});
 });
 

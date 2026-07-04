@@ -46,6 +46,7 @@ import {
 	decryptIdentityField,
 	encryptIdentityField,
 } from "../account/identity-encryption";
+import { nextGuestInfoReminderAt } from "../compliance/guest-reminder";
 import type { RefundRequest, RefundResult } from "../integrations/stripe";
 import { trackEvent } from "../observability";
 import {
@@ -4353,16 +4354,19 @@ export class CommerceService {
 			});
 
 			const providerBookingId = crypto.randomUUID();
+			const stayStartsAt = stayDateToTimestamp(rows.detail.checkIn);
+			const stayEndsAt = stayDateToTimestamp(rows.detail.checkOut);
 			await tx.insert(providerBookingTable).values({
 				createdAt: now,
 				externalAccountId: rows.detail.externalAccountId,
+				guestReminderEmailNextAt: nextGuestInfoReminderAt(now, stayStartsAt),
 				id: providerBookingId,
 				normalizedStatus: "pending",
 				orderId,
 				orderItemId,
 				provider: rows.detail.provider,
-				stayEndsAt: stayDateToTimestamp(rows.detail.checkOut),
-				stayStartsAt: stayDateToTimestamp(rows.detail.checkIn),
+				stayEndsAt,
+				stayStartsAt,
 				updatedAt: now,
 			});
 

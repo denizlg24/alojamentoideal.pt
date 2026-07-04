@@ -2,6 +2,7 @@ import { createHostkitClientForListing } from "@workspace/core/integrations/host
 import { InvoicingError, InvoicingService } from "@workspace/core/invoicing";
 import { getDb } from "@workspace/db";
 import { getAdminUser } from "@/lib/auth/admin";
+import { type ApiRouteOptions, type RouteHandler, withApiRoute } from "./route";
 
 /**
  * Kill switch for fiscal-document issuance. The admin endpoints exist ahead
@@ -48,6 +49,7 @@ export async function rejectUnlessInvoicingAdmin(
 
 const ERROR_STATUS: Record<InvoicingError["code"], number> = {
 	already_invoiced: 409,
+	billing_contact_missing: 422,
 	credit_note_target_invalid: 422,
 	currency_unsupported: 422,
 	customer_country_unresolved: 422,
@@ -61,6 +63,10 @@ const ERROR_STATUS: Record<InvoicingError["code"], number> = {
 	reservation_code_unavailable: 422,
 };
 
+interface InvoicingAdminRouteOptions extends ApiRouteOptions {
+	mutation?: boolean;
+}
+
 export function invoicingErrorResponse(error: unknown): Response | null {
 	if (!(error instanceof InvoicingError)) {
 		return null;
@@ -68,5 +74,33 @@ export function invoicingErrorResponse(error: unknown): Response | null {
 	return Response.json(
 		{ code: error.code, error: error.message },
 		{ status: ERROR_STATUS[error.code] ?? 500 },
+	);
+}
+
+export function withInvoicingAdmin<Ctx = unknown>(
+	options: InvoicingAdminRouteOptions,
+	handler: RouteHandler<Ctx>,
+) {
+	const { mutation = true, ...routeOptions } = options;
+
+	return withApiRoute<Ctx>(
+		routeOptions,
+		async (request: Request, context): Promise<Response> => {
+			const rejection = await rejectUnlessInvoicingAdmin(request, {
+				mutation,
+			});
+			if (rejection) {
+				return rejection;
+			}
+			try {
+				return await handler(request, context);
+			} catch (error) {
+				const handled = invoicingErrorResponse(error);
+				if (handled) {
+					return handled;
+				}
+				throw error;
+			}
+		},
 	);
 }

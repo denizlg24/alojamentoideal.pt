@@ -35,6 +35,9 @@ const DEFAULT_SWEEP_LOOKBACK_DAYS = 30;
 /** Re-check cadence when a listing has no Hostkit key provisioned yet. */
 const UNCONFIGURED_RETRY_DELAY_MS = 6 * 60 * 60 * 1000;
 
+/** Lease window for a running SIBA guest-submission job. */
+const GUEST_SUBMISSION_JOB_LEASE_MS = 30 * 60 * 1000;
+
 /** Temporary lease for a reminder email send claim. */
 const GUEST_REMINDER_EMAIL_CLAIM_MS = 15 * 60 * 1000;
 
@@ -156,14 +159,17 @@ export class GuestComplianceService {
 
 	/**
 	 * Enqueues a submission job for every confirmed booking whose roster is
-	 * complete and not yet covered: no active job, and no terminal job newer
-	 * than the roster's last change (so editing a guest after a successful
+	 * complete and not yet covered: no active non-stale job, and no terminal job
+	 * newer than the roster's last change (so editing a guest after a successful
 	 * submission re-syncs it).
 	 */
 	async sweepEligibleBookings(
 		limit = 20,
 	): Promise<GuestSubmissionSweepSummary> {
 		const now = this.#now();
+		const staleRunningBefore = new Date(
+			now.getTime() - GUEST_SUBMISSION_JOB_LEASE_MS,
+		);
 		const lookbackStart = new Date(
 			now.getTime() - this.#sweepLookbackDays * 24 * 60 * 60 * 1000,
 		);
@@ -194,10 +200,23 @@ export class GuestComplianceService {
 			select 1 from ${jobs}
 			where ${jobs.providerBookingId} = ${bookings.id}
 			and (
-				${jobs.status} in ('pending', 'running', 'retrying')
-				or ${jobs.updatedAt} >= (
-					select max(${guests.updatedAt}) from ${guests}
-					where ${guests.providerBookingId} = ${bookings.id}
+				${jobs.status} in ('pending', 'retrying')
+				or (
+					${jobs.status} = 'running'
+					and (
+						(${jobs.nextRunAt} is not null and ${jobs.nextRunAt} > ${now})
+						or (
+							${jobs.nextRunAt} is null
+							and coalesce(${jobs.startedAt}, ${jobs.updatedAt}) > ${staleRunningBefore}
+						)
+					)
+				)
+				or (
+					${jobs.status} in ('succeeded', 'failed', 'canceled')
+					and ${jobs.updatedAt} >= (
+						select max(${guests.updatedAt}) from ${guests}
+						where ${guests.providerBookingId} = ${bookings.id}
+					)
 				)
 			)
 		)`;
@@ -258,15 +277,7 @@ export class GuestComplianceService {
 		const due = await this.#db
 			.select({ id: guestSubmissionJobTable.id })
 			.from(guestSubmissionJobTable)
-			.where(
-				and(
-					inArray(guestSubmissionJobTable.status, ["pending", "retrying"]),
-					or(
-						sql`${guestSubmissionJobTable.nextRunAt} is null`,
-						lte(guestSubmissionJobTable.nextRunAt, now),
-					),
-				),
-			)
+			.where(dueGuestSubmissionJobCondition(now))
 			.orderBy(asc(guestSubmissionJobTable.nextRunAt))
 			.limit(limit);
 
@@ -503,13 +514,21 @@ export class GuestComplianceService {
 
 	async #claimJob(jobId: string) {
 		const now = this.#now();
+		const leaseExpiresAt = new Date(
+			now.getTime() + GUEST_SUBMISSION_JOB_LEASE_MS,
+		);
 		const rows = await this.#db
 			.update(guestSubmissionJobTable)
-			.set({ startedAt: now, status: "running", updatedAt: now })
+			.set({
+				nextRunAt: leaseExpiresAt,
+				startedAt: now,
+				status: "running",
+				updatedAt: now,
+			})
 			.where(
 				and(
 					eq(guestSubmissionJobTable.id, jobId),
-					inArray(guestSubmissionJobTable.status, ["pending", "retrying"]),
+					dueGuestSubmissionJobCondition(now),
 				),
 			)
 			.returning({
@@ -797,6 +816,38 @@ function emptyGuestInfoReminderSummary(): GuestInfoReminderSummary {
 		reminderEmailsSent: 0,
 		reminderEmailsSkipped: 0,
 	};
+}
+
+function dueGuestSubmissionJobCondition(now: Date): SQL {
+	const staleRunningBefore = new Date(
+		now.getTime() - GUEST_SUBMISSION_JOB_LEASE_MS,
+	);
+
+	return sql`(
+		(
+			${guestSubmissionJobTable.status} in ('pending', 'retrying')
+			and (
+				${guestSubmissionJobTable.nextRunAt} is null
+				or ${guestSubmissionJobTable.nextRunAt} <= ${now}
+			)
+		)
+		or (
+			${guestSubmissionJobTable.status} = 'running'
+			and (
+				(
+					${guestSubmissionJobTable.nextRunAt} is not null
+					and ${guestSubmissionJobTable.nextRunAt} <= ${now}
+				)
+				or (
+					${guestSubmissionJobTable.nextRunAt} is null
+					and coalesce(
+						${guestSubmissionJobTable.startedAt},
+						${guestSubmissionJobTable.updatedAt}
+					) <= ${staleRunningBefore}
+				)
+			)
+		)
+	)`;
 }
 
 function hasGuestNeedingReminder(): SQL {

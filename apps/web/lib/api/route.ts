@@ -29,7 +29,7 @@ export interface ApiRouteOptions {
 	rateLimit?: RateLimitRouteOptions | false;
 }
 
-type RouteHandler<Ctx> = (
+export type RouteHandler<Ctx> = (
 	request: Request,
 	context: Ctx,
 ) => Promise<Response> | Response;

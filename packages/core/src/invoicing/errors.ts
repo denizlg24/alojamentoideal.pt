@@ -1,5 +1,6 @@
 export type InvoicingErrorCode =
 	| "already_invoiced"
+	| "billing_contact_missing"
 	| "credit_note_target_invalid"
 	| "currency_unsupported"
 	| "customer_country_unresolved"

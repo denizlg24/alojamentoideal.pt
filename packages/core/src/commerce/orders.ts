@@ -139,10 +139,20 @@ function toDraftChargeRow(
 		position,
 		providerChargeId: null,
 		quantity: quantity.toFixed(2),
-		rawPayload: line.providerPayload,
+		rawPayload: chargeRawPayload(line),
 		taxMinor,
 		taxRateBasisPoints: null,
 		unitNetMinor: Math.round(netMinor / Math.max(quantity, 1)),
+	};
+}
+
+function chargeRawPayload(
+	line: AccommodationQuoteFeeSnapshot,
+): Record<string, unknown> {
+	return {
+		...(line.providerPayload ?? {}),
+		feeSubtype: line.type,
+		type: line.type,
 	};
 }
 

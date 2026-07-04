@@ -1180,7 +1180,7 @@ export const providerBooking = pgTable(
 		),
 		guestReminderEmailNextAt: timestampWithTimezone(
 			"guest_reminder_email_next_at",
-		).defaultNow(),
+		),
 		createdAt: timestampWithTimezone("created_at").notNull().defaultNow(),
 		updatedAt: timestampWithTimezone("updated_at").notNull().defaultNow(),
 	},

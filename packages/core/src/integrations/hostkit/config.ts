@@ -79,7 +79,7 @@ export function createHostkitClientForListing(
 			"HOSTKIT_TIMEOUT_MS",
 			environment.HOSTKIT_TIMEOUT_MS,
 		),
-		uid: environment.HOSTKIT_UID,
+		uid: environment.HOSTKIT_UID ?? undefined,
 	});
 }
 
@@ -120,7 +120,7 @@ function parseApiKeyMap(
 }
 
 function optionalNumber(name: string, value: string | undefined) {
-	if (value === undefined) {
+	if (value === undefined || value.trim() === "") {
 		return undefined;
 	}
 
