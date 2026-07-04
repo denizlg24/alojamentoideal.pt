@@ -7,6 +7,7 @@ export * from "./order-detail";
 export * from "./order-guests";
 export * from "./orders";
 export * from "./payments";
+export * from "./refunds";
 export * from "./reservations";
 export * from "./schemas";
 export * from "./service";

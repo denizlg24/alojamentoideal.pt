@@ -11,6 +11,7 @@ import {
 	CommerceService,
 	HostifyReservationGateway,
 	mapStripePaymentStatus,
+	OrderRefundService,
 	type ProviderReservationGateway,
 	type ResolvedOrderAccess,
 	StubReservationGateway,
@@ -130,6 +131,22 @@ export function commerceService(): CommerceService {
 						status: mapStripePaymentStatus(snapshot.status),
 					};
 				}
+			: undefined,
+	});
+}
+
+/**
+ * Request-scoped service for operator-issued manual refunds. Shares the same
+ * optional Stripe wiring as {@link commerceService}: when Stripe is not
+ * configured the service still constructs, but `refundOrder` rejects with
+ * `refund_unavailable`.
+ */
+export function orderRefundService(): OrderRefundService {
+	const stripe = optionalStripeClient();
+	return new OrderRefundService({
+		db: getDb(),
+		refundPayment: stripe
+			? (request) => createRefund(stripe, request)
 			: undefined,
 	});
 }

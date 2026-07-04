@@ -15,11 +15,13 @@ import {
 	adminOrderAccess,
 	commerceService,
 	loadAdminOrder,
+	orderRefundService,
 } from "@/lib/api/commerce";
 import { invoicingService } from "@/lib/api/invoicing";
 import { formatDate, formatDateTime, formatMoneyMinor } from "@/lib/format";
 import { GuestEditDialog } from "./guest-edit-dialog";
 import { OrderActions } from "./order-actions";
+import { RefundPanel } from "./refund-panel";
 
 interface OrderDetailPageProps {
 	params: Promise<{ reference: string }>;
@@ -60,9 +62,10 @@ export default async function OrderDetailPage({
 
 	const access = adminOrderAccess(row);
 	const service = commerceService();
-	const [detail, invoices] = await Promise.all([
+	const [detail, invoices, refunds] = await Promise.all([
 		service.readOrderDetail(access),
 		invoicingService().listOrderInvoices(row.publicReference),
+		orderRefundService().listOrderRefunds(row.id),
 	]);
 
 	const bookingIds = detail.items
@@ -77,6 +80,19 @@ export default async function OrderDetailPage({
 
 	const pricing = detail.pricing;
 	const contact = detail.contact;
+	const currency = pricing?.currency ?? "EUR";
+	const refundableMinor = Math.max(
+		0,
+		row.amountPaidMinor - row.amountRefundedMinor,
+	);
+	const refundItems = detail.items.map((item) => ({
+		amountMinor: item.pricing?.totalMinor ?? null,
+		id: item.id,
+		title: item.title,
+	}));
+	const itemTitleById = new Map(
+		detail.items.map((item) => [item.id, item.title]),
+	);
 
 	return (
 		<div className="mx-auto max-w-4xl">
@@ -244,6 +260,66 @@ export default async function OrderDetailPage({
 						);
 					})}
 				</div>
+			</section>
+
+			<section className="mt-10">
+				<div className="flex items-center justify-between gap-4">
+					<h2 className="font-medium text-sm">Payments &amp; refunds</h2>
+					{row.amountPaidMinor > 0 && refundableMinor > 0 ? (
+						<RefundPanel
+							currency={currency}
+							items={refundItems}
+							reference={row.publicReference}
+							refundableMinor={refundableMinor}
+						/>
+					) : null}
+				</div>
+				{refunds.length === 0 ? (
+					<p className="mt-3 text-muted-foreground text-sm">
+						{row.amountPaidMinor > 0
+							? `${formatMoneyMinor(refundableMinor, currency)} refundable. No refunds issued yet.`
+							: "No payment captured for this order."}
+					</p>
+				) : (
+					<Table className="mt-3">
+						<TableHeader>
+							<TableRow>
+								<TableHead className="text-right">Amount</TableHead>
+								<TableHead>Status</TableHead>
+								<TableHead>Reason</TableHead>
+								<TableHead>Attributed to</TableHead>
+								<TableHead>Issued</TableHead>
+								<TableHead>Stripe id</TableHead>
+							</TableRow>
+						</TableHeader>
+						<TableBody>
+							{refunds.map((refund) => (
+								<TableRow key={refund.id}>
+									<TableCell className="text-right tabular-nums">
+										{formatMoneyMinor(refund.amountMinor, refund.currency)}
+									</TableCell>
+									<TableCell>
+										<StatusDot status={refund.status} />
+									</TableCell>
+									<TableCell className="text-muted-foreground">
+										{refund.reason.replace(/_/g, " ")}
+									</TableCell>
+									<TableCell className="text-muted-foreground">
+										{refund.orderItemId
+											? (itemTitleById.get(refund.orderItemId) ?? "Reservation")
+											: "Whole order"}
+									</TableCell>
+									<TableCell className="text-muted-foreground">
+										{formatDateTime(refund.createdAt)}
+									</TableCell>
+									<TableCell className="text-muted-foreground">
+										{refund.stripeRefundId ?? "—"}
+									</TableCell>
+								</TableRow>
+							))}
+						</TableBody>
+					</Table>
+				)}
 			</section>
 
 			<section className="mt-10">
