@@ -1,5 +1,6 @@
 import "@workspace/ui/globals.css";
 import { Toaster } from "@workspace/ui/components/sonner";
+import { TooltipProvider } from "@workspace/ui/components/tooltip";
 import type { Metadata } from "next";
 import { Bricolage_Grotesque, Hanken_Grotesk } from "next/font/google";
 
@@ -32,7 +33,7 @@ export default function RootLayout({
 			<body
 				className={`${fontSans.variable} ${fontDisplay.variable} font-sans antialiased`}
 			>
-				{children}
+				<TooltipProvider>{children}</TooltipProvider>
 				<Toaster />
 			</body>
 		</html>
