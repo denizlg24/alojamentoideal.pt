@@ -30,6 +30,20 @@ const LINE_TYPES = [
 	{ label: "Tax", value: "I" },
 ] as const;
 
+/**
+ * Hostkit certified-product presets (mirrors the auto-mapping catalogue).
+ * Surfaced as combobox suggestions; the operator can still type any product id
+ * (Hostkit creates unknown ids on the fly).
+ */
+const PRODUCT_PRESETS = [
+	{ id: "AL", label: "Accommodation" },
+	{ id: "CF", label: "Cleaning" },
+	{ id: "TMT", label: "Tourist tax" },
+	{ id: "PA", label: "Breakfast" },
+	{ id: "SAL", label: "Service fee" },
+	{ id: "EXTRAS", label: "Extras" },
+] as const;
+
 function blankLine(): EditableInvoiceLine {
 	return {
 		customDescription: "",
@@ -126,9 +140,17 @@ export function InvoicePanel({
 
 	const total = linesTotalMinor(lines);
 	const canSubmit = invoicingEnabled && draft.hostkitConfigured;
+	const productListId = `invoice-products-${draft.orderItemId}`;
 
 	return (
 		<div className="mt-3 space-y-4 rounded-lg border border-border/60 p-4">
+			<datalist id={productListId}>
+				{PRODUCT_PRESETS.map((product) => (
+					<option key={product.id} value={product.id}>
+						{product.label}
+					</option>
+				))}
+			</datalist>
 			<div className="flex items-center justify-between gap-3">
 				<h3 className="font-medium text-sm">Invoice</h3>
 				<div className="flex items-center gap-2">
@@ -287,7 +309,8 @@ export function InvoicePanel({
 									</td>
 									<td className="py-1 pr-2">
 										<Input
-											className="h-8 w-20"
+											className="h-8 w-28"
+											list={productListId}
 											onChange={(event) =>
 												updateLine(index, { productId: event.target.value })
 											}
