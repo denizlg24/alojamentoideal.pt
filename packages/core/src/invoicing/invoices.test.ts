@@ -1,10 +1,16 @@
 import { describe, expect, it } from "bun:test";
 import {
+	buildInvoiceCustomerDraft,
 	buildInvoiceLine,
 	chargeVatPercent,
+	type EditableInvoiceLine,
+	editableInvoiceLinesTotalMinor,
+	editableInvoiceLineToDraft,
 	invoiceableCharges,
 	minorToDecimalString,
+	resolveDraftInvoiceCustomer,
 	resolveInvoiceCustomer,
+	toEditableInvoiceLine,
 } from "./invoices";
 
 const BASE_CUSTOMER = {
@@ -221,6 +227,141 @@ describe("resolveInvoiceCustomer", () => {
 		).toBe("unresolved_country");
 		expect(
 			resolveInvoiceCustomer({ ...BASE_CUSTOMER, billingCountry: "ZZ" }).kind,
+		).toBe("unresolved_country");
+	});
+});
+
+const EDITABLE_LINE: EditableInvoiceLine = {
+	customDescription: "Stay",
+	discount: 0,
+	price: "100.00",
+	productId: "AL",
+	quantity: 3,
+	reasonCode: null,
+	type: "S",
+	vat: 6,
+};
+
+describe("editableInvoiceLineToDraft", () => {
+	it("defaults a zero-VAT line's exemption reason to M99", () => {
+		const draft = editableInvoiceLineToDraft({
+			...EDITABLE_LINE,
+			reasonCode: null,
+			vat: 0,
+		});
+		expect(draft.reasonCode).toBe("M99");
+	});
+
+	it("keeps an explicit reason code and omits it for taxed lines", () => {
+		expect(
+			editableInvoiceLineToDraft({
+				...EDITABLE_LINE,
+				reasonCode: "M10",
+				vat: 0,
+			}).reasonCode,
+		).toBe("M10");
+		expect(
+			editableInvoiceLineToDraft(EDITABLE_LINE).reasonCode,
+		).toBeUndefined();
+	});
+});
+
+describe("editableInvoiceLinesTotalMinor", () => {
+	it("sums gross line totals with quantity, discount and VAT", () => {
+		// 3 * 100.00 = 300.00 net, +6% VAT = 318.00
+		expect(editableInvoiceLinesTotalMinor([EDITABLE_LINE])).toBe(31800);
+	});
+
+	it("applies a whole-percent line discount before VAT", () => {
+		// 1 * 100.00 net, 10% discount -> 90.00, +23% VAT = 110.70
+		expect(
+			editableInvoiceLinesTotalMinor([
+				{
+					...EDITABLE_LINE,
+					discount: 10,
+					quantity: 1,
+					vat: 23,
+				},
+			]),
+		).toBe(11070);
+	});
+
+	it("ignores lines with a non-numeric price", () => {
+		expect(
+			editableInvoiceLinesTotalMinor([{ ...EDITABLE_LINE, price: "abc" }]),
+		).toBe(0);
+	});
+});
+
+describe("toEditableInvoiceLine", () => {
+	it("round-trips an auto-built charge line, keeping price a string", () => {
+		const line = toEditableInvoiceLine(
+			buildInvoiceLine({
+				feeSubtype: null,
+				grossMinor: 10600,
+				kind: "accommodation",
+				name: "Stay",
+				netMinor: 10000,
+				taxMinor: 600,
+				taxRateBasisPoints: 600,
+			}),
+		);
+		expect(line.price).toBe("100.00");
+		expect(line.type).toBe("S");
+		expect(line.vat).toBe(6);
+		expect(line.quantity).toBe(1);
+	});
+});
+
+describe("buildInvoiceCustomerDraft", () => {
+	it("prefills the editable recipient from the billing contact", () => {
+		const draft = buildInvoiceCustomerDraft(BASE_CUSTOMER);
+		expect(draft.name).toBe("Alana Bolsch");
+		expect(draft.country).toBe("PT");
+		expect(draft.city).toBe("Porto");
+		expect(draft.address).toBe("Rua do Exemplo 10");
+		expect(draft.taxNumber).toBeNull();
+	});
+
+	it("prefers the company name for company contacts", () => {
+		expect(
+			buildInvoiceCustomerDraft({
+				...BASE_CUSTOMER,
+				companyName: "Ocean Lda",
+				isCompany: true,
+			}).name,
+		).toBe("Ocean Lda");
+	});
+});
+
+describe("resolveDraftInvoiceCustomer", () => {
+	it("resolves country to alpha-3 and falls back to the final-consumer id", () => {
+		const result = resolveDraftInvoiceCustomer(
+			buildInvoiceCustomerDraft(BASE_CUSTOMER),
+		);
+		expect(result.kind).toBe("ok");
+		if (result.kind === "ok") {
+			expect(result.customer.country).toBe("PRT");
+			expect(result.customer.customerId).toBe("999999990");
+		}
+	});
+
+	it("uses the tax number as the customer id when present", () => {
+		const result = resolveDraftInvoiceCustomer({
+			...buildInvoiceCustomerDraft(BASE_CUSTOMER),
+			taxNumber: "501234567",
+		});
+		expect(result.kind === "ok" && result.customer.customerId).toBe(
+			"501234567",
+		);
+	});
+
+	it("blocks an unmappable country", () => {
+		expect(
+			resolveDraftInvoiceCustomer({
+				...buildInvoiceCustomerDraft(BASE_CUSTOMER),
+				country: "",
+			}).kind,
 		).toBe("unresolved_country");
 	});
 });

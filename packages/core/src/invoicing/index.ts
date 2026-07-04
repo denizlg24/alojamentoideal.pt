@@ -1,20 +1,30 @@
 export { InvoicingError, type InvoicingErrorCode } from "./errors";
 export {
+	buildInvoiceCustomerDraft,
 	buildInvoiceLine,
 	chargeVatPercent,
+	type EditableInvoiceLine,
+	editableInvoiceLinesTotalMinor,
+	editableInvoiceLineToDraft,
 	FINAL_CONSUMER_CUSTOMER_ID,
 	type InvoiceChargeRow,
+	type InvoiceCustomerDraft,
 	type InvoiceCustomerInput,
 	type InvoiceLineDraft,
 	invoiceableCharges,
 	minorToDecimalString,
 	type ResolveCustomerResult,
 	type ResolvedInvoiceCustomer,
+	resolveDraftInvoiceCustomer,
 	resolveInvoiceCustomer,
+	toEditableInvoiceLine,
 } from "./invoices";
 export {
+	type BuildInvoiceDraftInput,
 	type CreateCreditNoteInput,
+	type CreateOrderItemInvoiceFromLinesInput,
 	type CreateOrderItemInvoiceInput,
 	InvoicingService,
 	type InvoicingServiceOptions,
+	type OrderItemInvoiceDraft,
 } from "./service";

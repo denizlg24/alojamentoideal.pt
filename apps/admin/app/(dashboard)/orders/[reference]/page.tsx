@@ -17,9 +17,10 @@ import {
 	loadAdminOrder,
 	orderRefundService,
 } from "@/lib/api/commerce";
-import { invoicingService } from "@/lib/api/invoicing";
+import { invoicingEnabled, invoicingService } from "@/lib/api/invoicing";
 import { formatDate, formatDateTime, formatMoneyMinor } from "@/lib/format";
 import { GuestEditDialog } from "./guest-edit-dialog";
+import { InvoiceDialog } from "./invoice-dialog";
 import { OrderActions } from "./order-actions";
 import { RefundPanel } from "./refund-panel";
 
@@ -92,6 +93,16 @@ export default async function OrderDetailPage({
 	}));
 	const itemTitleById = new Map(
 		detail.items.map((item) => [item.id, item.title]),
+	);
+	const invoicingIsEnabled = invoicingEnabled();
+	const activeInvoiceItemIds = new Set(
+		invoices
+			.filter(
+				(invoice) =>
+					invoice.kind === "invoice" &&
+					(invoice.status === "draft" || invoice.status === "issued"),
+			)
+			.map((invoice) => invoice.orderItemId),
 	);
 
 	return (
@@ -213,6 +224,20 @@ export default async function OrderDetailPage({
 										) : null}
 									</div>
 								</div>
+
+								{item.type === "accommodation" &&
+								row.status === "confirmed" &&
+								!activeInvoiceItemIds.has(item.id) ? (
+									<div className="mt-3">
+										<InvoiceDialog
+											currency={currency}
+											invoicingEnabled={invoicingIsEnabled}
+											itemId={item.id}
+											itemTitle={item.title}
+											reference={row.publicReference}
+										/>
+									</div>
+								) : null}
 
 								{booking && guests && guests.length > 0 ? (
 									<Table className="mt-3">
