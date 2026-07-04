@@ -9,6 +9,7 @@ import {
 	type CommerceParseResult,
 	type CommerceQuoteInput,
 	CommerceService,
+	HostifyConversationGateway,
 	HostifyReservationGateway,
 	mapStripePaymentStatus,
 	OrderRefundService,
@@ -29,6 +30,7 @@ import { getRedis } from "@workspace/core/redis";
 import type { AppliedDiscountSnapshot } from "@workspace/db";
 import { getDb, order } from "@workspace/db";
 import { eq } from "drizzle-orm";
+import { createPusherRealtimePublisher } from "./realtime";
 
 export const HOSTIFY_PROVIDER = "hostify";
 
@@ -67,9 +69,8 @@ function optionalStripeClient(): ReturnType<
 
 /**
  * Request-scoped CommerceService for admin operations. Mirrors the web app's
- * factory minus the guest-facing extras (realtime publisher, conversation
- * gateway, cart quote error mapping): the admin surface only drives the
- * reservation saga and guest records.
+ * factory minus cart quote error mapping. Admin conversation replies still use
+ * the same Hostify inbox gateway and realtime publisher as the guest surface.
  */
 export function commerceService(): CommerceService {
 	const config = getAccommodationsConfig();
@@ -118,6 +119,11 @@ export function commerceService(): CommerceService {
 			provider === HOSTIFY_PROVIDER
 				? resolveHostifyGateway(hostifyClient)
 				: undefined,
+		resolveConversationGateway: (provider) =>
+			provider === HOSTIFY_PROVIDER
+				? new HostifyConversationGateway({ client: hostifyClient })
+				: undefined,
+		realtimePublisher: createPusherRealtimePublisher(),
 		retrievePaymentIntent: stripe
 			? async (paymentIntentId) => {
 					const snapshot = await retrievePaymentIntentSnapshot(

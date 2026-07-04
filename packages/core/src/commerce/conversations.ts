@@ -55,6 +55,8 @@ export interface ProviderConversationGateway {
 		body: string,
 		channelMessageId: string,
 	): Promise<string | null>;
+	/** Delivers a host/operator reply into the provider thread. */
+	sendHostReply(threadId: string, body: string): Promise<string | null>;
 }
 
 export interface ConversationSummary {
@@ -340,6 +342,17 @@ export class HostifyConversationGateway implements ProviderConversationGateway {
 				channel_message_id: channelMessageId,
 				message: body,
 				sent_by: "guest",
+				thread_id: threadId,
+			},
+			this.#context,
+		);
+		return idToString(response.id);
+	}
+
+	async sendHostReply(threadId: string, body: string): Promise<string | null> {
+		const response = await this.#client.inbox.reply(
+			{
+				message: body,
 				thread_id: threadId,
 			},
 			this.#context,

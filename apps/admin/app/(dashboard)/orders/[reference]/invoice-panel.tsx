@@ -6,6 +6,20 @@ import type {
 	OrderItemInvoiceDraft,
 } from "@workspace/core/invoicing";
 import { Button } from "@workspace/ui/components/button";
+import {
+	Combobox,
+	ComboboxContent,
+	ComboboxEmpty,
+	ComboboxInput,
+	ComboboxItem,
+	ComboboxList,
+} from "@workspace/ui/components/combobox";
+import {
+	Dialog,
+	DialogContent,
+	DialogDescription,
+	DialogHeader,
+} from "@workspace/ui/components/dialog";
 import { Input } from "@workspace/ui/components/input";
 import { Label } from "@workspace/ui/components/label";
 import {
@@ -140,17 +154,95 @@ export function InvoicePanel({
 
 	const total = linesTotalMinor(lines);
 	const canSubmit = invoicingEnabled && draft.hostkitConfigured;
-	const productListId = `invoice-products-${draft.orderItemId}`;
+
+	const [createProduct, setCreateProduct] = useState<{
+		enabled: boolean;
+		lineIndex: number;
+		label: string;
+		id: string;
+	}>({ enabled: false, lineIndex: -1, label: "", id: "" });
+
+	function openCreateProductDialog(lineIndex: number, label: string) {
+		const trimmedLabel = label.trim();
+		if (trimmedLabel.length === 0) {
+			return;
+		}
+
+		setCreateProduct({
+			enabled: true,
+			lineIndex,
+			label: trimmedLabel,
+			id: trimmedLabel.toUpperCase().replace(/\s+/g, "_"),
+		});
+	}
 
 	return (
 		<div className="mt-3 space-y-4 rounded-lg border border-border/60 p-4">
-			<datalist id={productListId}>
-				{PRODUCT_PRESETS.map((product) => (
-					<option key={product.id} value={product.id}>
-						{product.label}
-					</option>
-				))}
-			</datalist>
+			<Dialog
+				open={createProduct.enabled}
+				onOpenChange={(enabled) => {
+					if (!enabled) {
+						setCreateProduct({
+							enabled: false,
+							lineIndex: -1,
+							label: "",
+							id: "",
+						});
+						return;
+					}
+					setCreateProduct((current) => ({ ...current, enabled }));
+				}}
+			>
+				<DialogContent>
+					<DialogHeader>Create a custom Product</DialogHeader>
+					<DialogDescription>
+						Create a new custom product for this invoice.
+					</DialogDescription>
+					<form className="flex w-full flex-col gap-2">
+						<Label htmlFor="product-name">Product Name</Label>
+						<Input
+							value={createProduct.label}
+							onChange={(e) =>
+								setCreateProduct((prev) => ({
+									...prev,
+									label: e.target.value,
+								}))
+							}
+							id="product-name"
+							placeholder="Accommodation"
+						/>
+						<Label htmlFor="product-id">Product ID</Label>
+						<Input
+							value={createProduct.id}
+							onChange={(e) =>
+								setCreateProduct((prev) => ({
+									...prev,
+									id: e.target.value,
+								}))
+							}
+							id="product-id"
+							placeholder="AL"
+						/>
+						<Button
+							type="button"
+							onClick={() => {
+								updateLine(createProduct.lineIndex, {
+									productId: createProduct.id,
+									customDescription: createProduct.label,
+								});
+								setCreateProduct({
+									enabled: false,
+									lineIndex: -1,
+									label: "",
+									id: "",
+								});
+							}}
+						>
+							Create Product
+						</Button>
+					</form>
+				</DialogContent>
+			</Dialog>
 			<div className="flex items-center justify-between gap-3">
 				<h3 className="font-medium text-sm">Invoice</h3>
 				<div className="flex items-center gap-2">
@@ -308,14 +400,66 @@ export function InvoicePanel({
 										/>
 									</td>
 									<td className="py-1 pr-2">
-										<Input
-											className="h-8 w-28"
-											list={productListId}
-											onChange={(event) =>
-												updateLine(index, { productId: event.target.value })
-											}
+										<Combobox
+											items={PRODUCT_PRESETS}
 											value={line.productId}
-										/>
+											onValueChange={(value) => {
+												if (value) updateLine(index, { productId: value });
+											}}
+											onInputValueChange={(value) => {
+												setCreateProduct((prev) => ({ ...prev, label: value }));
+											}}
+										>
+											<ComboboxInput
+												className="h-8 w-28"
+												onKeyDown={(event) => {
+													if (event.key !== "Enter") {
+														return;
+													}
+
+													const label = createProduct.label.trim();
+													const hasPreset = PRODUCT_PRESETS.some(
+														(product) =>
+															product.id.toLowerCase() ===
+																label.toLowerCase() ||
+															product.label.toLowerCase() ===
+																label.toLowerCase(),
+													);
+
+													if (!hasPreset) {
+														event.preventDefault();
+														openCreateProductDialog(index, label);
+													}
+												}}
+												placeholder="Select a product"
+											/>
+											<ComboboxContent className="w-50! max-w-full!">
+												<ComboboxEmpty className="p-2">
+													<Button
+														className="h-8 w-full"
+														onMouseDown={(event) => event.preventDefault()}
+														onClick={() =>
+															openCreateProductDialog(
+																index,
+																createProduct.label,
+															)
+														}
+														size="sm"
+														type="button"
+														variant="ghost"
+													>
+														Create custom
+													</Button>
+												</ComboboxEmpty>
+												<ComboboxList>
+													{(item) => (
+														<ComboboxItem key={item.id} value={item.id}>
+															{item.label}
+														</ComboboxItem>
+													)}
+												</ComboboxList>
+											</ComboboxContent>
+										</Combobox>
 									</td>
 									<td className="py-1 pr-2">
 										<NativeSelect

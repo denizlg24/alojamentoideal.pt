@@ -1,4 +1,9 @@
 import {
+	type ConversationMessageDto,
+	type ConversationSummary,
+	conversationChannelName,
+} from "@workspace/core/commerce";
+import {
 	Table,
 	TableBody,
 	TableCell,
@@ -19,6 +24,7 @@ import {
 } from "@/lib/api/commerce";
 import { invoicingEnabled, invoicingService } from "@/lib/api/invoicing";
 import { formatDate, formatDateTime, formatMoneyMinor } from "@/lib/format";
+import { ConversationPanel } from "./conversation-panel";
 import { GuestEditDialog } from "./guest-edit-dialog";
 import { InvoicePanel } from "./invoice-panel";
 import { OrderActions } from "./order-actions";
@@ -51,6 +57,16 @@ function DefinitionRow({
 			<dd className="mt-0.5 text-sm">{value}</dd>
 		</div>
 	);
+}
+
+function primaryConversation(
+	conversations: ConversationSummary[],
+): ConversationSummary | null {
+	const live = conversations.find(
+		(conversation) =>
+			conversation.status === "active" && conversation.externalThreadId,
+	);
+	return live ?? conversations[0] ?? null;
 }
 
 export default async function OrderDetailPage({
@@ -128,6 +144,29 @@ export default async function OrderDetailPage({
 			}),
 		),
 	);
+	const conversation = primaryConversation(detail.conversations);
+	const realtimeConfigured = Boolean(
+		process.env.NEXT_PUBLIC_PUSHER_KEY &&
+			process.env.NEXT_PUBLIC_PUSHER_CLUSTER,
+	);
+	const channelName =
+		conversation && realtimeConfigured
+			? conversationChannelName(row.id, conversation.id)
+			: null;
+	let initialMessages: ConversationMessageDto[] = [];
+	let messagesLoadError = false;
+	if (conversation) {
+		try {
+			initialMessages = await service.readConversationMessages(
+				access,
+				conversation.id,
+				{ limit: 100 },
+			);
+		} catch (error) {
+			console.error("Failed to load admin order conversation messages", error);
+			messagesLoadError = true;
+		}
+	}
 
 	return (
 		<div className="mx-auto max-w-4xl">
@@ -210,6 +249,14 @@ export default async function OrderDetailPage({
 					</>
 				) : null}
 			</dl>
+
+			<ConversationPanel
+				channelName={channelName}
+				conversationId={conversation?.id ?? null}
+				initialMessages={initialMessages}
+				messagesLoadError={messagesLoadError}
+				reference={row.publicReference}
+			/>
 
 			<section className="mt-10">
 				<h2 className="font-medium text-sm">Items</h2>
