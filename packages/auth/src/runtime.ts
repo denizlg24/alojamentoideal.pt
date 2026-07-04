@@ -7,12 +7,21 @@ import { z } from "zod";
 import { getAuthConfig } from "./config";
 import { sendResetPasswordEmail, sendVerificationEmail } from "./email";
 
-export function createAuth() {
+export interface CreateAuthOptions {
+	/**
+	 * Origin serving this Better Auth mount. Defaults to BETTER_AUTH_URL (the
+	 * guest-facing web app); the admin app passes its own origin so a second
+	 * mount can share the same user/session tables.
+	 */
+	baseURL?: string;
+}
+
+export function createAuth(options: CreateAuthOptions = {}) {
 	const config = getAuthConfig();
 
 	return betterAuth({
 		appName: "Alojamento Ideal",
-		baseURL: config.baseURL,
+		baseURL: options.baseURL ?? config.baseURL,
 		basePath: "/api/auth",
 		secret: config.secret,
 		trustedOrigins: config.trustedOrigins,

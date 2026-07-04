@@ -1,0 +1,37 @@
+{
+	"name": "admin",
+	"version": "0.0.1",
+	"type": "module",
+	"private": true,
+	"scripts": {
+		"dev": "next dev -p 3001",
+		"build": "next build",
+		"start": "next start -p 3001",
+		"typecheck": "next typegen && tsc --noEmit",
+		"test": "bun test --pass-with-no-tests",
+		"db:seed-root-admin": "bun run scripts/seed-root-admin.ts"
+	},
+	"dependencies": {
+		"@workspace/auth": "workspace:*",
+		"@workspace/core": "workspace:*",
+		"@workspace/db": "workspace:*",
+		"@workspace/ui": "workspace:*",
+		"better-auth": "^1.6.20",
+		"date-fns": "^4.4.0",
+		"drizzle-orm": "^0.45.2",
+		"lucide-react": "^1.21.0",
+		"next": "16.2.9",
+		"react": "19.2.7",
+		"react-dom": "19.2.7",
+		"sonner": "^2.0.7",
+		"zod": "^4.4.3"
+	},
+	"devDependencies": {
+		"@tailwindcss/postcss": "^4",
+		"@types/node": "^26",
+		"@types/react": "^19",
+		"@types/react-dom": "^19",
+		"@workspace/typescript-config": "workspace:*",
+		"typescript": "^6"
+	}
+}

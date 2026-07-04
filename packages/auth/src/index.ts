@@ -22,3 +22,4 @@ export {
 	type OrderInviteEmailInput,
 	type OutboundEmail,
 } from "./email";
+export { type CreateAuthOptions, createAuth } from "./runtime";
