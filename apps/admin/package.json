@@ -8,7 +8,8 @@
 		"build": "next build",
 		"start": "next start -p 3001",
 		"typecheck": "next typegen && tsc --noEmit",
-		"test": "bun test --pass-with-no-tests"
+		"test": "bun test --pass-with-no-tests",
+		"db:seed-root-admin": "bun run scripts/seed-root-admin.ts"
 	},
 	"dependencies": {
 		"@workspace/auth": "workspace:*",

@@ -15,6 +15,7 @@
 		"db:migrate": "dotenv -- bun run --filter @workspace/db db:migrate",
 		"db:push": "dotenv -- bun run --filter @workspace/db db:push",
 		"db:studio": "dotenv -- bun run --filter @workspace/db db:studio",
+		"db:seed-root-admin": "dotenv -- bun run --filter admin db:seed-root-admin",
 		"db:up": "docker compose up -d postgres",
 		"db:down": "docker compose stop postgres",
 		"redis:up": "docker compose up -d redis",
