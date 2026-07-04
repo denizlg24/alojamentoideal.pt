@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { readJson } from "@/lib/api/commerce";
+import { readJson } from "@/lib/api/admin-route";
 import { invoicingService, withInvoicingAdmin } from "@/lib/api/invoicing";
 
 interface AdminOrderItemInvoiceRouteContext {
@@ -13,8 +13,8 @@ const createInvoiceSchema = z.object({
 /**
  * Admin-only: issue the Hostkit invoice for one order item (draft -> lines
  * from the order's own charge rows -> close). Double-gated: admin role plus
- * HOSTKIT_INVOICING_ENABLED. Deliberately not wired into any UI or payment
- * hook yet; issuance is an explicit operator action.
+ * HOSTKIT_INVOICING_ENABLED. Issuance is an explicit operator action, never
+ * a payment hook.
  */
 export const POST = withInvoicingAdmin<AdminOrderItemInvoiceRouteContext>(
 	{ name: "admin.orders.invoices.create", rateLimit: { bucket: "mutation" } },

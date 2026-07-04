@@ -6,7 +6,7 @@ interface AdminOrderInvoicesRouteContext {
 
 /**
  * Admin-only: fiscal documents recorded for an order (local rows, no
- * provider call). Not linked from any UI yet — M7 dashboard territory.
+ * provider call).
  */
 export const GET = withInvoicingAdmin<AdminOrderInvoicesRouteContext>(
 	{

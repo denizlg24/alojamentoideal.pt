@@ -1,13 +1,13 @@
 import { createHostkitClientForListing } from "@workspace/core/integrations/hostkit";
 import { InvoicingError, InvoicingService } from "@workspace/core/invoicing";
 import { getDb } from "@workspace/db";
-import { getAdminUser } from "@/lib/auth/admin";
+import { getAdminUser } from "../auth/admin";
 import { type ApiRouteOptions, type RouteHandler, withApiRoute } from "./route";
 
 /**
- * Kill switch for fiscal-document issuance. The admin endpoints exist ahead
- * of the M7 dashboard but must not be able to touch real financial documents
- * until the business flips HOSTKIT_INVOICING_ENABLED=true.
+ * Kill switch for fiscal-document issuance. The admin endpoints must not be
+ * able to touch real financial documents until the business flips
+ * HOSTKIT_INVOICING_ENABLED=true.
  */
 export function invoicingEnabled(): boolean {
 	return process.env.HOSTKIT_INVOICING_ENABLED === "true";

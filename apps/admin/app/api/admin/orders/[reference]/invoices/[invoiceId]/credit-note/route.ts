@@ -6,7 +6,7 @@ interface AdminCreditNoteRouteContext {
 
 /**
  * Admin-only: issue a Hostkit credit note voiding a previously issued
- * invoice. Same double gate as invoice creation; not wired into any UI.
+ * invoice. Same double gate as invoice creation.
  */
 export const POST = withInvoicingAdmin<AdminCreditNoteRouteContext>(
 	{
