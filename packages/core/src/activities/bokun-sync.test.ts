@@ -79,6 +79,37 @@ describe("BokunActivityCacheSync.pollActivities", () => {
 		expect(repository.upserts).toHaveLength(0);
 	});
 
+	test("shortens the retry when every activity fails", async () => {
+		const repository = new FakeActivityCacheRepository();
+		// Both configured ids are missing from the client, so each fetch throws.
+		const client = new FakeBokunClient({});
+		const sync = createSync({ client, repository });
+
+		const result = await sync.pollActivities("poll");
+
+		expect(result.status).toBe("completed");
+		expect(result.data?.status).toBe("completed_with_errors");
+		expect(result.data?.activitiesFailed).toBe(2);
+		expect(result.data?.errors).toHaveLength(2);
+		// Total failure falls back to the 10-minute lease backoff, not 24h.
+		expect(result.nextRunAt).toBe("2026-06-18T12:10:00.000Z");
+		expect(repository.state.status).toBe("failed");
+	});
+
+	test("keeps the full interval when only some activities fail", async () => {
+		const repository = new FakeActivityCacheRepository();
+		const client = new FakeBokunClient({ "1": activity("1") });
+		const sync = createSync({ client, repository });
+
+		const result = await sync.pollActivities("poll");
+
+		expect(result.data?.status).toBe("completed_with_errors");
+		expect(result.data?.activitiesCreated).toBe(1);
+		expect(result.data?.activitiesFailed).toBe(1);
+		// A partial failure keeps the normal 24h cadence.
+		expect(result.nextRunAt).toBe("2026-06-19T12:00:00.000Z");
+	});
+
 	test("skips polls before the next run time", async () => {
 		const repository = new FakeActivityCacheRepository();
 		const client = new FakeBokunClient({

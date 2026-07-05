@@ -167,7 +167,13 @@ export function ActivityPhotoGallery({
 
 	return (
 		<div className="min-h-screen bg-background">
-			<header className="sticky top-0 z-40 border-b bg-background/95 backdrop-blur">
+			{/* `inert` while the lightbox is open removes the background from the tab
+			    order and the accessibility tree, so assistive tech can't reach it via
+			    virtual-cursor navigation past the manual Tab trap. */}
+			<header
+				inert={isOpen}
+				className="sticky top-0 z-40 border-b bg-background/95 backdrop-blur"
+			>
 				<div className="mx-auto flex h-16 max-w-7xl items-center gap-3 px-4 sm:px-6">
 					<Button asChild variant="ghost" size="icon" className="rounded-full">
 						<Link href={backHref} aria-label="Back to activity">
@@ -226,7 +232,10 @@ export function ActivityPhotoGallery({
 				</nav>
 			</header>
 
-			<main className="mx-auto grid max-w-7xl gap-6 px-4 py-8 sm:px-6 lg:grid-cols-[14rem_minmax(0,1fr)] lg:gap-10">
+			<main
+				inert={isOpen}
+				className="mx-auto grid max-w-7xl gap-6 px-4 py-8 sm:px-6 lg:grid-cols-[14rem_minmax(0,1fr)] lg:gap-10"
+			>
 				<aside className="hidden lg:block">
 					<div className="sticky top-64">
 						<h1 className="font-heading font-semibold text-3xl">Overview</h1>

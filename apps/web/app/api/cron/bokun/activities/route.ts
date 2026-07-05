@@ -27,7 +27,7 @@ export const GET = withApiRoute(
 			return Response.json({ error: "Unauthorized" }, { status: 401 });
 		}
 
-		const sync = await createBokunActivityCacheSyncFromEnv();
+		const sync = await createBokunActivityCacheSyncFromEnv(config);
 		const result = await sync.pollActivities("poll");
 
 		const changedExternalIds = result.data?.changedExternalIds ?? [];

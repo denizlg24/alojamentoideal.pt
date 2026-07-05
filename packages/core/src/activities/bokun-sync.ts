@@ -60,12 +60,14 @@ interface ActivityProjection {
 	summary: ActivitySummary;
 }
 
-export async function createBokunActivityCacheSyncFromEnv() {
-	const config = await getActivityCacheConfigFromSettings();
+export async function createBokunActivityCacheSyncFromEnv(
+	config?: ActivityCacheConfig,
+) {
+	const resolvedConfig = config ?? (await getActivityCacheConfigFromSettings());
 
 	return new BokunActivityCacheSync({
 		client: createBokunClientFromEnv(),
-		config,
+		config: resolvedConfig,
 		repository: new ActivityCacheRepository(getDb()),
 	});
 }
@@ -144,10 +146,17 @@ export class BokunActivityCacheSync {
 				stats.activitiesFailed > 0 ? "completed_with_errors" : "completed";
 			const finishedAt = this.#now();
 			await this.finishRun(activeRunId, stats, undefined, finishedAt);
-			const nextRunAt = new Date(
-				finishedAt.getTime() +
-					this.#config.syncIntervalHours * MILLISECONDS_PER_HOUR,
-			);
+			// A run where every fetched activity failed is a provider outage, not a
+			// steady state: `syncActivity` swallows per-activity errors so it never
+			// throws into the catch below. Fall back to the short lease backoff so we
+			// retry within minutes instead of waiting a full sync interval.
+			const isTotalFailure =
+				stats.activitiesSeen > 0 &&
+				stats.activitiesFailed === stats.activitiesSeen;
+			const nextRunDelayMs = isTotalFailure
+				? this.#config.syncLeaseMinutes * MILLISECONDS_PER_MINUTE
+				: this.#config.syncIntervalHours * MILLISECONDS_PER_HOUR;
+			const nextRunAt = new Date(finishedAt.getTime() + nextRunDelayMs);
 			await this.#repository.completeSyncState({
 				activeRunId,
 				error:

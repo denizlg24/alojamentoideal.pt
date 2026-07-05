@@ -175,11 +175,11 @@ export function resolveActivityPlaceId(
 
 	const city = location.city?.trim().toLowerCase();
 	if (city) {
+		// Exact match only. Substring matching risks placing an activity under the
+		// wrong service area (e.g. a preset label that is a substring of an
+		// unrelated city). An unmatched city degrades safely to "All areas".
 		const match = CATALOG_LOCATION_PRESETS.find(
-			(preset) =>
-				preset.label.toLowerCase() === city ||
-				preset.label.toLowerCase().includes(city) ||
-				city.includes(preset.label.toLowerCase()),
+			(preset) => preset.label.toLowerCase() === city,
 		);
 		if (match) return match.id;
 	}

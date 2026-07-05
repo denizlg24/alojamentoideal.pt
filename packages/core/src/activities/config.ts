@@ -1,3 +1,4 @@
+import { logger } from "../observability";
 import { getRuntimeSettings } from "../settings";
 import { DEFAULT_ACTIVITY_IDS } from "./defaults";
 
@@ -58,6 +59,12 @@ export function getActivityCacheConfig(
 	const parsedActivityIds = configuredIds
 		? parseActivityIdList(configuredIds)
 		: [];
+	if (configuredIds && parsedActivityIds.length === 0) {
+		logger.warn(
+			"BOKUN_ACTIVITY_IDS was set but contained no valid numeric ids; falling back to defaults",
+			{ configuredIds },
+		);
+	}
 	const activityIds =
 		parsedActivityIds.length > 0
 			? parsedActivityIds

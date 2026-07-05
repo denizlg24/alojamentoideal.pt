@@ -17,6 +17,9 @@ const HTML_ENTITIES: Record<string, string> = {
 
 function decodeEntities(value: string): string {
 	return value
+		.replace(/&#x([0-9a-f]+);/gi, (_, code: string) =>
+			String.fromCodePoint(Number.parseInt(code, 16)),
+		)
 		.replace(/&#(\d+);/g, (_, code: string) =>
 			String.fromCodePoint(Number.parseInt(code, 10)),
 		)

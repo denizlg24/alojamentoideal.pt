@@ -104,7 +104,14 @@ export function ActivityGallery({
 					href={photoHref(galleryHref, index + 1)}
 					className={cn(
 						"relative hidden bg-muted transition-opacity hover:opacity-95 md:block",
-						grid.length <= 2 ? "col-span-2 row-span-2" : "col-span-1",
+						// With one extra photo it fills the 2x2 half; with two, each takes
+						// a single row so both stay inside the 2-row grid (otherwise the
+						// second is pushed to an implicit row and clipped by overflow).
+						grid.length === 1
+							? "col-span-2 row-span-2"
+							: grid.length === 2
+								? "col-span-2 row-span-1"
+								: "col-span-1",
 					)}
 					aria-label={`Open all photos at photo ${index + 2}`}
 				>

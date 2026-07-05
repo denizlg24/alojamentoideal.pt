@@ -1,11 +1,9 @@
 import type { ActivityDetail } from "@workspace/core/activities";
 import { addDays, format } from "date-fns";
 import { connection } from "next/server";
+import { AVAILABILITY_WINDOW_DAYS } from "@/lib/activities/constants";
 import { loadActivityAvailability } from "@/lib/activities/source";
 import { ActivityBookingWidget } from "./activity-booking-widget";
-
-/** How far ahead the day list loads departures. */
-const AVAILABILITY_WINDOW_DAYS = 120;
 
 /**
  * Server slot that fetches the live departure window once and hands it to the

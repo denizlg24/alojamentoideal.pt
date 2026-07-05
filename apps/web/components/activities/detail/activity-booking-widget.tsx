@@ -35,16 +35,14 @@ import { Separator } from "@workspace/ui/components/separator";
 import { cn } from "@workspace/ui/lib/utils";
 import { addDays, format, startOfDay } from "date-fns";
 import { CalendarDays, Minus, Plus, Users } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import type { DayButton as DayButtonProps } from "react-day-picker";
+import { AVAILABILITY_WINDOW_DAYS } from "@/lib/activities/constants";
 import { formatActivityMoney, formatLanguage } from "@/lib/activities/format";
 import { parseIsoDate } from "@/lib/catalog/dates";
 import { formatListingMoney } from "@/lib/catalog/pricing-display";
 
 const MAX_PER_CATEGORY = 30;
-
-/** Mirrors the availability window loaded by the server slot. */
-const AVAILABILITY_WINDOW_DAYS = 120;
 
 interface DayEntry {
 	date: string;
@@ -158,15 +156,18 @@ export function ActivityBookingWidget({
 	const total = departure ? computeDepartureTotal(departure, selection) : null;
 	const canBook = departure !== null && issue === null && (total ?? 0) > 0;
 
-	const dayState = (entry: DayEntry | undefined): DayState => {
-		if (!entry) return "none";
-		if (entry.soldOut) return "sold_out";
-		if (entry.seats !== null && entry.seats < Math.max(1, required)) {
-			return "sold_out";
-		}
-		if (entry.minToBook > Math.max(1, participants)) return "below_min";
-		return "open";
-	};
+	const dayState = useCallback(
+		(entry: DayEntry | undefined): DayState => {
+			if (!entry) return "none";
+			if (entry.soldOut) return "sold_out";
+			if (entry.seats !== null && entry.seats < Math.max(1, required)) {
+				return "sold_out";
+			}
+			if (entry.minToBook > Math.max(1, participants)) return "below_min";
+			return "open";
+		},
+		[participants, required],
+	);
 
 	const canIncrement = (category: ActivityPricingCategory): boolean => {
 		if ((selection[category.id] ?? 0) >= MAX_PER_CATEGORY) return false;
@@ -252,53 +253,66 @@ export function ActivityBookingWidget({
 		</section>
 	);
 
-	const AvailabilityDayButton = ({
-		className,
-		day,
-		modifiers,
-		children: _children,
-		...props
-	}: React.ComponentProps<typeof DayButtonProps>) => {
-		const iso = format(day.date, "yyyy-MM-dd");
-		const entry = days.get(iso);
-		const state = dayState(entry);
-		const price = entry && state === "open" ? dayPrice(entry, selection) : null;
+	// Memoized so react-day-picker keeps the same component type across renders
+	// driven by unrelated state (language, coming-soon, start-time). Identity only
+	// changes when the day data, selection, or currency actually change, which is
+	// when the cells genuinely need to re-render.
+	const AvailabilityDayButton = useCallback(
+		({
+			className,
+			day,
+			modifiers,
+			children: _children,
+			...props
+		}: React.ComponentProps<typeof DayButtonProps>) => {
+			const iso = format(day.date, "yyyy-MM-dd");
+			const entry = days.get(iso);
+			const state = dayState(entry);
+			const price =
+				entry && state === "open" ? dayPrice(entry, selection) : null;
 
-		return (
-			<button
-				{...props}
-				className={cn(
-					"relative flex aspect-square size-auto w-full min-w-(--cell-size) flex-col items-center justify-center gap-0.5 overflow-hidden rounded-(--cell-radius) rounded-tr-none! leading-none transition-colors",
-					state === "open" && "hover:bg-accent",
-					state !== "open" && "text-muted-foreground",
-					modifiers.selected && "bg-accent ring-1 ring-primary ring-inset",
-					className,
-				)}
-			>
-				<span className="text-xs sm:text-sm">{day.date.getDate()}</span>
-				{state === "open" && price !== null && (
-					<span className="font-medium text-[0.6rem] text-emerald-600 dark:text-emerald-400">
-						{formatListingMoney(price, currency)}
-					</span>
-				)}
-				{state === "below_min" && entry && (
-					<span className="flex items-center gap-0.5 text-[0.5rem] text-foreground">
-						Min {entry.minToBook}
-						<Users className="size-2 shrink-0" />
-					</span>
-				)}
-				{state === "open" && (
-					<span className="absolute -top-2 -right-2 size-4 rotate-45 bg-emerald-400/80" />
-				)}
-				{state === "below_min" && (
-					<span className="absolute -top-2 -right-2 size-4 rotate-45 bg-amber-400/80" />
-				)}
-				{state === "sold_out" && (
-					<span className="absolute -top-2 -right-2 size-4 rotate-45 bg-destructive/70" />
-				)}
-			</button>
-		);
-	};
+			return (
+				<button
+					{...props}
+					className={cn(
+						"relative flex aspect-square size-auto w-full min-w-(--cell-size) flex-col items-center justify-center gap-0.5 overflow-hidden rounded-(--cell-radius) rounded-tr-none! leading-none transition-colors",
+						state === "open" && "hover:bg-accent",
+						state !== "open" && "text-muted-foreground",
+						modifiers.selected && "bg-accent ring-1 ring-primary ring-inset",
+						className,
+					)}
+				>
+					<span className="text-xs sm:text-sm">{day.date.getDate()}</span>
+					{state === "open" && price !== null && (
+						<span className="font-medium text-[0.6rem] text-emerald-600 dark:text-emerald-400">
+							{formatListingMoney(price, currency)}
+						</span>
+					)}
+					{state === "below_min" && entry && (
+						<span className="flex items-center gap-0.5 text-[0.5rem] text-foreground">
+							Min {entry.minToBook}
+							<Users className="size-2 shrink-0" />
+						</span>
+					)}
+					{state === "open" && (
+						<span className="absolute -top-2 -right-2 size-4 rotate-45 bg-emerald-400/80" />
+					)}
+					{state === "below_min" && (
+						<span className="absolute -top-2 -right-2 size-4 rotate-45 bg-amber-400/80" />
+					)}
+					{state === "sold_out" && (
+						<span className="absolute -top-2 -right-2 size-4 rotate-45 bg-destructive/70" />
+					)}
+				</button>
+			);
+		},
+		[currency, dayState, days, selection],
+	);
+
+	const calendarComponents = useMemo(
+		() => ({ DayButton: AvailabilityDayButton }),
+		[AvailabilityDayButton],
+	);
 
 	const renderCalendar = () => {
 		if (days.size === 0) {
@@ -329,7 +343,7 @@ export function ActivityBookingWidget({
 					disabled={(date) =>
 						dayState(days.get(format(date, "yyyy-MM-dd"))) !== "open"
 					}
-					components={{ DayButton: AvailabilityDayButton }}
+					components={calendarComponents}
 				/>
 				<div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-muted-foreground text-xs">
 					<span className="flex items-center gap-1.5">

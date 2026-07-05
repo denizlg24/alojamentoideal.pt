@@ -394,6 +394,7 @@ export const activityExperience = pgTable(
 		),
 		index("activity_experience_city_idx").on(table.city),
 		index("activity_experience_stale_after_idx").on(table.staleAfter),
+		index("activity_experience_sync_run_id_idx").on(table.syncRunId),
 	],
 );
 
