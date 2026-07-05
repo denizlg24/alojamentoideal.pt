@@ -56,6 +56,10 @@
 			"types": "./src/observability/index.ts",
 			"default": "./src/observability/index.ts"
 		},
+		"./settings": {
+			"types": "./src/settings/index.ts",
+			"default": "./src/settings/index.ts"
+		},
 		"./integrations/hostify": {
 			"types": "./src/integrations/hostify/index.ts",
 			"default": "./src/integrations/hostify/index.ts"

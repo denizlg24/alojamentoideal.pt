@@ -44,7 +44,7 @@ export const POST = withApiRoute<OrderGuestReuseRouteContext>(
 				);
 			}
 
-			const service = commerceService();
+			const service = await commerceService();
 			const access = await service.resolveOrderAccess(reference, accessContext);
 			const guests = await service.applyVerifiedAccountIdentityToGuest(
 				access,

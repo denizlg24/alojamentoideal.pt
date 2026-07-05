@@ -40,9 +40,13 @@ export const POST = withApiRoute<OrderGuestInviteRouteContext>(
 			);
 		}
 
-		const accessContext = await resolveOrderAccessContext(request, reference);
+		const accessContextPromise = resolveOrderAccessContext(request, reference);
+		const servicePromise = commerceService();
 		try {
-			const service = commerceService();
+			const [accessContext, service] = await Promise.all([
+				accessContextPromise,
+				servicePromise,
+			]);
 			const access = await service.resolveOrderAccess(reference, accessContext);
 			const detail = await service.readOrderDetail(access);
 			const accommodationTitle =

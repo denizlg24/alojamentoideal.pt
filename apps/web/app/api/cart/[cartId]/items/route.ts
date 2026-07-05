@@ -25,7 +25,7 @@ export const POST = withApiRoute<CartItemsRouteContext>(
 
 		try {
 			return Response.json(
-				await commerceService().addItem(cartId, parsed.data, owner),
+				await (await commerceService()).addItem(cartId, parsed.data, owner),
 			);
 		} catch (error) {
 			const response = commerceErrorResponse(error);

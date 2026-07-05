@@ -16,7 +16,9 @@ export const GET = withApiRoute<CartRouteContext>(
 		const owner = await resolveCartOwner(request);
 
 		try {
-			return Response.json(await commerceService().getCart(cartId, owner));
+			return Response.json(
+				await (await commerceService()).getCart(cartId, owner),
+			);
 		} catch (error) {
 			const response = commerceErrorResponse(error);
 			if (response) {

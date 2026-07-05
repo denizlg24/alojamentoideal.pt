@@ -20,7 +20,7 @@ export const POST = withApiRoute(
 
 		try {
 			return Response.json(
-				await commerceService().createDraftOrder(parsed.data, owner),
+				await (await commerceService()).createDraftOrder(parsed.data, owner),
 			);
 		} catch (error) {
 			const response = commerceErrorResponse(error);

@@ -23,7 +23,7 @@ export const GET = withApiRoute<OrderDetailRouteContext>(
 		const accessContext = await resolveOrderAccessContext(request, reference);
 
 		try {
-			const service = commerceService();
+			const service = await commerceService();
 			const access = await service.resolveOrderAccess(reference, accessContext);
 			const detail = await service.readOrderDetail(access);
 			return Response.json(detail);

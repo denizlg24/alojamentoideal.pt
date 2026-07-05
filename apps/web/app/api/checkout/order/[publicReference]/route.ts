@@ -33,7 +33,7 @@ export const GET = withApiRoute<OrderStatusRouteContext>(
 		const owner = await resolveCartOwner(request);
 
 		try {
-			const record = await commerceService().readOrderStatus(
+			const record = await (await commerceService()).readOrderStatus(
 				publicReference,
 				owner,
 			);

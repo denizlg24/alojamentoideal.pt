@@ -30,7 +30,7 @@ export const POST = withApiRoute(
 		const owner = await resolveCartOwner(request);
 
 		try {
-			const service = commerceService();
+			const service = await commerceService();
 			const order = parsed.data.orderId
 				? await service.getPayableOrder(parsed.data.orderId, owner)
 				: await service.getPayableOrderForCart(parsed.data.cartId, owner);

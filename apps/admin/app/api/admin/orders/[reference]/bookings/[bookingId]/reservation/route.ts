@@ -71,7 +71,7 @@ export const PUT = withAdminRoute<AdminReservationRouteContext>(
 
 		const { checkIn, checkOut, guests, status } = parsed.data;
 		try {
-			const service = reservationAdminService();
+			const service = await reservationAdminService();
 			if (status && (checkIn || checkOut || guests)) {
 				return Response.json(
 					{

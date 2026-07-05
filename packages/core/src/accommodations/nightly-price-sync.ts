@@ -7,7 +7,7 @@ import {
 import { ListingCacheRepository } from "../listing-cache/repository";
 import { LISTING_SYNC_VERSION } from "../listing-cache/sync-version";
 import type { AccommodationsConfig } from "./config";
-import { getAccommodationsConfig } from "./config";
+import { getAccommodationsConfigFromSettings } from "./config";
 import type {
 	AccommodationPricingRepository,
 	AccommodationScope,
@@ -62,12 +62,12 @@ interface NightlyPriceSyncOptions {
 	syncRepository: ListingCacheRepository;
 }
 
-export function createNightlyPriceSyncFromEnv(): NightlyPriceSync {
+export async function createNightlyPriceSyncFromEnv(): Promise<NightlyPriceSync> {
 	const db = getDb();
 
 	return new NightlyPriceSync({
 		client: createHostifyClientFromEnv(),
-		config: getAccommodationsConfig(),
+		config: await getAccommodationsConfigFromSettings(),
 		repository: new DefaultAccommodationPricingRepository(db),
 		syncRepository: new ListingCacheRepository(db),
 	});
@@ -81,7 +81,9 @@ export function createNightlyPriceSyncFromEnv(): NightlyPriceSync {
 export function resyncAccommodationListing(
 	listingId: string,
 ): Promise<NightlyPriceSyncStats> {
-	return createNightlyPriceSyncFromEnv().syncListing(listingId);
+	return createNightlyPriceSyncFromEnv().then((sync) =>
+		sync.syncListing(listingId),
+	);
 }
 
 export class NightlyPriceSync {

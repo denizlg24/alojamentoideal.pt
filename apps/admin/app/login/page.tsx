@@ -18,7 +18,7 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
 	return (
 		<main className="flex min-h-svh items-center justify-center px-6">
 			<div className="w-full max-w-xs">
-				<h1 className="font-display text-lg font-semibold tracking-tight">
+				<h1 className="font-display font-semibold text-lg tracking-tight">
 					Alojamento Ideal
 				</h1>
 				<p className="mt-1 text-muted-foreground text-sm">

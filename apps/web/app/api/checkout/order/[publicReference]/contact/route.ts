@@ -25,7 +25,7 @@ export const GET = withApiRoute<OrderContactRouteContext>(
 		const owner = await resolveCartOwner(request);
 
 		try {
-			const contact = await commerceService().getOrderContact(
+			const contact = await (await commerceService()).getOrderContact(
 				publicReference,
 				owner,
 			);
@@ -55,7 +55,7 @@ export const PUT = withApiRoute<OrderContactRouteContext>(
 		const owner = await resolveCartOwner(request);
 
 		try {
-			await commerceService().updateDraftOrderContact(
+			await (await commerceService()).updateDraftOrderContact(
 				publicReference,
 				owner,
 				parsed.data,

@@ -20,7 +20,7 @@ export const DELETE = withApiRoute<OrderMemberRouteContext>(
 		const { memberId, reference } = await context.params;
 		const accessContext = await resolveOrderAccessContext(request, reference);
 		try {
-			const service = commerceService();
+			const service = await commerceService();
 			const access = await service.resolveOrderAccess(reference, accessContext);
 			await service.revokeMember(access, memberId);
 			return new Response(null, { status: 204 });

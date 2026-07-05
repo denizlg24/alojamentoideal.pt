@@ -44,7 +44,9 @@ export interface InvoicingServiceOptions {
 	/** Hostkit payment method code stamped on issued invoices. */
 	paymentMethod?: string;
 	/** Returns the property-scoped Hostkit client, or null when not set up. */
-	resolveHostkitClient: (listingId: string) => HostkitClient | null;
+	resolveHostkitClient: (
+		listingId: string,
+	) => HostkitClient | null | Promise<HostkitClient | null>;
 }
 
 export interface CreateOrderItemInvoiceInput {
@@ -183,7 +185,7 @@ export class InvoicingService {
 			currency: order.currency,
 			customer: buildInvoiceCustomerDraft(contact),
 			hostkitConfigured:
-				this.#resolveHostkitClient(item.hostifyListingId) !== null,
+				(await this.#resolveHostkitClient(item.hostifyListingId)) !== null,
 			invoiceType: "FR",
 			itemTitle: item.title,
 			lines: charges.map(buildInvoiceLine).map(toEditableInvoiceLine),
@@ -305,7 +307,7 @@ export class InvoicingService {
 		reservationCode: string | null;
 		totalMinor: number;
 	}): Promise<OrderInvoice> {
-		const client = this.#resolveHostkitClient(params.hostifyListingId);
+		const client = await this.#resolveHostkitClient(params.hostifyListingId);
 		if (!client) {
 			throw new InvoicingError(
 				"hostkit_not_configured",
@@ -463,7 +465,7 @@ export class InvoicingService {
 		}
 
 		const item = await this.#loadOrderItem(order.id, invoice.orderItemId);
-		const client = this.#resolveHostkitClient(item.hostifyListingId);
+		const client = await this.#resolveHostkitClient(item.hostifyListingId);
 		if (!client) {
 			throw new InvoicingError(
 				"hostkit_not_configured",

@@ -2,6 +2,7 @@ import "server-only";
 
 import {
 	CommerceError,
+	type CommerceService,
 	type OrderDetail,
 	type ResolvedOrderAccess,
 } from "@workspace/core/commerce";
@@ -14,6 +15,7 @@ import {
 export interface LoadedOrder {
 	access: ResolvedOrderAccess;
 	detail: OrderDetail;
+	service: CommerceService;
 }
 
 /**
@@ -27,10 +29,10 @@ export const loadOrderForRequest = cache(
 	async (reference: string): Promise<LoadedOrder | null> => {
 		const accessContext = await resolveOrderAccessFromCookies(reference);
 		try {
-			const service = commerceService();
+			const service = await commerceService();
 			const access = await service.resolveOrderAccess(reference, accessContext);
 			const detail = await service.readOrderDetail(access);
-			return { access, detail };
+			return { access, detail, service };
 		} catch (error) {
 			if (error instanceof CommerceError && error.status === 404) {
 				return null;

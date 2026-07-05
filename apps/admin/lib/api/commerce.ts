@@ -1,7 +1,7 @@
 import {
 	type AccommodationQuoteResult,
 	AccommodationQuoteService,
-	getAccommodationsConfig,
+	getAccommodationsConfigFromSettings,
 } from "@workspace/core/accommodations";
 import {
 	CommerceError,
@@ -27,6 +27,7 @@ import {
 	StripeConfigurationError,
 } from "@workspace/core/integrations/stripe";
 import { getRedis } from "@workspace/core/redis";
+import { getRuntimeSettings } from "@workspace/core/settings";
 import type { AppliedDiscountSnapshot } from "@workspace/db";
 import { getDb, order } from "@workspace/db";
 import { eq } from "drizzle-orm";
@@ -34,13 +35,11 @@ import { createPusherRealtimePublisher } from "./realtime";
 
 export const HOSTIFY_PROVIDER = "hostify";
 
-/** Mirrors the web app's HOSTIFY_BOOKINGS_ENABLED dry-run switch. */
-const hostifyBookingsEnabled = process.env.HOSTIFY_BOOKINGS_ENABLED !== "false";
-
 let warnedHostifyDisabled = false;
 
 function resolveHostifyGateway(
 	hostifyClient: ReturnType<typeof createHostifyClientFromEnv>,
+	hostifyBookingsEnabled: boolean,
 ): ProviderReservationGateway {
 	if (hostifyBookingsEnabled) {
 		return new HostifyReservationGateway({ client: hostifyClient });
@@ -72,10 +71,13 @@ function optionalStripeClient(): ReturnType<
  * factory minus cart quote error mapping. Admin conversation replies still use
  * the same Hostify inbox gateway and realtime publisher as the guest surface.
  */
-export function commerceService(): CommerceService {
-	const config = getAccommodationsConfig();
+export async function commerceService(): Promise<CommerceService> {
+	const settings = await getRuntimeSettings();
+	const config = await getAccommodationsConfigFromSettings(settings);
 	const hostifyClient = createHostifyClientFromEnv();
 	const stripe = optionalStripeClient();
+	const hostifyBookingsEnabled =
+		settings["features.hostifyBookingsEnabled"] === true;
 	const quoteService = new AccommodationQuoteService({
 		client: hostifyClient,
 		currency: config.currency,
@@ -86,7 +88,7 @@ export function commerceService(): CommerceService {
 	return new CommerceService({
 		accountId: config.hostifyAccountId,
 		autoRefundOnFailure:
-			process.env.COMMERCE_AUTO_REFUND !== "false" && stripe !== null,
+			settings["features.commerceAutoRefund"] === true && stripe !== null,
 		currency: config.currency,
 		db: getDb(),
 		provider: HOSTIFY_PROVIDER,
@@ -117,7 +119,7 @@ export function commerceService(): CommerceService {
 		},
 		resolveReservationGateway: (provider) =>
 			provider === HOSTIFY_PROVIDER
-				? resolveHostifyGateway(hostifyClient)
+				? resolveHostifyGateway(hostifyClient, hostifyBookingsEnabled)
 				: undefined,
 		resolveConversationGateway: (provider) =>
 			provider === HOSTIFY_PROVIDER
@@ -163,7 +165,10 @@ export function orderRefundService(): OrderRefundService {
  * dates, guest count). In the HOSTIFY_BOOKINGS_ENABLED=false dry-run it gets a
  * null client and only syncs local booking state, mirroring the saga.
  */
-export function reservationAdminService(): ReservationAdminService {
+export async function reservationAdminService(): Promise<ReservationAdminService> {
+	const settings = await getRuntimeSettings();
+	const hostifyBookingsEnabled =
+		settings["features.hostifyBookingsEnabled"] === true;
 	return new ReservationAdminService({
 		db: getDb(),
 		hostify: hostifyBookingsEnabled ? createHostifyClientFromEnv() : null,

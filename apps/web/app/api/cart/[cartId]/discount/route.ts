@@ -25,7 +25,11 @@ export const POST = withApiRoute<CartDiscountRouteContext>(
 
 		try {
 			return Response.json(
-				await commerceService().applyDiscount(cartId, parsed.data, owner),
+				await (await commerceService()).applyDiscount(
+					cartId,
+					parsed.data,
+					owner,
+				),
 			);
 		} catch (error) {
 			const response = commerceErrorResponse(error);
@@ -45,7 +49,7 @@ export const DELETE = withApiRoute<CartDiscountRouteContext>(
 
 		try {
 			return Response.json(
-				await commerceService().removeDiscount(cartId, owner),
+				await (await commerceService()).removeDiscount(cartId, owner),
 			);
 		} catch (error) {
 			const response = commerceErrorResponse(error);

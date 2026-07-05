@@ -30,7 +30,7 @@ export const GET = withApiRoute(
 			return Response.json({ error: "Unauthorized" }, { status: 401 });
 		}
 
-		const summary = await commerceService().reconcileReservations({
+		const summary = await (await commerceService()).reconcileReservations({
 			onCompensated: sendOrderCompensationEmail,
 			onConfirmed: sendOrderConfirmationEmail,
 			onPendingNotice: sendOrderPendingConfirmationEmail,

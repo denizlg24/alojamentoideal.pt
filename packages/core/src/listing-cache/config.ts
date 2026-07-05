@@ -98,6 +98,36 @@ export function getListingCacheConfig(
 	};
 }
 
+export async function getListingCacheConfigFromSettings(): Promise<ListingCacheConfig> {
+	const settings = await getRuntimeSettings();
+	return getListingCacheConfig({
+		CRON_SECRET: process.env.CRON_SECRET,
+		HOSTIFY_ACCOUNT_ID: String(settings["hostify.accountId"]),
+		HOSTIFY_LISTING_INCREMENTAL_BATCH_SIZE: String(
+			settings["hostify.listingIncrementalBatchSize"],
+		),
+		HOSTIFY_LISTING_SYNC_INTERVAL_HOURS: String(
+			settings["hostify.listingSyncIntervalHours"],
+		),
+		HOSTIFY_LISTING_SYNC_LEASE_MINUTES: String(
+			settings["hostify.listingSyncLeaseMinutes"],
+		),
+		HOSTIFY_LISTING_STALE_AFTER_HOURS: String(
+			settings["hostify.listingStaleAfterHours"],
+		),
+		HOSTIFY_LISTING_SYNC_MAX_PAGES: String(
+			settings["hostify.listingSyncMaxPages"],
+		),
+		HOSTIFY_LISTING_SYNC_PER_PAGE: String(
+			settings["hostify.listingSyncPerPage"],
+		),
+		HOSTIFY_SYNC_CRON_SECRET: process.env.HOSTIFY_SYNC_CRON_SECRET,
+		LISTING_LLM_ENABLED: String(settings["features.listingLlmEnabled"]),
+		OPENAI_API_KEY: process.env.OPENAI_API_KEY,
+		OPENAI_LISTING_MODEL: String(settings["listing.openaiModel"]),
+	});
+}
+
 function optionalBoolean(value: string | undefined): boolean | undefined {
 	if (value === undefined) {
 		return undefined;
@@ -124,3 +154,5 @@ function optionalInteger(
 
 	return parsed;
 }
+
+import { getRuntimeSettings } from "../settings";

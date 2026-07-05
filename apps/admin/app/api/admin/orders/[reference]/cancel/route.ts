@@ -27,7 +27,7 @@ export const POST = withAdminRoute<AdminOrderCancelRouteContext>(
 		}
 
 		try {
-			const service = commerceService();
+			const service = await commerceService();
 			const result =
 				row.amountPaidMinor > 0
 					? await service.compensateOrder(row.id, ADMIN_CANCEL_REASON)

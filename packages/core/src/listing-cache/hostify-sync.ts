@@ -6,7 +6,7 @@ import {
 	HostifyApiError,
 } from "../integrations/hostify/index";
 import type { ListingCacheConfig } from "./config";
-import { getListingCacheConfig } from "./config";
+import { getListingCacheConfigFromSettings } from "./config";
 import {
 	buildListingCacheProjection,
 	type HostifyListingSections,
@@ -62,8 +62,8 @@ interface HostifyListingCacheSyncOptions {
 	repository: ListingCacheRepository;
 }
 
-export function createHostifyListingCacheSyncFromEnv() {
-	const config = getListingCacheConfig();
+export async function createHostifyListingCacheSyncFromEnv() {
+	const config = await getListingCacheConfigFromSettings();
 
 	return new HostifyListingCacheSync({
 		client: createHostifyClientFromEnv(),

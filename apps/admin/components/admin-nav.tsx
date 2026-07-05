@@ -8,7 +8,7 @@ import {
 	SidebarMenuItem,
 } from "@workspace/ui/components/sidebar";
 import { cn } from "@workspace/ui/lib/utils";
-import { Activity, ReceiptText, Users } from "lucide-react";
+import { Activity, ReceiptText, Settings, Users } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
@@ -16,6 +16,7 @@ const links = [
 	{ href: "/orders", icon: ReceiptText, label: "Orders" },
 	{ href: "/observability", icon: Activity, label: "Observability" },
 	{ href: "/users", icon: Users, label: "Users" },
+	{ href: "/settings", icon: Settings, label: "Settings" },
 ] as const;
 
 export function AdminNav({ className }: { className?: string }) {

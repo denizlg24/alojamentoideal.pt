@@ -64,6 +64,27 @@ export function getListingReviewSyncConfig(
 	};
 }
 
+export async function getListingReviewSyncConfigFromSettings(): Promise<ListingReviewSyncConfig> {
+	const settings = await getRuntimeSettings();
+	return getListingReviewSyncConfig({
+		CRON_SECRET: process.env.CRON_SECRET,
+		HOSTIFY_ACCOUNT_ID: String(settings["hostify.accountId"]),
+		HOSTIFY_REVIEW_SYNC_BATCH_SIZE: String(
+			settings["hostify.reviewSyncBatchSize"],
+		),
+		HOSTIFY_REVIEW_SYNC_INTERVAL_HOURS: String(
+			settings["hostify.reviewSyncIntervalHours"],
+		),
+		HOSTIFY_REVIEW_SYNC_LEASE_MINUTES: String(
+			settings["hostify.reviewSyncLeaseMinutes"],
+		),
+		HOSTIFY_REVIEW_SYNC_MAX_PAGES: String(
+			settings["hostify.reviewSyncMaxPages"],
+		),
+		HOSTIFY_SYNC_CRON_SECRET: process.env.HOSTIFY_SYNC_CRON_SECRET,
+	});
+}
+
 function optionalInteger(
 	name: string,
 	value: string | undefined,
@@ -82,3 +103,5 @@ function optionalInteger(
 
 	return parsed;
 }
+
+import { getRuntimeSettings } from "../settings";

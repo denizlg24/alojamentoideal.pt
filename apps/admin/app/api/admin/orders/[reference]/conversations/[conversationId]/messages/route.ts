@@ -68,7 +68,7 @@ export const GET = withAdminRoute<AdminConversationMessagesRouteContext>(
 				);
 			}
 
-			const messages = await commerceService().readConversationMessages(
+			const messages = await (await commerceService()).readConversationMessages(
 				adminOrderAccess(row),
 				conversationId,
 				{ limit },
@@ -106,7 +106,9 @@ export const POST = withAdminRoute<AdminConversationMessagesRouteContext>(
 		}
 
 		try {
-			const message = await commerceService().sendHostConversationMessage(
+			const message = await (
+				await commerceService()
+			).sendHostConversationMessage(
 				adminOrderAccess(row),
 				conversationId,
 				{ body },

@@ -110,7 +110,7 @@ export const POST = withAdminRoute(
 		}
 
 		try {
-			const service = commerceService();
+			const service = await commerceService();
 			const access = adminOrderAccess(row);
 			if (access.order.id !== parsedChannel.orderId) {
 				return Response.json({ error: "Forbidden" }, { status: 403 });

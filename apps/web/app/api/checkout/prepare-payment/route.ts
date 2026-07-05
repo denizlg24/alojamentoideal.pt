@@ -29,10 +29,14 @@ export const POST = withApiRoute(
 			return validationResponse(parsed, "Invalid draft order request");
 		}
 
-		const owner = await resolveCartOwner(request);
+		const ownerPromise = resolveCartOwner(request);
+		const servicePromise = commerceService();
 
 		try {
-			const service = commerceService();
+			const [owner, service] = await Promise.all([
+				ownerPromise,
+				servicePromise,
+			]);
 			const draft = await service.createDraftOrder(parsed.data, owner);
 			const order = await service.getPayableOrder(draft.orderId, owner);
 

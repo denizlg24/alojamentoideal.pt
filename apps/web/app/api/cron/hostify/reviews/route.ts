@@ -1,7 +1,7 @@
 import { isAuthorizedCronRequest } from "@workspace/core/listing-cache";
 import {
 	createHostifyListingReviewSyncFromEnv,
-	getListingReviewSyncConfig,
+	getListingReviewSyncConfigFromSettings,
 } from "@workspace/core/listing-reviews";
 import { revalidateTag } from "next/cache";
 import { withApiRoute } from "@/lib/api/route";
@@ -12,7 +12,7 @@ import { HOSTIFY_PROVIDER } from "@/lib/catalog/constants";
 export const GET = withApiRoute(
 	{ name: "cron.hostify.reviews", rateLimit: { bucket: "cron" } },
 	async (request: Request): Promise<Response> => {
-		const config = getListingReviewSyncConfig();
+		const config = await getListingReviewSyncConfigFromSettings();
 
 		if (!config.cronSecret) {
 			return Response.json(
@@ -25,7 +25,7 @@ export const GET = withApiRoute(
 			return Response.json({ error: "Unauthorized" }, { status: 401 });
 		}
 
-		const sync = createHostifyListingReviewSyncFromEnv();
+		const sync = await createHostifyListingReviewSyncFromEnv();
 		const result = await sync.pollReviews("poll");
 
 		const changedListingExternalIds =

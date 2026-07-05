@@ -1,8 +1,10 @@
 export { HostkitClient } from "./client";
 export {
 	createHostkitClientForListing,
+	createHostkitClientForListingFromSettings,
 	type HostkitEnvironment,
 	isHostkitConfigured,
+	isHostkitConfiguredFromSettings,
 	resolveHostkitApiKey,
 } from "./config";
 export type { HostkitResponseValidationIssue } from "./errors";

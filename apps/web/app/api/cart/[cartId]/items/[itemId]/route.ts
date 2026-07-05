@@ -28,7 +28,12 @@ export const PATCH = withApiRoute<CartItemRouteContext>(
 
 		try {
 			return Response.json(
-				await commerceService().updateItem(cartId, itemId, parsed.data, owner),
+				await (await commerceService()).updateItem(
+					cartId,
+					itemId,
+					parsed.data,
+					owner,
+				),
 			);
 		} catch (error) {
 			const response = commerceErrorResponse(error);
@@ -60,7 +65,12 @@ export const DELETE = withApiRoute<CartItemRouteContext>(
 
 		try {
 			return Response.json(
-				await commerceService().removeItem(cartId, itemId, parsed.data, owner),
+				await (await commerceService()).removeItem(
+					cartId,
+					itemId,
+					parsed.data,
+					owner,
+				),
 			);
 		} catch (error) {
 			const response = commerceErrorResponse(error);
