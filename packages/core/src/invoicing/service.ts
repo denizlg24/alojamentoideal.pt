@@ -14,9 +14,19 @@ import type { HostkitClient } from "../integrations/hostkit";
 import { redactHostkitText } from "../integrations/hostkit";
 import { InvoicingError } from "./errors";
 import {
+	buildInvoiceCustomerDraft,
 	buildInvoiceLine,
+	type EditableInvoiceLine,
+	editableInvoiceLinesTotalMinor,
+	editableInvoiceLineToDraft,
+	type InvoiceChargeRow,
+	type InvoiceCustomerDraft,
+	type InvoiceLineDraft,
 	invoiceableCharges,
+	type ResolvedInvoiceCustomer,
+	resolveDraftInvoiceCustomer,
 	resolveInvoiceCustomer,
+	toEditableInvoiceLine,
 } from "./invoices";
 
 /**
@@ -46,6 +56,36 @@ export interface CreateOrderItemInvoiceInput {
 
 export interface CreateCreditNoteInput {
 	invoiceId: string;
+	orderReference: string;
+}
+
+export interface BuildInvoiceDraftInput {
+	orderItemId: string;
+	orderReference: string;
+}
+
+/**
+ * Prefilled, fully editable invoice the operator reviews before issuing. Built
+ * from our own order state with no provider call, so opening the form is cheap
+ * and side-effect free.
+ */
+export interface OrderItemInvoiceDraft {
+	currency: string;
+	customer: InvoiceCustomerDraft;
+	/** Whether the item's listing has a Hostkit API key (issuance is possible). */
+	hostkitConfigured: boolean;
+	invoiceType: "FR" | "FT";
+	itemTitle: string;
+	lines: EditableInvoiceLine[];
+	orderItemId: string;
+	reservationCode: string | null;
+}
+
+export interface CreateOrderItemInvoiceFromLinesInput {
+	customer: InvoiceCustomerDraft;
+	invoiceType?: "FR" | "FT";
+	lines: EditableInvoiceLine[];
+	orderItemId: string;
 	orderReference: string;
 }
 
@@ -81,28 +121,18 @@ export class InvoicingService {
 	}
 
 	/**
-	 * Creates, fills and closes a Hostkit invoice for one order item. The
-	 * local row is inserted as `draft` first — the partial unique index makes
-	 * a concurrent or repeated issuance fail fast instead of double-billing.
+	 * Creates, fills and closes a Hostkit invoice for one order item from the
+	 * order's own charge rows (the automatic mapping). The local row is inserted
+	 * as `draft` first — the partial unique index makes a concurrent or repeated
+	 * issuance fail fast instead of double-billing.
 	 */
 	async createInvoiceForOrderItem(
 		input: CreateOrderItemInvoiceInput,
 	): Promise<OrderInvoice> {
 		const order = await this.#loadOrder(input.orderReference);
-		if (order.status !== "confirmed") {
-			throw new InvoicingError(
-				"order_not_paid",
-				`order ${input.orderReference} is ${order.status}; only confirmed orders can be invoiced`,
-			);
-		}
-		if (order.currency.toUpperCase() !== SUPPORTED_CURRENCY) {
-			throw new InvoicingError(
-				"currency_unsupported",
-				`order currency ${order.currency} is not supported for fiscal documents`,
-			);
-		}
-
+		this.#assertInvoiceable(order, input.orderReference);
 		const item = await this.#loadOrderItem(order.id, input.orderItemId);
+
 		const contact = await this.#loadContact(order.id);
 		const customerResult = resolveInvoiceCustomer(contact);
 		if (customerResult.kind === "unresolved_country") {
@@ -111,33 +141,144 @@ export class InvoicingService {
 				"billing country is missing or not a recognized ISO code; fix the order contact before invoicing",
 			);
 		}
-		const customer = customerResult.customer;
 
-		const reservationCode = await this.#loadReservationCode(item.id);
-		const client = this.#resolveHostkitClient(item.hostifyListingId);
-		if (!client) {
+		const charges = await this.#loadInvoiceableCharges(item.id);
+		if (charges.length === 0) {
 			throw new InvoicingError(
-				"hostkit_not_configured",
-				`no Hostkit API key configured for listing ${item.hostifyListingId}`,
+				"order_item_not_found",
+				"order item has no charge rows to invoice",
+			);
+		}
+		const reservationCode = await this.#loadReservationCode(item.id);
+
+		return this.#issueInvoiceForItem({
+			customer: customerResult.customer,
+			hostifyListingId: item.hostifyListingId,
+			invoiceType: input.invoiceType ?? "FR",
+			lines: charges.map(buildInvoiceLine),
+			order,
+			orderItemId: item.id,
+			reservationCode,
+			totalMinor: item.totalMinor,
+		});
+	}
+
+	/**
+	 * Builds a prefilled, fully editable invoice for one order item without any
+	 * provider call. Feeds the semi-manual invoicing form; the operator edits
+	 * lines and the recipient before calling
+	 * {@link createOrderItemInvoiceFromLines}.
+	 */
+	async buildOrderItemInvoiceDraft(
+		input: BuildInvoiceDraftInput,
+	): Promise<OrderItemInvoiceDraft> {
+		const order = await this.#loadOrder(input.orderReference);
+		this.#assertInvoiceable(order, input.orderReference);
+		const item = await this.#loadOrderItem(order.id, input.orderItemId);
+		const contact = await this.#loadContact(order.id);
+		const charges = await this.#loadInvoiceableCharges(item.id);
+		const reservationCode = await this.#loadReservationCode(item.id);
+
+		return {
+			currency: order.currency,
+			customer: buildInvoiceCustomerDraft(contact),
+			hostkitConfigured:
+				this.#resolveHostkitClient(item.hostifyListingId) !== null,
+			invoiceType: "FR",
+			itemTitle: item.title,
+			lines: charges.map(buildInvoiceLine).map(toEditableInvoiceLine),
+			orderItemId: item.id,
+			reservationCode,
+		};
+	}
+
+	/**
+	 * Issues a Hostkit invoice for one order item from operator-edited lines and
+	 * recipient. Same draft-first, close-then-persist flow as the automatic
+	 * path, but the document may legitimately diverge from the charged total —
+	 * the operator is trusted.
+	 */
+	async createOrderItemInvoiceFromLines(
+		input: CreateOrderItemInvoiceFromLinesInput,
+	): Promise<OrderInvoice> {
+		const order = await this.#loadOrder(input.orderReference);
+		this.#assertInvoiceable(order, input.orderReference);
+		const item = await this.#loadOrderItem(order.id, input.orderItemId);
+
+		if (!input.customer.name.trim()) {
+			throw new InvoicingError(
+				"billing_contact_missing",
+				"invoice recipient name is required",
+			);
+		}
+		const customerResult = resolveDraftInvoiceCustomer(input.customer);
+		if (customerResult.kind === "unresolved_country") {
+			throw new InvoicingError(
+				"customer_country_unresolved",
+				"recipient country is missing or not a recognized ISO code",
 			);
 		}
 
-		const charges = invoiceableCharges(
-			(
-				await this.#db
-					.select({
-						grossMinor: orderItemChargeTable.grossMinor,
-						kind: orderItemChargeTable.kind,
-						name: orderItemChargeTable.name,
-						netMinor: orderItemChargeTable.netMinor,
-						rawPayload: orderItemChargeTable.rawPayload,
-						taxMinor: orderItemChargeTable.taxMinor,
-						taxRateBasisPoints: orderItemChargeTable.taxRateBasisPoints,
-					})
-					.from(orderItemChargeTable)
-					.where(eq(orderItemChargeTable.orderItemId, item.id))
-					.orderBy(asc(orderItemChargeTable.position))
-			).map((charge) => ({
+		const lines = input.lines
+			.filter(isFilledInvoiceLine)
+			.map(editableInvoiceLineToDraft);
+		if (lines.length === 0) {
+			throw new InvoicingError(
+				"order_item_not_found",
+				"the invoice needs at least one line with a product, quantity and price",
+			);
+		}
+		const reservationCode = await this.#loadReservationCode(item.id);
+
+		return this.#issueInvoiceForItem({
+			customer: customerResult.customer,
+			hostifyListingId: item.hostifyListingId,
+			invoiceType: input.invoiceType ?? "FR",
+			lines,
+			order,
+			orderItemId: item.id,
+			reservationCode,
+			totalMinor: editableInvoiceLinesTotalMinor(input.lines),
+		});
+	}
+
+	/** Order must be a confirmed euro order to carry a fiscal document. */
+	#assertInvoiceable(
+		order: { currency: string; status: string },
+		reference: string,
+	): void {
+		if (order.status !== "confirmed") {
+			throw new InvoicingError(
+				"order_not_paid",
+				`order ${reference} is ${order.status}; only confirmed orders can be invoiced`,
+			);
+		}
+		if (order.currency.toUpperCase() !== SUPPORTED_CURRENCY) {
+			throw new InvoicingError(
+				"currency_unsupported",
+				`order currency ${order.currency} is not supported for fiscal documents`,
+			);
+		}
+	}
+
+	async #loadInvoiceableCharges(
+		orderItemId: string,
+	): Promise<InvoiceChargeRow[]> {
+		const rows = await this.#db
+			.select({
+				grossMinor: orderItemChargeTable.grossMinor,
+				kind: orderItemChargeTable.kind,
+				name: orderItemChargeTable.name,
+				netMinor: orderItemChargeTable.netMinor,
+				rawPayload: orderItemChargeTable.rawPayload,
+				taxMinor: orderItemChargeTable.taxMinor,
+				taxRateBasisPoints: orderItemChargeTable.taxRateBasisPoints,
+			})
+			.from(orderItemChargeTable)
+			.where(eq(orderItemChargeTable.orderItemId, orderItemId))
+			.orderBy(asc(orderItemChargeTable.position));
+		return invoiceableCharges(
+			rows.map((charge) => ({
 				feeSubtype: feeSubtypeFromRawPayload(charge.rawPayload),
 				grossMinor: charge.grossMinor,
 				kind: charge.kind,
@@ -147,19 +288,37 @@ export class InvoicingService {
 				taxRateBasisPoints: charge.taxRateBasisPoints,
 			})),
 		);
-		if (charges.length === 0) {
+	}
+
+	/**
+	 * Shared Hostkit issuance: insert the local draft guard, create the provider
+	 * draft, add every line, close, then persist the issued state. Cleans up a
+	 * half-filled provider draft on failure and records a redacted error.
+	 */
+	async #issueInvoiceForItem(params: {
+		customer: ResolvedInvoiceCustomer;
+		hostifyListingId: string;
+		invoiceType: "FR" | "FT";
+		lines: InvoiceLineDraft[];
+		order: { currency: string; id: string };
+		orderItemId: string;
+		reservationCode: string | null;
+		totalMinor: number;
+	}): Promise<OrderInvoice> {
+		const client = this.#resolveHostkitClient(params.hostifyListingId);
+		if (!client) {
 			throw new InvoicingError(
-				"order_item_not_found",
-				"order item has no charge rows to invoice",
+				"hostkit_not_configured",
+				`no Hostkit API key configured for listing ${params.hostifyListingId}`,
 			);
 		}
 
 		const record = await this.#insertDraftRecord({
-			currency: order.currency,
-			orderId: order.id,
-			orderItemId: item.id,
-			reservationCode,
-			totalMinor: item.totalMinor,
+			currency: params.order.currency,
+			orderId: params.order.id,
+			orderItemId: params.orderItemId,
+			reservationCode: params.reservationCode,
+			totalMinor: params.totalMinor,
 		});
 
 		let hostkitInvoiceId: string | null = null;
@@ -175,17 +334,18 @@ export class InvoicingService {
 				);
 			}
 
+			const customer = params.customer;
 			const draft = await client.invoicing.createDraft({
 				address: customer.address,
 				city: customer.city,
 				country: customer.country,
 				cp: customer.cp,
 				customerId: customer.customerId,
-				invoiceType: input.invoiceType ?? "FR",
+				invoiceType: params.invoiceType,
 				invoicingNif,
 				name: customer.name,
 				paymentMethod: this.#paymentMethod,
-				rcode: reservationCode ?? undefined,
+				rcode: params.reservationCode ?? undefined,
 				series,
 			});
 			if (draft.id === null || draft.id === undefined) {
@@ -201,9 +361,9 @@ export class InvoicingService {
 				invoicingNif,
 			});
 
-			for (const charge of charges) {
+			for (const line of params.lines) {
 				await client.invoicing.addLine({
-					...buildInvoiceLine(charge),
+					...line,
 					id: hostkitInvoiceId,
 					invoicingNif,
 					series,
@@ -520,6 +680,7 @@ export class InvoicingService {
 			.select({
 				hostifyListingId: accommodationItemDetailTable.hostifyListingId,
 				id: orderItemTable.id,
+				title: orderItemTable.titleSnapshot,
 				totalMinor: orderItemTable.totalMinor,
 			})
 			.from(orderItemTable)
@@ -600,6 +761,16 @@ function feeSubtypeFromRawPayload(
 ): string | null {
 	const value = payload?.feeSubtype ?? payload?.type;
 	return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function isFilledInvoiceLine(line: EditableInvoiceLine): boolean {
+	const price = Number(line.price);
+	return (
+		line.productId.trim().length > 0 &&
+		line.quantity > 0 &&
+		Number.isFinite(price) &&
+		price !== 0
+	);
 }
 
 /** Operator-facing error text: no API keys, no guest identity values. */

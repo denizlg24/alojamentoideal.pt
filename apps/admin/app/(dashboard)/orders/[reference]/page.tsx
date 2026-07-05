@@ -1,4 +1,9 @@
 import {
+	type ConversationMessageDto,
+	type ConversationSummary,
+	conversationChannelName,
+} from "@workspace/core/commerce";
+import {
 	Table,
 	TableBody,
 	TableCell,
@@ -15,11 +20,16 @@ import {
 	adminOrderAccess,
 	commerceService,
 	loadAdminOrder,
+	orderRefundService,
 } from "@/lib/api/commerce";
-import { invoicingService } from "@/lib/api/invoicing";
+import { invoicingEnabled, invoicingService } from "@/lib/api/invoicing";
 import { formatDate, formatDateTime, formatMoneyMinor } from "@/lib/format";
+import { ConversationPanel } from "./conversation-panel";
 import { GuestEditDialog } from "./guest-edit-dialog";
+import { InvoicePanel } from "./invoice-panel";
 import { OrderActions } from "./order-actions";
+import { RefundPanel } from "./refund-panel";
+import { ReservationPanel } from "./reservation-panel";
 
 interface OrderDetailPageProps {
 	params: Promise<{ reference: string }>;
@@ -49,6 +59,16 @@ function DefinitionRow({
 	);
 }
 
+function primaryConversation(
+	conversations: ConversationSummary[],
+): ConversationSummary | null {
+	const live = conversations.find(
+		(conversation) =>
+			conversation.status === "active" && conversation.externalThreadId,
+	);
+	return live ?? conversations[0] ?? null;
+}
+
 export default async function OrderDetailPage({
 	params,
 }: OrderDetailPageProps) {
@@ -60,9 +80,11 @@ export default async function OrderDetailPage({
 
 	const access = adminOrderAccess(row);
 	const service = commerceService();
-	const [detail, invoices] = await Promise.all([
+	const invoicing = invoicingService();
+	const [detail, invoices, refunds] = await Promise.all([
 		service.readOrderDetail(access),
-		invoicingService().listOrderInvoices(row.publicReference),
+		invoicing.listOrderInvoices(row.publicReference),
+		orderRefundService().listOrderRefunds(row.id),
 	]);
 
 	const bookingIds = detail.items
@@ -77,6 +99,74 @@ export default async function OrderDetailPage({
 
 	const pricing = detail.pricing;
 	const contact = detail.contact;
+	const currency = pricing?.currency ?? "EUR";
+	const refundableMinor = Math.max(
+		0,
+		row.amountPaidMinor - row.amountRefundedMinor,
+	);
+	const refundItems = detail.items.map((item) => ({
+		amountMinor: item.pricing?.totalMinor ?? null,
+		id: item.id,
+		title: item.title,
+	}));
+	const itemTitleById = new Map(
+		detail.items.map((item) => [item.id, item.title]),
+	);
+	const invoicingIsEnabled = invoicingEnabled();
+	const activeInvoiceItemIds = new Set(
+		invoices
+			.filter(
+				(invoice) =>
+					invoice.kind === "invoice" &&
+					(invoice.status === "draft" || invoice.status === "issued"),
+			)
+			.map((invoice) => invoice.orderItemId),
+	);
+	const invoiceableItems =
+		row.status === "confirmed"
+			? detail.items.filter(
+					(item) =>
+						item.type === "accommodation" && !activeInvoiceItemIds.has(item.id),
+				)
+			: [];
+	const invoiceDraftById = new Map(
+		await Promise.all(
+			invoiceableItems.map(async (item) => {
+				try {
+					const draft = await invoicing.buildOrderItemInvoiceDraft({
+						orderItemId: item.id,
+						orderReference: row.publicReference,
+					});
+					return [item.id, draft] as const;
+				} catch {
+					return [item.id, null] as const;
+				}
+			}),
+		),
+	);
+	const conversation = primaryConversation(detail.conversations);
+	const realtimeConfigured = Boolean(
+		process.env.NEXT_PUBLIC_PUSHER_KEY &&
+			process.env.NEXT_PUBLIC_PUSHER_CLUSTER,
+	);
+	const channelName =
+		conversation && realtimeConfigured
+			? conversationChannelName(row.id, conversation.id)
+			: null;
+	let initialMessages: ConversationMessageDto[] = [];
+	let messagesLoadError = false;
+	if (conversation) {
+		try {
+			initialMessages = await service.readConversationMessages(
+				access,
+				conversation.id,
+				{ limit: 100 },
+			);
+		} catch (error) {
+			console.error("Failed to load admin order conversation messages", error);
+			messagesLoadError = true;
+		}
+	}
 
 	return (
 		<div className="mx-auto max-w-4xl">
@@ -160,14 +250,23 @@ export default async function OrderDetailPage({
 				) : null}
 			</dl>
 
+			<ConversationPanel
+				channelName={channelName}
+				conversationId={conversation?.id ?? null}
+				initialMessages={initialMessages}
+				messagesLoadError={messagesLoadError}
+				reference={row.publicReference}
+			/>
+
 			<section className="mt-10">
 				<h2 className="font-medium text-sm">Items</h2>
 				<div className="mt-3 divide-y divide-border/60 border-border/60 border-t border-b">
 					{detail.items.map((item) => {
 						const booking = item.providerBooking;
 						const guests = booking ? guestsByBooking.get(booking.id) : null;
+						const invoiceDraft = invoiceDraftById.get(item.id) ?? null;
 						return (
-							<div className="py-4" key={item.id}>
+							<div className="py-6" key={item.id}>
 								<div className="flex items-start justify-between gap-4">
 									<div>
 										<p className="font-medium text-sm">{item.title}</p>
@@ -240,10 +339,89 @@ export default async function OrderDetailPage({
 										</TableBody>
 									</Table>
 								) : null}
+
+								{booking ? (
+									<ReservationPanel
+										bookingId={booking.id}
+										checkIn={item.checkIn}
+										checkOut={item.checkOut}
+										currentStatus={booking.status}
+										guests={item.guests}
+										reference={row.publicReference}
+									/>
+								) : null}
+
+								{invoiceDraft ? (
+									<InvoicePanel
+										draft={invoiceDraft}
+										invoicingEnabled={invoicingIsEnabled}
+										reference={row.publicReference}
+									/>
+								) : null}
 							</div>
 						);
 					})}
 				</div>
+			</section>
+
+			<section className="mt-10">
+				<div className="flex items-center justify-between gap-4">
+					<h2 className="font-medium text-sm">Payments &amp; refunds</h2>
+					{row.amountPaidMinor > 0 && refundableMinor > 0 ? (
+						<RefundPanel
+							currency={currency}
+							items={refundItems}
+							reference={row.publicReference}
+							refundableMinor={refundableMinor}
+						/>
+					) : null}
+				</div>
+				{refunds.length === 0 ? (
+					<p className="mt-3 text-muted-foreground text-sm">
+						{row.amountPaidMinor > 0
+							? `${formatMoneyMinor(refundableMinor, currency)} refundable. No refunds issued yet.`
+							: "No payment captured for this order."}
+					</p>
+				) : (
+					<Table className="mt-3">
+						<TableHeader>
+							<TableRow>
+								<TableHead className="text-right">Amount</TableHead>
+								<TableHead>Status</TableHead>
+								<TableHead>Reason</TableHead>
+								<TableHead>Attributed to</TableHead>
+								<TableHead>Issued</TableHead>
+								<TableHead>Stripe id</TableHead>
+							</TableRow>
+						</TableHeader>
+						<TableBody>
+							{refunds.map((refund) => (
+								<TableRow key={refund.id}>
+									<TableCell className="text-right tabular-nums">
+										{formatMoneyMinor(refund.amountMinor, refund.currency)}
+									</TableCell>
+									<TableCell>
+										<StatusDot status={refund.status} />
+									</TableCell>
+									<TableCell className="text-muted-foreground">
+										{refund.reason.replace(/_/g, " ")}
+									</TableCell>
+									<TableCell className="text-muted-foreground">
+										{refund.orderItemId
+											? (itemTitleById.get(refund.orderItemId) ?? "Reservation")
+											: "Whole order"}
+									</TableCell>
+									<TableCell className="text-muted-foreground">
+										{formatDateTime(refund.createdAt)}
+									</TableCell>
+									<TableCell className="text-muted-foreground">
+										{refund.stripeRefundId ?? "—"}
+									</TableCell>
+								</TableRow>
+							))}
+						</TableBody>
+					</Table>
+				)}
 			</section>
 
 			<section className="mt-10">

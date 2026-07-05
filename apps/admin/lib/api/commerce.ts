@@ -9,9 +9,12 @@ import {
 	type CommerceParseResult,
 	type CommerceQuoteInput,
 	CommerceService,
+	HostifyConversationGateway,
 	HostifyReservationGateway,
 	mapStripePaymentStatus,
+	OrderRefundService,
 	type ProviderReservationGateway,
+	ReservationAdminService,
 	type ResolvedOrderAccess,
 	StubReservationGateway,
 } from "@workspace/core/commerce";
@@ -27,6 +30,7 @@ import { getRedis } from "@workspace/core/redis";
 import type { AppliedDiscountSnapshot } from "@workspace/db";
 import { getDb, order } from "@workspace/db";
 import { eq } from "drizzle-orm";
+import { createPusherRealtimePublisher } from "./realtime";
 
 export const HOSTIFY_PROVIDER = "hostify";
 
@@ -65,9 +69,8 @@ function optionalStripeClient(): ReturnType<
 
 /**
  * Request-scoped CommerceService for admin operations. Mirrors the web app's
- * factory minus the guest-facing extras (realtime publisher, conversation
- * gateway, cart quote error mapping): the admin surface only drives the
- * reservation saga and guest records.
+ * factory minus cart quote error mapping. Admin conversation replies still use
+ * the same Hostify inbox gateway and realtime publisher as the guest surface.
  */
 export function commerceService(): CommerceService {
 	const config = getAccommodationsConfig();
@@ -116,6 +119,11 @@ export function commerceService(): CommerceService {
 			provider === HOSTIFY_PROVIDER
 				? resolveHostifyGateway(hostifyClient)
 				: undefined,
+		resolveConversationGateway: (provider) =>
+			provider === HOSTIFY_PROVIDER
+				? new HostifyConversationGateway({ client: hostifyClient })
+				: undefined,
+		realtimePublisher: createPusherRealtimePublisher(),
 		retrievePaymentIntent: stripe
 			? async (paymentIntentId) => {
 					const snapshot = await retrievePaymentIntentSnapshot(
@@ -131,6 +139,34 @@ export function commerceService(): CommerceService {
 					};
 				}
 			: undefined,
+	});
+}
+
+/**
+ * Request-scoped service for operator-issued manual refunds. Shares the same
+ * optional Stripe wiring as {@link commerceService}: when Stripe is not
+ * configured the service still constructs, but `refundOrder` rejects with
+ * `refund_unavailable`.
+ */
+export function orderRefundService(): OrderRefundService {
+	const stripe = optionalStripeClient();
+	return new OrderRefundService({
+		db: getDb(),
+		refundPayment: stripe
+			? (request) => createRefund(stripe, request)
+			: undefined,
+	});
+}
+
+/**
+ * Request-scoped service for per-reservation Hostify management (status,
+ * dates, guest count). In the HOSTIFY_BOOKINGS_ENABLED=false dry-run it gets a
+ * null client and only syncs local booking state, mirroring the saga.
+ */
+export function reservationAdminService(): ReservationAdminService {
+	return new ReservationAdminService({
+		db: getDb(),
+		hostify: hostifyBookingsEnabled ? createHostifyClientFromEnv() : null,
 	});
 }
 

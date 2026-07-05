@@ -2691,6 +2691,125 @@ export class CommerceService {
 		}
 	}
 
+	async sendHostConversationMessage(
+		access: ResolvedOrderAccess,
+		conversationId: string,
+		input: { body: string },
+		options: { excludeSocketId?: string | null } = {},
+	): Promise<ConversationMessageDto> {
+		this.#assertOrderPermission(access, "chat");
+		const excludeSocketId = options.excludeSocketId ?? null;
+		const body = trimMessageBody(input.body);
+		if (body.length === 0) {
+			throw invalidRequest("Message body is required.", [
+				{ message: "Message body is required.", path: "body" },
+			]);
+		}
+
+		const conversation = await this.#loadConversationForAccess(
+			access,
+			conversationId,
+		);
+		if (conversation.status === "archived" || !conversation.externalThreadId) {
+			throw new CommerceError(
+				"conversation_unavailable",
+				"This conversation is not ready yet.",
+				409,
+			);
+		}
+
+		const now = new Date();
+		const [inserted] = await this.#db
+			.insert(conversationMessageTable)
+			.values({
+				body,
+				conversationId,
+				createdAt: now,
+				deliveryStatus: "pending",
+				id: crypto.randomUUID(),
+				isAutomatic: false,
+				orderId: access.order.id,
+				senderMemberId: null,
+				senderType: "host",
+				sentAt: now,
+				updatedAt: now,
+			})
+			.returning(conversationMessageSelection);
+		if (!inserted) {
+			throw new CommerceError(
+				"conversation_unavailable",
+				"Could not create the message.",
+				503,
+			);
+		}
+
+		const pending = this.#toMessageDto(inserted);
+		await this.#publishMessageCreatedSafe(
+			access.order.id,
+			conversationId,
+			pending,
+			excludeSocketId,
+		);
+
+		const gateway = this.#conversationGatewayFor(conversation.provider);
+		if (!gateway) {
+			return this.#markConversationMessageFailed(
+				access.order.id,
+				conversationId,
+				pending.id,
+				"Conversation gateway is not configured.",
+				excludeSocketId,
+			);
+		}
+
+		try {
+			const externalMessageId = await gateway.sendHostReply(
+				conversation.externalThreadId,
+				body,
+			);
+			const delivered = await this.#markConversationMessageDelivered(
+				access.order.id,
+				conversationId,
+				pending.id,
+				externalMessageId,
+				now,
+				excludeSocketId,
+			);
+			trackEvent({
+				metadata: {
+					conversationId,
+					messageId: delivered.id,
+					orderId: access.order.id,
+				},
+				name: "conversation_host_message_sent",
+				provider: conversation.provider,
+				type: "integration",
+			});
+			return delivered;
+		} catch (error) {
+			const message = error instanceof Error ? error.message : String(error);
+			trackEvent({
+				metadata: {
+					conversationId,
+					error: message,
+					messageId: pending.id,
+					orderId: access.order.id,
+				},
+				name: "conversation_host_message_send_failed",
+				provider: conversation.provider,
+				severity: "warning",
+				type: "integration",
+			});
+			return this.#markConversationMessageFailed(
+				access.order.id,
+				conversationId,
+				pending.id,
+				message,
+				excludeSocketId,
+			);
+		}
+	}
+
 	async retryConversationMessage(
 		access: ResolvedOrderAccess,
 		conversationId: string,

@@ -1648,6 +1648,79 @@ export const orderInvoice = pgTable(
 
 export type OrderInvoice = typeof orderInvoice.$inferSelect;
 
+export type OrderRefundStatus = "failed" | "pending" | "succeeded";
+export type OrderRefundReason =
+	| "duplicate"
+	| "fraudulent"
+	| "other"
+	| "requested_by_customer";
+
+/**
+ * Ledger of manual, operator-issued refunds against an order's Stripe
+ * PaymentIntent. `orders.amount_refunded_minor` stays the authoritative
+ * aggregate (the `<= amount_paid` guard lives on the order row); each row here
+ * records one Stripe refund so a multi-refund order is fully reconstructable.
+ * `order_item_id` optionally attributes a refund to one reservation for
+ * reporting, but the money always moves against the single order PaymentIntent.
+ * A row is written `pending` before the Stripe call, promoted to `succeeded`
+ * with the refund id once Stripe accepts it, or parked `failed` with a redacted
+ * error. The automatic full-refund compensation path does not write here; it
+ * keeps using the single `orders.stripe_refund_*` columns.
+ */
+export const orderRefund = pgTable(
+	"order_refunds",
+	{
+		id: text("id").primaryKey(),
+		orderId: text("order_id")
+			.notNull()
+			.references(() => order.id, { onDelete: "cascade" }),
+		orderItemId: text("order_item_id").references(() => orderItem.id, {
+			onDelete: "set null",
+		}),
+		amountMinor: bigint("amount_minor", { mode: "number" }).notNull(),
+		currency: text("currency").notNull(),
+		reason: text("reason")
+			.$type<OrderRefundReason>()
+			.notNull()
+			.default("requested_by_customer"),
+		note: text("note"),
+		status: text("status")
+			.$type<OrderRefundStatus>()
+			.notNull()
+			.default("pending"),
+		stripeRefundId: text("stripe_refund_id"),
+		stripeRefundIdempotencyKey: text("stripe_refund_idempotency_key").notNull(),
+		createdByUserId: text("created_by_user_id").references(() => user.id, {
+			onDelete: "set null",
+		}),
+		lastErrorMessage: text("last_error_message"),
+		completedAt: timestampWithTimezone("completed_at"),
+		createdAt: timestampWithTimezone("created_at").notNull().defaultNow(),
+		updatedAt: timestampWithTimezone("updated_at").notNull().defaultNow(),
+	},
+	(table) => [
+		index("order_refunds_order_idx").on(table.orderId),
+		index("order_refunds_order_item_idx").on(table.orderItemId),
+		uniqueIndex("order_refunds_idempotency_key_uidx").on(
+			table.stripeRefundIdempotencyKey,
+		),
+		uniqueIndex("order_refunds_stripe_refund_id_uidx")
+			.on(table.stripeRefundId)
+			.where(sql`${table.stripeRefundId} is not null`),
+		check("order_refunds_amount_minor_positive", sql`${table.amountMinor} > 0`),
+		check(
+			"order_refunds_reason_check",
+			sql`${table.reason} in ('requested_by_customer', 'duplicate', 'fraudulent', 'other')`,
+		),
+		check(
+			"order_refunds_status_check",
+			sql`${table.status} in ('pending', 'succeeded', 'failed')`,
+		),
+	],
+);
+
+export type OrderRefund = typeof orderRefund.$inferSelect;
+
 export const apiIdempotencyKey = pgTable(
 	"api_idempotency_keys",
 	{

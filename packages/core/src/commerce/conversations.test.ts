@@ -231,4 +231,29 @@ describe("HostifyConversationGateway", () => {
 			},
 		]);
 	});
+
+	test("delivers host replies through the Hostify reply endpoint", async () => {
+		const calls: unknown[] = [];
+		const client = {
+			inbox: {
+				reply: async (input: unknown) => {
+					calls.push(input);
+					return { id: 790, success: true };
+				},
+			},
+		} as unknown as HostifyClient;
+
+		const id = await new HostifyConversationGateway({ client }).sendHostReply(
+			"thread-1",
+			"Hello from admin",
+		);
+
+		expect(id).toBe("790");
+		expect(calls).toEqual([
+			{
+				message: "Hello from admin",
+				thread_id: "thread-1",
+			},
+		]);
+	});
 });

@@ -211,6 +211,13 @@
       "when": 1783106740665,
       "tag": "0029_glossy_morlocks",
       "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "7",
+      "when": 1783187307195,
+      "tag": "0030_colorful_marvel_zombies",
+      "breakpoints": true
     }
   ]
 }

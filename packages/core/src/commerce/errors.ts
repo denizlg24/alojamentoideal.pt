@@ -23,6 +23,7 @@ export type CommerceErrorCode =
 	| "order_member_exists"
 	| "order_member_immutable"
 	| "order_member_not_found"
+	| "order_not_charged"
 	| "order_not_found"
 	| "order_not_payable"
 	| "order_reference_unavailable"
@@ -30,6 +31,10 @@ export type CommerceErrorCode =
 	| "pricing_unavailable"
 	| "quote_expired"
 	| "quote_revalidation_failed"
+	| "refund_amount_exceeds_refundable"
+	| "refund_amount_invalid"
+	| "refund_failed"
+	| "refund_unavailable"
 	| "reservation_unavailable"
 	| "too_many_guests";
 

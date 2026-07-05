@@ -204,3 +204,149 @@ export function invoiceableCharges(
 		(charge) => charge.netMinor !== 0 || charge.taxMinor !== 0,
 	);
 }
+
+/**
+ * A fully operator-editable invoice line. Mirrors {@link InvoiceLineDraft} but
+ * keeps `price` a string (form input) and `type`/`reasonCode` always present so
+ * the semi-manual invoicing form can round-trip a row without losing fields.
+ */
+export interface EditableInvoiceLine {
+	customDescription?: string | null;
+	/** Whole-percent line discount. */
+	discount: number;
+	/** Unit price in euros, decimal string (e.g. "120.00"). */
+	price: string;
+	productId: string;
+	/** Human product label used when no custom line description is provided. */
+	productLabel?: string | null;
+	quantity: number;
+	reasonCode: string | null;
+	type: "I" | "P" | "S";
+	/** Whole-percent VAT rate. */
+	vat: number;
+}
+
+/** Operator-editable invoice recipient (country as ISO alpha-2, resolved to alpha-3 on issue). */
+export interface InvoiceCustomerDraft {
+	address: string | null;
+	city: string | null;
+	country: string;
+	name: string;
+	postalCode: string | null;
+	/** Portuguese NIF / tax number; empty issues to the final-consumer id. */
+	taxNumber: string | null;
+}
+
+/** Prefills an editable line from an auto-built charge line. */
+export function toEditableInvoiceLine(
+	draft: InvoiceLineDraft,
+): EditableInvoiceLine {
+	return {
+		customDescription: draft.customDescription,
+		discount: draft.discount,
+		price:
+			typeof draft.price === "number" ? draft.price.toString() : draft.price,
+		productId: draft.productId,
+		productLabel: null,
+		quantity: draft.quantity,
+		reasonCode: draft.reasonCode ?? null,
+		type: draft.type ?? "S",
+		vat: draft.vat,
+	};
+}
+
+/**
+ * Maps an operator-edited line back to a Hostkit line draft. A zero-VAT line
+ * must carry an exemption reason code; we default to M99 when the operator
+ * leaves it blank so Hostkit never rejects the line.
+ */
+export function editableInvoiceLineToDraft(
+	line: EditableInvoiceLine,
+): InvoiceLineDraft {
+	const reason = line.reasonCode?.trim() || null;
+	const customDescription =
+		line.customDescription?.trim() ||
+		line.productLabel?.trim() ||
+		line.productId.trim();
+	return {
+		customDescription,
+		discount: line.discount,
+		price: line.price,
+		productId: line.productId,
+		quantity: line.quantity,
+		reasonCode:
+			line.vat === 0
+				? (reason ?? VAT_EXEMPTION_REASON_CODE)
+				: (reason ?? undefined),
+		type: line.type,
+		vat: line.vat,
+	};
+}
+
+/**
+ * Estimated gross total (minor units) of an edited line set, for the local
+ * `order_invoices` record. Hostkit remains the authoritative document total;
+ * this only drives the admin display.
+ */
+export function editableInvoiceLinesTotalMinor(
+	lines: readonly EditableInvoiceLine[],
+): number {
+	let total = 0;
+	for (const line of lines) {
+		const unitMinor = Math.round(Number(line.price) * 100);
+		if (!Number.isFinite(unitMinor)) {
+			continue;
+		}
+		const net = Math.round(
+			(unitMinor * line.quantity * (100 - line.discount)) / 100,
+		);
+		total += Math.round((net * (100 + line.vat)) / 100);
+	}
+	return total;
+}
+
+/** Prefills the editable recipient block from the order's billing contact. */
+export function buildInvoiceCustomerDraft(
+	input: InvoiceCustomerInput,
+): InvoiceCustomerDraft {
+	const name =
+		input.isCompany && input.companyName?.trim()
+			? input.companyName.trim()
+			: input.name.trim();
+	const address = [input.billingLine1?.trim(), input.billingLine2?.trim()]
+		.filter((part): part is string => Boolean(part))
+		.join(" ");
+	return {
+		address: address || null,
+		city: input.billingCity?.trim() || null,
+		country: input.billingCountry?.trim() || "",
+		name,
+		postalCode: input.billingPostalCode?.trim() || null,
+		taxNumber: input.taxNumber?.trim() || null,
+	};
+}
+
+/**
+ * Resolves an operator-edited recipient to the Hostkit customer shape. Like
+ * {@link resolveInvoiceCustomer}, an unmappable country blocks issuance rather
+ * than guessing.
+ */
+export function resolveDraftInvoiceCustomer(
+	draft: InvoiceCustomerDraft,
+): ResolveCustomerResult {
+	const country = countryAlpha3(draft.country);
+	if (!country) {
+		return { kind: "unresolved_country" };
+	}
+	return {
+		customer: {
+			address: draft.address?.trim() || undefined,
+			city: draft.city?.trim() || undefined,
+			country,
+			cp: draft.postalCode?.trim() || undefined,
+			customerId: draft.taxNumber?.trim() || FINAL_CONSUMER_CUSTOMER_ID,
+			name: draft.name.trim(),
+		},
+		kind: "ok",
+	};
+}
