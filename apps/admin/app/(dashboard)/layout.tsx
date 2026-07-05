@@ -48,7 +48,6 @@ export default async function DashboardLayout({
 						</div>
 					</div>
 				</SidebarHeader>
-				<SidebarSeparator />
 				<SidebarContent>
 					<AdminNav />
 				</SidebarContent>
@@ -66,7 +65,6 @@ export default async function DashboardLayout({
 			<SidebarInset>
 				<header className="sticky top-0 z-20 flex h-14 shrink-0 items-center gap-3 border-border/60 border-b bg-background/95 px-4 backdrop-blur supports-[backdrop-filter]:bg-background/80">
 					<SidebarTrigger />
-					<Separator className="h-4" orientation="vertical" />
 					<HeaderTitle />
 				</header>
 				<div className="min-w-0 flex-1 px-4 py-6 md:px-8 md:py-8">
