@@ -18,7 +18,7 @@ export async function guestComplianceService(): Promise<GuestComplianceService> 
 	return new GuestComplianceService({
 		db: getDb(),
 		resolveHostkitClient: (listingId) =>
-			createHostkitClientForListingFromSettings(listingId),
+			createHostkitClientForListingFromSettings(listingId, settings),
 		resolveReservationCode: async (providerReservationId) => {
 			const response = await hostifyClient.reservations.get(
 				providerReservationId,

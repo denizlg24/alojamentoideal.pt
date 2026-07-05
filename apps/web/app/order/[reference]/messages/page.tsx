@@ -9,7 +9,6 @@ import { OrderAccessDenied } from "@/components/order/order-access-denied";
 import { OrderHubShell } from "@/components/order/order-hub-shell";
 import { OrderHubSkeleton } from "@/components/order/order-hub-skeleton";
 import { OrderMessages } from "@/components/order/order-messages";
-import { commerceService } from "@/lib/api/commerce";
 import { loadOrderForRequest } from "@/lib/order/load";
 import { buildPrivatePageMetadata } from "@/lib/site/metadata";
 
@@ -51,9 +50,12 @@ async function OrderMessagesRoute({ params }: OrderMessagesPageProps) {
 	let messagesLoadError = false;
 	if (conversation) {
 		try {
-			initialMessages = await (
-				await commerceService()
-			).readConversationMessages(loaded.access, conversation.id, { limit: 50 });
+			const service = loaded.service;
+			initialMessages = await service.readConversationMessages(
+				loaded.access,
+				conversation.id,
+				{ limit: 50 },
+			);
 		} catch (error) {
 			console.error("Failed to load order conversation messages", error);
 			messagesLoadError = true;

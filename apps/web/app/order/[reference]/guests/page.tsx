@@ -11,7 +11,6 @@ import {
 import { OrderHubShell } from "@/components/order/order-hub-shell";
 import { OrderHubSkeleton } from "@/components/order/order-hub-skeleton";
 import { accountProfileRepository } from "@/lib/api/account";
-import { commerceService } from "@/lib/api/commerce";
 import { getCurrentUser } from "@/lib/auth/session";
 import { loadOrderForRequest } from "@/lib/order/load";
 import { buildPrivatePageMetadata } from "@/lib/site/metadata";
@@ -33,7 +32,7 @@ async function OrderGuestsRoute({ params }: OrderGuestsPageProps) {
 		return <OrderAccessDenied />;
 	}
 
-	const service = await commerceService();
+	const service = loaded.service;
 	const user = await getCurrentUser();
 	const canReuseAccountIdentity = user
 		? (await accountProfileRepository().getProfile(user.id)).identity.status ===

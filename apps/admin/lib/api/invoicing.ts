@@ -7,8 +7,8 @@ import { type ApiRouteOptions, type RouteHandler, withApiRoute } from "./route";
 
 /**
  * Kill switch for fiscal-document issuance. The admin endpoints must not be
- * able to touch real financial documents until the business flips
- * HOSTKIT_INVOICING_ENABLED=true.
+ * able to touch real financial documents until the business enables the
+ * Hostkit invoicing runtime setting.
  */
 export async function invoicingEnabled(): Promise<boolean> {
 	const settings = await getRuntimeSettings();
@@ -41,7 +41,7 @@ export async function rejectUnlessInvoicingAdmin(
 			{
 				code: "invoicing_disabled",
 				error:
-					"Invoice issuance is disabled. Set HOSTKIT_INVOICING_ENABLED=true to enable it.",
+					"Invoice issuance is disabled. Enable Hostkit invoicing in admin Settings to issue fiscal documents.",
 			},
 			{ status: 503 },
 		);

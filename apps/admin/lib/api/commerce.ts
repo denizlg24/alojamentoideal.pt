@@ -72,10 +72,8 @@ function optionalStripeClient(): ReturnType<
  * the same Hostify inbox gateway and realtime publisher as the guest surface.
  */
 export async function commerceService(): Promise<CommerceService> {
-	const [config, settings] = await Promise.all([
-		getAccommodationsConfigFromSettings(),
-		getRuntimeSettings(),
-	]);
+	const settings = await getRuntimeSettings();
+	const config = await getAccommodationsConfigFromSettings(settings);
 	const hostifyClient = createHostifyClientFromEnv();
 	const stripe = optionalStripeClient();
 	const hostifyBookingsEnabled =

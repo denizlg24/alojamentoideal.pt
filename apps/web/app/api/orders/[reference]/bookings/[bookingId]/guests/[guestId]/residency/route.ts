@@ -38,9 +38,13 @@ export const POST = withApiRoute<OrderGuestResidencyRouteContext>(
 		}
 		const { nationality, residenceCountry } = parsed.data;
 
-		const accessContext = await resolveOrderAccessContext(request, reference);
+		const accessContextPromise = resolveOrderAccessContext(request, reference);
+		const servicePromise = commerceService();
 		try {
-			const service = await commerceService();
+			const [accessContext, service] = await Promise.all([
+				accessContextPromise,
+				servicePromise,
+			]);
 			const access = await service.resolveOrderAccess(reference, accessContext);
 			const guests = await service.patchGuestResidency(
 				access,

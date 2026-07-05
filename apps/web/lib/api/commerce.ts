@@ -245,10 +245,8 @@ function optionalStripeClient(): ReturnType<
  * Postgres clients are themselves pooled/singletons, so this is cheap.
  */
 export async function commerceService(): Promise<CommerceService> {
-	const [config, settings] = await Promise.all([
-		getAccommodationsConfigFromSettings(),
-		getRuntimeSettings(),
-	]);
+	const settings = await getRuntimeSettings();
+	const config = await getAccommodationsConfigFromSettings(settings);
 	const hostifyClient = createHostifyClientFromEnv();
 	const stripe = optionalStripeClient();
 	const hostifyBookingsEnabled =
@@ -262,7 +260,8 @@ export async function commerceService(): Promise<CommerceService> {
 
 	return new CommerceService({
 		accountId: config.hostifyAccountId,
-		// Default on; Finance can switch to manual-hold via env (D4).
+		// Default on; Finance can switch to manual recovery through the Commerce
+		// auto-refund runtime setting.
 		autoRefundOnFailure:
 			settings["features.commerceAutoRefund"] === true && stripe !== null,
 		currency: config.currency,

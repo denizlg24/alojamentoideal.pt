@@ -37,8 +37,8 @@ const createInvoiceSchema = z.object({
  * Admin-only: issue the Hostkit invoice for one order item. With an edited
  * `customer` + `lines` body it issues the operator-reviewed document (the
  * semi-manual path); with an empty body it falls back to the automatic mapping
- * from the order's own charge rows. Double-gated: admin role plus
- * HOSTKIT_INVOICING_ENABLED. Issuance is an explicit operator action, never a
+ * from the order's own charge rows. Double-gated: admin role plus the Hostkit
+ * invoicing runtime setting. Issuance is an explicit operator action, never a
  * payment hook.
  */
 export const POST = withInvoicingAdmin<AdminOrderItemInvoiceRouteContext>(

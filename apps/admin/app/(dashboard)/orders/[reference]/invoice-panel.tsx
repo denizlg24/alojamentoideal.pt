@@ -295,8 +295,8 @@ export function InvoicePanel({
 
 			{!invoicingEnabled ? (
 				<p className="rounded-md bg-amber-500/10 px-3 py-2 text-amber-700 text-xs dark:text-amber-500">
-					Issuance is disabled. Set HOSTKIT_INVOICING_ENABLED=true to enable it.
-					You can still edit the draft.
+					Issuance is disabled. Enable Hostkit invoicing in admin Settings. You
+					can still edit the draft.
 				</p>
 			) : null}
 			{!draft.hostkitConfigured ? (

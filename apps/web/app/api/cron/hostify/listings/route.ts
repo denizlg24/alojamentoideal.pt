@@ -1,6 +1,6 @@
 import {
 	createHostifyListingCacheSyncFromEnv,
-	getListingCacheConfig,
+	getListingCacheConfigFromSettings,
 	isAuthorizedCronRequest,
 } from "@workspace/core/listing-cache";
 import { revalidateTag } from "next/cache";
@@ -12,7 +12,7 @@ import { HOSTIFY_PROVIDER } from "@/lib/catalog/constants";
 export const GET = withApiRoute(
 	{ name: "cron.hostify.listings", rateLimit: { bucket: "cron" } },
 	async (request: Request): Promise<Response> => {
-		const config = getListingCacheConfig();
+		const config = await getListingCacheConfigFromSettings();
 
 		if (!config.cronSecret) {
 			return Response.json(

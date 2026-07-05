@@ -1,4 +1,3 @@
-import { Separator } from "@workspace/ui/components/separator";
 import {
 	Sidebar,
 	SidebarContent,
@@ -7,7 +6,6 @@ import {
 	SidebarInset,
 	SidebarProvider,
 	SidebarRail,
-	SidebarSeparator,
 	SidebarTrigger,
 } from "@workspace/ui/components/sidebar";
 import { cookies } from "next/headers";

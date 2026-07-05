@@ -16,7 +16,7 @@ export async function guestComplianceService(): Promise<GuestComplianceService> 
 	return new GuestComplianceService({
 		db: getDb(),
 		resolveHostkitClient: (listingId) =>
-			createHostkitClientForListingFromSettings(listingId),
+			createHostkitClientForListingFromSettings(listingId, settings),
 		// Holds persisted before the confirmation code reached the operational
 		// payload re-read it from the Hostify reservation.
 		resolveReservationCode: async (providerReservationId) => {

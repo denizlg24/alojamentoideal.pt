@@ -33,10 +33,14 @@ export const POST = withApiRoute<OrderGuestIdentitySessionRouteContext>(
 	},
 	async (request: Request, context): Promise<Response> => {
 		const { bookingId, guestId, reference } = await context.params;
-		const accessContext = await resolveOrderAccessContext(request, reference);
+		const accessContextPromise = resolveOrderAccessContext(request, reference);
+		const servicePromise = commerceService();
 
 		try {
-			const service = await commerceService();
+			const [accessContext, service] = await Promise.all([
+				accessContextPromise,
+				servicePromise,
+			]);
 			const access = await service.resolveOrderAccess(reference, accessContext);
 
 			let stripe: ReturnType<typeof createStripeClientFromEnv>;

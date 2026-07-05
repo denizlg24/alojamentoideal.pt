@@ -47,28 +47,37 @@ function coerceEnvValue(
 	}
 	if (type === "integer") {
 		const parsed = Number(raw);
-		return Number.isInteger(parsed) ? parsed : fallback;
+		if (!Number.isInteger(parsed)) {
+			throw new Error(`Environment value must be an integer`);
+		}
+		return parsed;
 	}
 	return raw;
 }
 
 function coerceStoredValue(
 	value: AppSettingValue | undefined,
-	fallback: AppSettingValue,
 	type: "boolean" | "integer" | "string",
 ): AppSettingValue {
 	if (value === undefined) {
-		return fallback;
+		throw new Error("Setting value is missing");
 	}
 	if (type === "boolean") {
-		return typeof value === "boolean" ? value : fallback;
+		if (typeof value !== "boolean") {
+			throw new Error("Setting value must be a boolean");
+		}
+		return value;
 	}
 	if (type === "integer") {
-		return typeof value === "number" && Number.isInteger(value)
-			? value
-			: fallback;
+		if (typeof value !== "number" || !Number.isInteger(value)) {
+			throw new Error("Setting value must be an integer");
+		}
+		return value;
 	}
-	return typeof value === "string" ? value : fallback;
+	if (typeof value !== "string") {
+		throw new Error("Setting value must be a string");
+	}
+	return value;
 }
 
 export function validateRuntimeSettingValue(
@@ -79,11 +88,7 @@ export function validateRuntimeSettingValue(
 	if (!definition) {
 		throw new Error(`Unknown setting ${key}`);
 	}
-	const coerced = coerceStoredValue(
-		value,
-		definition.defaultValue,
-		definition.type,
-	);
+	const coerced = coerceStoredValue(value, definition.type);
 	if (definition.type === "integer") {
 		const numeric = Number(coerced);
 		if (
@@ -97,14 +102,66 @@ export function validateRuntimeSettingValue(
 		return numeric;
 	}
 	if (definition.type === "string") {
-		return String(coerced).trim();
+		const trimmed = String(coerced).trim();
+		if (key === "hostkit.baseUrl" && trimmed) {
+			let parsed: URL;
+			try {
+				parsed = new URL(trimmed);
+			} catch {
+				throw new Error(`${definition.label} must be a valid URL`);
+			}
+			if (parsed.protocol !== "https:") {
+				throw new Error(`${definition.label} must use HTTPS`);
+			}
+		}
+		return trimmed;
 	}
 	return Boolean(coerced);
+}
+
+const RUNTIME_SETTINGS_CACHE_MS = 5000;
+
+let runtimeSettingsCache:
+	| {
+			db: Database;
+			expiresAt: number;
+			promise: Promise<RuntimeSettings>;
+	  }
+	| undefined;
+
+function clearRuntimeSettingsCache() {
+	runtimeSettingsCache = undefined;
 }
 
 export async function getRuntimeSettings(
 	db: Database = getDb(),
 ): Promise<RuntimeSettings> {
+	const now = Date.now();
+	if (
+		runtimeSettingsCache &&
+		runtimeSettingsCache.db === db &&
+		runtimeSettingsCache.expiresAt > now
+	) {
+		return runtimeSettingsCache.promise;
+	}
+
+	const promise = loadRuntimeSettings(db);
+	runtimeSettingsCache = {
+		db,
+		expiresAt: now + RUNTIME_SETTINGS_CACHE_MS,
+		promise,
+	};
+	try {
+		return await promise;
+	} catch (error) {
+		if (runtimeSettingsCache?.promise === promise) {
+			clearRuntimeSettingsCache();
+		}
+		throw error;
+	}
+}
+
+async function loadRuntimeSettings(db: Database): Promise<RuntimeSettings> {
 	const keys = runtimeSettingDefinitions.map((definition) => definition.key);
 	const rows =
 		keys.length === 0
@@ -117,19 +174,26 @@ export async function getRuntimeSettings(
 	const settings = {} as RuntimeSettings;
 
 	for (const definition of runtimeSettingDefinitions) {
-		const envFallback = coerceEnvValue(
-			envValue(definition.envName),
-			definition.defaultValue,
-			definition.type,
-		);
-		settings[definition.key as RuntimeSettingKey] = validateRuntimeSettingValue(
-			definition.key as RuntimeSettingKey,
-			coerceStoredValue(
-				stored.get(definition.key),
-				envFallback,
-				definition.type,
-			),
-		);
+		const key = definition.key as RuntimeSettingKey;
+		try {
+			const envFallback = validateRuntimeSettingValue(
+				key,
+				coerceEnvValue(
+					envValue(definition.envName),
+					definition.defaultValue,
+					definition.type,
+				),
+			);
+			const storedValue = stored.get(definition.key);
+			const rawValue = storedValue === undefined ? envFallback : storedValue;
+			settings[key] = validateRuntimeSettingValue(key, rawValue);
+		} catch (error) {
+			console.warn(
+				`Invalid runtime setting ${definition.key}; using default value.`,
+				error,
+			);
+			settings[key] = validateRuntimeSettingValue(key, definition.defaultValue);
+		}
 	}
 
 	return settings;
@@ -140,22 +204,25 @@ export async function updateRuntimeSettings(
 	db: Database = getDb(),
 ): Promise<void> {
 	const now = new Date();
-	for (const [key, value] of Object.entries(values)) {
-		if (value === undefined) {
-			continue;
+	await db.transaction(async (tx) => {
+		for (const [key, value] of Object.entries(values)) {
+			if (value === undefined) {
+				continue;
+			}
+			const validated = validateRuntimeSettingValue(
+				key as RuntimeSettingKey,
+				value,
+			);
+			await tx
+				.insert(appSetting)
+				.values({ key, updatedAt: now, value: validated })
+				.onConflictDoUpdate({
+					set: { updatedAt: now, value: validated },
+					target: appSetting.key,
+				});
 		}
-		const validated = validateRuntimeSettingValue(
-			key as RuntimeSettingKey,
-			value,
-		);
-		await db
-			.insert(appSetting)
-			.values({ key, updatedAt: now, value: validated })
-			.onConflictDoUpdate({
-				set: { updatedAt: now, value: validated },
-				target: appSetting.key,
-			});
-	}
+	});
+	clearRuntimeSettingsCache();
 }
 
 export async function listHostkitListingCredentials(
@@ -217,17 +284,20 @@ export async function setHostkitListingApiKey(
 	}
 	const now = new Date();
 	const encrypted = encryptIdentityField(trimmedApiKey);
+	if (!encrypted) {
+		throw new Error("Failed to encrypt Hostkit API key");
+	}
 	await db
 		.insert(listingHostkitCredential)
 		.values({
-			apiKeyEncrypted: encrypted ?? Buffer.alloc(0),
+			apiKeyEncrypted: encrypted,
 			keyHint: keyHint(trimmedApiKey),
 			listingExternalId: trimmedListingId,
 			updatedAt: now,
 		})
 		.onConflictDoUpdate({
 			set: {
-				apiKeyEncrypted: encrypted ?? Buffer.alloc(0),
+				apiKeyEncrypted: encrypted,
 				keyHint: keyHint(trimmedApiKey),
 				updatedAt: now,
 			},

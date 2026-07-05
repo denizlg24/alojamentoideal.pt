@@ -1,3 +1,5 @@
+import { getRuntimeSettings, type RuntimeSettings } from "../settings";
+
 export interface AccommodationsConfig {
 	availabilityCacheTtlSeconds: number;
 	cronSecret?: string;
@@ -125,36 +127,38 @@ export function getAccommodationsConfig(
 	};
 }
 
-export async function getAccommodationsConfigFromSettings(): Promise<AccommodationsConfig> {
-	const settings = await getRuntimeSettings();
+export async function getAccommodationsConfigFromSettings(
+	settings?: RuntimeSettings,
+): Promise<AccommodationsConfig> {
+	const resolvedSettings = settings ?? (await getRuntimeSettings());
 	return getAccommodationsConfig({
 		ACCOMMODATION_AVAILABILITY_CACHE_TTL_SECONDS:
 			process.env.ACCOMMODATION_AVAILABILITY_CACHE_TTL_SECONDS,
-		ACCOMMODATION_CURRENCY: String(settings["accommodations.currency"]),
+		ACCOMMODATION_CURRENCY: String(resolvedSettings["accommodations.currency"]),
 		ACCOMMODATION_LIVE_SEARCH_CANDIDATE_LIMIT:
 			process.env.ACCOMMODATION_LIVE_SEARCH_CANDIDATE_LIMIT,
 		ACCOMMODATION_NIGHTLY_PRICE_SYNC_BATCH_SIZE: String(
-			settings["accommodations.nightlyPriceSyncBatchSize"],
+			resolvedSettings["accommodations.nightlyPriceSyncBatchSize"],
 		),
 		ACCOMMODATION_NIGHTLY_PRICE_SYNC_DAYS: String(
-			settings["accommodations.nightlyPriceSyncDays"],
+			resolvedSettings["accommodations.nightlyPriceSyncDays"],
 		),
 		ACCOMMODATION_NIGHTLY_PRICE_SYNC_INTERVAL_HOURS: String(
-			settings["accommodations.nightlyPriceSyncIntervalHours"],
+			resolvedSettings["accommodations.nightlyPriceSyncIntervalHours"],
 		),
 		ACCOMMODATION_NIGHTLY_PRICE_SYNC_LEASE_MINUTES: String(
-			settings["accommodations.nightlyPriceSyncLeaseMinutes"],
+			resolvedSettings["accommodations.nightlyPriceSyncLeaseMinutes"],
 		),
 		ACCOMMODATION_NIGHTLY_PRICE_SYNC_MAX_PAGES: String(
-			settings["accommodations.nightlyPriceSyncMaxPages"],
+			resolvedSettings["accommodations.nightlyPriceSyncMaxPages"],
 		),
 		ACCOMMODATION_NIGHTLY_PRICE_SYNC_MAX_LISTINGS: String(
-			settings["accommodations.nightlyPriceSyncMaxListings"],
+			resolvedSettings["accommodations.nightlyPriceSyncMaxListings"],
 		),
 		ACCOMMODATION_QUOTE_CACHE_TTL_SECONDS:
 			process.env.ACCOMMODATION_QUOTE_CACHE_TTL_SECONDS,
 		CRON_SECRET: process.env.CRON_SECRET,
-		HOSTIFY_ACCOUNT_ID: String(settings["hostify.accountId"]),
+		HOSTIFY_ACCOUNT_ID: String(resolvedSettings["hostify.accountId"]),
 		HOSTIFY_SYNC_CRON_SECRET: process.env.HOSTIFY_SYNC_CRON_SECRET,
 	});
 }
@@ -177,5 +181,3 @@ function optionalInteger(
 
 	return parsed;
 }
-
-import { getRuntimeSettings } from "../settings";

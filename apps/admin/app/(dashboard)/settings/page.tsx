@@ -16,7 +16,7 @@ import {
 export const metadata: Metadata = { title: "Settings" };
 
 interface SettingsPageProps {
-	searchParams: Promise<{ saved?: string }>;
+	searchParams: Promise<{ error?: string; saved?: string }>;
 }
 
 const GROUP_LABELS = {
@@ -33,6 +33,7 @@ export default async function SettingsPage({
 		getRuntimeSettings(),
 		listHostkitListingCredentials(),
 	]);
+	const error = params.error;
 	const saved = params.saved;
 
 	return (
@@ -47,7 +48,9 @@ export default async function SettingsPage({
 						integrations.
 					</p>
 				</div>
-				{saved ? (
+				{error ? (
+					<p className="text-red-600 text-sm dark:text-red-400">{error}</p>
+				) : saved ? (
 					<p className="text-emerald-600 text-sm dark:text-emerald-400">
 						Changes saved.
 					</p>

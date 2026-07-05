@@ -1,6 +1,7 @@
 import {
 	anyHostkitListingCredentialConfigured,
 	getRuntimeSettings,
+	type RuntimeSettings,
 	resolveEncryptedHostkitApiKey,
 } from "../../settings";
 import { HostkitClient } from "./client";
@@ -97,23 +98,32 @@ export async function isHostkitConfiguredFromSettings(): Promise<boolean> {
 
 export async function createHostkitClientForListingFromSettings(
 	listingId: string,
+	settings?: RuntimeSettings,
 ): Promise<HostkitClient | null> {
-	const settings = await getRuntimeSettings();
-	const apiKey =
-		(await resolveEncryptedHostkitApiKey(listingId)) ??
-		resolveHostkitApiKey(listingId);
-	if (apiKey === null) {
+	try {
+		const apiKey =
+			(await resolveEncryptedHostkitApiKey(listingId)) ??
+			resolveHostkitApiKey(listingId);
+		if (apiKey === null) {
+			return null;
+		}
+
+		const resolvedSettings = settings ?? (await getRuntimeSettings());
+		return new HostkitClient({
+			apiKey,
+			baseUrl: String(resolvedSettings["hostkit.baseUrl"] || ""),
+			maxReadRetries: Number(resolvedSettings["hostkit.maxReadRetries"]),
+			retryDelayMs: Number(resolvedSettings["hostkit.retryDelayMs"]),
+			timeoutMs: Number(resolvedSettings["hostkit.timeoutMs"]),
+			uid: String(resolvedSettings["hostkit.uid"] || "") || undefined,
+		});
+	} catch (error) {
+		console.warn(
+			`Hostkit client is unavailable for listing ${listingId}.`,
+			error,
+		);
 		return null;
 	}
-
-	return new HostkitClient({
-		apiKey,
-		baseUrl: String(settings["hostkit.baseUrl"] || ""),
-		maxReadRetries: Number(settings["hostkit.maxReadRetries"]),
-		retryDelayMs: Number(settings["hostkit.retryDelayMs"]),
-		timeoutMs: Number(settings["hostkit.timeoutMs"]),
-		uid: String(settings["hostkit.uid"] || "") || undefined,
-	});
 }
 
 function parseApiKeyMap(

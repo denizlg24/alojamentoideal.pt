@@ -42,16 +42,14 @@ export const POST = withApiRoute<OrderAccessRouteContext>(
 			);
 		}
 
-		const user = await getServerUser(request);
+		const userPromise = getServerUser(request);
+		const servicePromise = commerceService();
 
 		try {
-			const access = await (await commerceService()).redeemMemberToken(
-				reference,
-				token,
-				{
-					userId: user?.id ?? null,
-				},
-			);
+			const [user, service] = await Promise.all([userPromise, servicePromise]);
+			const access = await service.redeemMemberToken(reference, token, {
+				userId: user?.id ?? null,
+			});
 			const response = Response.json({
 				reference: access.order.publicReference,
 				role: access.role,
