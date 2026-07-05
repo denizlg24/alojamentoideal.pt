@@ -25,6 +25,7 @@ const baseConfig: ActivityCacheConfig = {
 	staleAfterHours: 24,
 	syncIntervalHours: 24,
 	syncLeaseMinutes: 10,
+	syncVersion: ACTIVITY_SYNC_VERSION,
 };
 
 describe("BokunActivityCacheSync.pollActivities", () => {
@@ -62,7 +63,10 @@ describe("BokunActivityCacheSync.pollActivities", () => {
 		repository.states.set("1", {
 			active: true,
 			sortOrder: 0,
-			sourceHash: stableHash(sanitizeProviderPayload(raw)),
+			sourceHash: stableHash({
+				v: baseConfig.syncVersion,
+				value: sanitizeProviderPayload(raw),
+			}),
 		});
 		const client = new FakeBokunClient({ "1": raw });
 		const sync = createSync({
@@ -77,6 +81,33 @@ describe("BokunActivityCacheSync.pollActivities", () => {
 		expect(result.data?.activitiesUnchanged).toBe(1);
 		expect(result.data?.changedExternalIds).toEqual([]);
 		expect(repository.upserts).toHaveLength(0);
+	});
+
+	test("rewrites unchanged raw content when the sync version changes", async () => {
+		const raw = activity("1");
+		const repository = new FakeActivityCacheRepository();
+		repository.states.set("1", {
+			active: true,
+			sortOrder: 0,
+			sourceHash: stableHash({
+				v: baseConfig.syncVersion - 1,
+				value: sanitizeProviderPayload(raw),
+			}),
+		});
+		const client = new FakeBokunClient({ "1": raw });
+		const sync = createSync({
+			client,
+			config: { ...baseConfig, activityIds: ["1"] },
+			repository,
+		});
+
+		const result = await sync.pollActivities("poll");
+
+		expect(result.status).toBe("completed");
+		expect(result.data?.activitiesUpdated).toBe(1);
+		expect(repository.upserts.map((upsert) => upsert.externalId)).toEqual([
+			"1",
+		]);
 	});
 
 	test("shortens the retry when every activity fails", async () => {

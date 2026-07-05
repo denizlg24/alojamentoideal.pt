@@ -18,8 +18,11 @@ import { trackCheckoutEvent } from "@/lib/checkout/analytics";
 import * as api from "@/lib/checkout/api-client";
 import { writeCartNotice } from "@/lib/checkout/cart-notice";
 import {
+	CART_CHANGED_EVENT,
+	cartContentFingerprint,
 	clearStoredCart,
 	notifyCartChanged,
+	readStoredCartFingerprint,
 	readStoredCartId,
 	storeCartId,
 } from "@/lib/checkout/cart-store";
@@ -51,6 +54,7 @@ import { ConfirmPayButton } from "./confirm-pay-button";
 import { ContactBillingForm } from "./contact-billing-form";
 import { CurrencyDialog } from "./currency-dialog";
 import { DiscountCodeForm } from "./discount-code-form";
+import { EditStayDialog } from "./edit-stay-dialog";
 import { PayTimingStep } from "./pay-timing-step";
 import { CheckoutPaymentElement } from "./payment-element";
 import { PaymentMethodStep } from "./payment-method-step";
@@ -66,6 +70,11 @@ import {
 	hasBillingDetails,
 	profileInputFromContactDraft,
 } from "./types";
+import {
+	DEFAULT_LISTING_CONSTRAINTS,
+	useListingConstraints,
+} from "./use-listing-constraints";
+import { useOptimisticStayEdits } from "./use-optimistic-stay-edits";
 import { usePendingMessages } from "./use-pending-messages";
 
 /**
@@ -249,8 +258,17 @@ export function CheckoutController({ seed }: CheckoutControllerProps) {
 	const [reviewError, setReviewError] = useState<string | null>(null);
 	const [notice, setNotice] = useState<string | null>(null);
 	const [dialog, setDialog] = useState<DialogKind>(null);
+	const [stayDialogItemId, setStayDialogItemId] = useState<string | null>(null);
+	const [repricingItemIds, setRepricingItemIds] = useState<Set<string>>(
+		new Set(),
+	);
 
 	const bootstrapStarted = useRef(false);
+	// Fingerprint of the cart last reconciled here, so the external-change
+	// listener tells our own inline edits apart from changes made elsewhere.
+	const lastAppliedFingerprintRef = useRef<string>("");
+	const repricingRef = useRef(repricingItemIds);
+	repricingRef.current = repricingItemIds;
 	// Last profile fetched during prefill; reused so a "save to account" write
 	// preserves residence/nationality the checkout form never collects.
 	const accountProfileRef = useRef<AccountProfile | null>(null);
@@ -272,6 +290,7 @@ export function CheckoutController({ seed }: CheckoutControllerProps) {
 	}, [pathname, searchParams]);
 
 	const applyValidation = useCallback((validated: CartValidationResponse) => {
+		lastAppliedFingerprintRef.current = cartContentFingerprint(validated.cart);
 		setCart(validated.cart);
 		notifyCartChanged(validated.cart);
 		setFailures(
@@ -282,6 +301,18 @@ export function CheckoutController({ seed }: CheckoutControllerProps) {
 		const first = validated.failures[0];
 		setNotice(first ? first.message : null);
 	}, []);
+
+	const stayEdits = useOptimisticStayEdits({
+		applyValidated: applyValidation,
+		cart,
+		onError: setNotice,
+		setCart,
+		setRepricingItemIds,
+	});
+
+	const listingConstraints = useListingConstraints(
+		activeItemsOf(cart).map((item) => item.listingId),
+	);
 
 	/**
 	 * Creates a fresh mutable cart holding the given stays. Used when the current
@@ -632,6 +663,40 @@ export function CheckoutController({ seed }: CheckoutControllerProps) {
 			cancelled = true;
 		};
 	}, [sessionUserId]);
+
+	// Refresh the cart in place when it changed elsewhere (the /cart page in
+	// another tab, or a revived checkout route). Only while the cart is still
+	// mutable and no inline edit is mid-flight; a frozen (prepared) cart or an
+	// in-flight edit reconciles through its own path. Keying the route on cart id
+	// (not content) means this never remounts mid-edit.
+	useEffect(() => {
+		const onChanged = () => {
+			if (prepared || phase !== "ready" || repricingRef.current.size > 0) {
+				return;
+			}
+			if (readStoredCartFingerprint() === lastAppliedFingerprintRef.current) {
+				return;
+			}
+			const storedId = readStoredCartId();
+			if (!storedId) {
+				return;
+			}
+			void (async () => {
+				try {
+					applyValidation(await api.validateCart(storedId));
+				} catch {
+					// Best-effort refresh; the existing cart stays on screen.
+				}
+			})();
+		};
+
+		window.addEventListener(CART_CHANGED_EVENT, onChanged);
+		window.addEventListener("storage", onChanged);
+		return () => {
+			window.removeEventListener(CART_CHANGED_EVENT, onChanged);
+			window.removeEventListener("storage", onChanged);
+		};
+	}, [applyValidation, prepared, phase]);
 
 	const clientSecret =
 		payment?.kind === "payment_intent" ? payment.clientSecret : null;
@@ -1318,9 +1383,20 @@ export function CheckoutController({ seed }: CheckoutControllerProps) {
 		</>
 	);
 
+	// Single-stay checkout edits its one stay inline (no /cart redirect); the
+	// "Edit cart" link stays for multi-stay, where remove/add still live there.
+	const canInlineEdit = !prepared && phase === "ready" && items.length === 1;
+	const editStayItem = stayDialogItemId
+		? (items.find((item) => item.id === stayDialogItemId) ?? null)
+		: null;
+	const editStayConstraints = editStayItem
+		? (listingConstraints.get(editStayItem.listingId) ??
+			DEFAULT_LISTING_CONSTRAINTS)
+		: DEFAULT_LISTING_CONSTRAINTS;
+
 	const summary = (
 		<CartSummary
-			canEditCart={!prepared && phase === "ready"}
+			canEditCart={!prepared && phase === "ready" && items.length > 1}
 			canOpenPriceDetails={phase === "ready" && items.length > 0}
 			cart={phase === "loading" ? null : cart}
 			discountSlot={
@@ -1334,9 +1410,12 @@ export function CheckoutController({ seed }: CheckoutControllerProps) {
 					/>
 				) : null
 			}
+			editableItemId={canInlineEdit ? items[0]?.id : null}
 			items={items}
+			onEditStay={(item) => setStayDialogItemId(item.id)}
 			onOpenCurrency={() => setDialog("currency")}
 			onOpenPriceDetails={() => setDialog("price")}
+			repricingItemIds={repricingItemIds}
 		/>
 	);
 
@@ -1360,6 +1439,27 @@ export function CheckoutController({ seed }: CheckoutControllerProps) {
 				onOpenChange={(open) => setDialog(open ? "currency" : null)}
 				open={dialog === "currency"}
 			/>
+			{canInlineEdit && editStayItem && (
+				<EditStayDialog
+					listingId={editStayItem.listingId}
+					maxGuests={editStayConstraints.maxGuests}
+					minNights={editStayConstraints.minNights}
+					onOpenChange={(open) => {
+						if (!open) {
+							setStayDialogItemId(null);
+						}
+					}}
+					onSave={(next) => stayEdits.patchStay(editStayItem.id, next)}
+					open
+					value={{
+						adults: editStayItem.adults,
+						checkIn: editStayItem.checkIn,
+						checkOut: editStayItem.checkOut,
+						children: editStayItem.children,
+						infants: editStayItem.infants,
+					}}
+				/>
+			)}
 		</>
 	);
 }

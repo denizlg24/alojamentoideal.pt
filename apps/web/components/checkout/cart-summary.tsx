@@ -20,42 +20,73 @@ interface CartSummaryProps {
 	canOpenPriceDetails: boolean;
 	cart: CartDto | null;
 	discountSlot?: ReactNode;
+	/** Item id allowed to edit dates/guests inline (single-stay checkout). */
+	editableItemId?: string | null;
 	items: CartItemDto[];
+	onEditStay?: (item: CartItemDto) => void;
 	onOpenCurrency: () => void;
 	onOpenPriceDetails: () => void;
+	/** Items whose price is being re-quoted after an optimistic edit. */
+	repricingItemIds?: Set<string>;
 }
 
-function SummaryItemRow({ item }: { item: CartItemDto }) {
+function SummaryItemRow({
+	item,
+	onEdit,
+	repricing,
+}: {
+	item: CartItemDto;
+	onEdit?: () => void;
+	repricing: boolean;
+}) {
 	return (
-		<div className="flex gap-3">
-			<div className="size-14 shrink-0 overflow-hidden rounded-lg bg-muted">
-				{item.imageUrl && (
-					<Image
-						alt={item.title}
-						className="size-full object-cover"
-						height={56}
-						src={item.imageUrl}
-						width={56}
-					/>
+		<div className="flex flex-col gap-2">
+			<div className="flex gap-3">
+				<div className="size-14 shrink-0 overflow-hidden rounded-lg bg-muted">
+					{item.imageUrl && (
+						<Image
+							alt={item.title}
+							className="size-full object-cover"
+							height={56}
+							src={item.imageUrl}
+							width={56}
+						/>
+					)}
+				</div>
+				<div className="flex min-w-0 flex-1 flex-col">
+					<span className="line-clamp-1 font-medium text-sm">{item.title}</span>
+					<span className="text-muted-foreground text-xs">
+						{formatStayRange(item.checkIn, item.checkOut)} ·{" "}
+						{nightsLabel(item.nights)}
+					</span>
+					<span className="text-muted-foreground text-xs">
+						{guestSummaryLabel({
+							adults: item.adults,
+							children: item.children,
+							infants: item.infants,
+						})}
+					</span>
+				</div>
+				{repricing ? (
+					<Skeleton className="h-4 w-16 shrink-0" />
+				) : (
+					<span className="shrink-0 font-medium text-sm">
+						{formatMinor(item.totalMinor, item.currency)}
+					</span>
 				)}
 			</div>
-			<div className="flex min-w-0 flex-1 flex-col">
-				<span className="line-clamp-1 font-medium text-sm">{item.title}</span>
-				<span className="text-muted-foreground text-xs">
-					{formatStayRange(item.checkIn, item.checkOut)} ·{" "}
-					{nightsLabel(item.nights)}
-				</span>
-				<span className="text-muted-foreground text-xs">
-					{guestSummaryLabel({
-						adults: item.adults,
-						children: item.children,
-						infants: item.infants,
-					})}
-				</span>
-			</div>
-			<span className="shrink-0 font-medium text-sm">
-				{formatMinor(item.totalMinor, item.currency)}
-			</span>
+			{onEdit && (
+				<div className="pl-[68px]">
+					<button
+						className="text-muted-foreground text-xs underline underline-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+						disabled={repricing}
+						onClick={onEdit}
+						type="button"
+					>
+						Edit stay
+					</button>
+				</div>
+			)}
 		</div>
 	);
 }
@@ -70,11 +101,15 @@ export function CartSummary({
 	canOpenPriceDetails,
 	cart,
 	discountSlot,
+	editableItemId,
 	items,
+	onEditStay,
 	onOpenCurrency,
 	onOpenPriceDetails,
+	repricingItemIds,
 }: CartSummaryProps) {
 	const loading = cart === null;
+	const repricing = (repricingItemIds?.size ?? 0) > 0;
 
 	return (
 		<div className="rounded-2xl border bg-card p-5 shadow-sm">
@@ -105,7 +140,16 @@ export function CartSummary({
 			) : (
 				<div className="flex flex-col gap-4">
 					{items.map((item) => (
-						<SummaryItemRow item={item} key={item.id} />
+						<SummaryItemRow
+							item={item}
+							key={item.id}
+							onEdit={
+								editableItemId === item.id && onEditStay
+									? () => onEditStay(item)
+									: undefined
+							}
+							repricing={repricingItemIds?.has(item.id) ?? false}
+						/>
 					))}
 				</div>
 			)}
@@ -131,7 +175,7 @@ export function CartSummary({
 			</div>
 
 			<div className="mt-3 flex flex-col gap-2 text-sm">
-				{cart ? (
+				{cart && !repricing ? (
 					<>
 						<div className="flex items-center justify-between text-muted-foreground">
 							<span>Subtotal</span>

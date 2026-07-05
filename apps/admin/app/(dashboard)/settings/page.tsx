@@ -8,6 +8,7 @@ import { Input } from "@workspace/ui/components/input";
 import { Label } from "@workspace/ui/components/label";
 import type { Metadata } from "next";
 import {
+	bumpManualSyncVersion,
 	removeHostkitListingKey,
 	saveHostkitListingKey,
 	saveSettings,
@@ -36,6 +37,8 @@ export default async function SettingsPage({
 	]);
 	const error = params.error;
 	const saved = params.saved;
+	const savedMessage =
+		saved === "sync" ? "Manual resync requested." : "Changes saved.";
 
 	return (
 		<div className="mx-auto max-w-5xl">
@@ -53,10 +56,39 @@ export default async function SettingsPage({
 					<p className="text-red-600 text-sm dark:text-red-400">{error}</p>
 				) : saved ? (
 					<p className="text-emerald-600 text-sm dark:text-emerald-400">
-						Changes saved.
+						{savedMessage}
 					</p>
 				) : null}
 			</div>
+
+			<section
+				aria-labelledby="manual-resync-heading"
+				className="mt-8 border-border/60 border-t pt-5"
+			>
+				<div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_auto] md:items-center">
+					<div>
+						<h2
+							className="font-display font-semibold text-base tracking-tight"
+							id="manual-resync-heading"
+						>
+							Manual resync
+						</h2>
+						<p className="mt-1 text-muted-foreground text-sm">
+							Bump the listing and activity sync versions so the next sync
+							refreshes cached Homes and Activities.
+						</p>
+						<p className="mt-2 text-muted-foreground text-xs">
+							Listings {settings["hostify.listingSyncVersion"]} · Activities{" "}
+							{settings["bokun.activitySyncVersion"]}
+						</p>
+					</div>
+					<form action={bumpManualSyncVersion}>
+						<Button type="submit" variant="secondary">
+							Manual resync
+						</Button>
+					</form>
+				</div>
+			</section>
 
 			<form action={saveSettings} className="mt-8">
 				<div className="space-y-10">

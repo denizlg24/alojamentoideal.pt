@@ -29,6 +29,7 @@ const baseConfig: AccommodationsConfig = {
 	nightlyPriceSyncMaxListings: 100,
 	nightlyPriceSyncMaxPages: 50,
 	quoteCacheTtlSeconds: 300,
+	syncVersion: LISTING_SYNC_VERSION,
 };
 
 describe("NightlyPriceSync.pollPrices", () => {

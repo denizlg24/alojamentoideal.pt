@@ -20,6 +20,7 @@ import { stableHash } from "./hash";
  * interval) so they re-upsert everything under the new version.
  */
 export const DEFAULT_LISTING_SYNC_VERSION = 9;
+export const MAX_LISTING_SYNC_VERSION = 2_147_483_647;
 
 interface ListingSyncVersionEnvironment {
 	LISTING_SYNC_VERSION?: string;
@@ -36,7 +37,11 @@ export function getListingSyncVersion(
 	}
 
 	const parsed = Number(value);
-	if (!Number.isInteger(parsed) || parsed < 0 || parsed > 2_147_483_647) {
+	if (
+		!Number.isInteger(parsed) ||
+		parsed < 0 ||
+		parsed > MAX_LISTING_SYNC_VERSION
+	) {
 		throw new Error(
 			"LISTING_SYNC_VERSION must be an integer between 0 and 2147483647",
 		);
@@ -48,6 +53,9 @@ export function getListingSyncVersion(
 export const LISTING_SYNC_VERSION = getListingSyncVersion();
 
 /** Hash `value` bound to the current {@link LISTING_SYNC_VERSION}. */
-export function versionedHash(value: unknown): string {
-	return stableHash({ v: LISTING_SYNC_VERSION, value });
+export function versionedHash(
+	value: unknown,
+	syncVersion = LISTING_SYNC_VERSION,
+): string {
+	return stableHash({ v: syncVersion, value });
 }

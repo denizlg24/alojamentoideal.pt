@@ -5,7 +5,6 @@ import type {
 } from "../integrations/hostify/index";
 import { createHostifyClientFromEnv } from "../integrations/hostify/index";
 import { ListingCacheRepository } from "../listing-cache/repository";
-import { LISTING_SYNC_VERSION } from "../listing-cache/sync-version";
 import type { ListingReviewSyncConfig } from "./config";
 import { getListingReviewSyncConfigFromSettings } from "./config";
 import { buildListingReviewProjection } from "./normalizer";
@@ -109,7 +108,7 @@ export class HostifyListingReviewSync {
 			now,
 			provider: HOSTIFY_PROVIDER,
 			syncType: LISTING_REVIEW_SYNC_TYPE,
-			versionHash: LISTING_SYNC_VERSION,
+			versionHash: this.#config.syncVersion,
 		});
 
 		if (!claim) {
@@ -199,7 +198,7 @@ export class HostifyListingReviewSync {
 					nextRunAt,
 					now: finishedAt,
 					provider: HOSTIFY_PROVIDER,
-					versionHash: LISTING_SYNC_VERSION,
+					versionHash: this.#config.syncVersion,
 				});
 
 				return {

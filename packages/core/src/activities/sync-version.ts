@@ -9,4 +9,35 @@
  * `activity_experience` rows unrefreshed until their source hash happens to
  * change.
  */
-export const ACTIVITY_SYNC_VERSION = 1;
+export const DEFAULT_ACTIVITY_SYNC_VERSION = 1;
+export const MAX_ACTIVITY_SYNC_VERSION = 2_147_483_647;
+
+interface ActivitySyncVersionEnvironment {
+	ACTIVITY_SYNC_VERSION?: string;
+}
+
+export function getActivitySyncVersion(
+	environment: ActivitySyncVersionEnvironment = {
+		ACTIVITY_SYNC_VERSION: process.env.ACTIVITY_SYNC_VERSION,
+	},
+): number {
+	const value = environment.ACTIVITY_SYNC_VERSION;
+	if (value === undefined || value.trim() === "") {
+		return DEFAULT_ACTIVITY_SYNC_VERSION;
+	}
+
+	const parsed = Number(value);
+	if (
+		!Number.isInteger(parsed) ||
+		parsed < 0 ||
+		parsed > MAX_ACTIVITY_SYNC_VERSION
+	) {
+		throw new Error(
+			"ACTIVITY_SYNC_VERSION must be an integer between 0 and 2147483647",
+		);
+	}
+
+	return parsed;
+}
+
+export const ACTIVITY_SYNC_VERSION = getActivitySyncVersion();
