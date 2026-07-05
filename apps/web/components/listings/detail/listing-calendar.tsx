@@ -17,7 +17,11 @@ import {
  * blocks them from selection. `availableDates: null` means the listing has no
  * synced calendar, so nothing is restricted and the live quote validates the
  * stay instead. `excludeDisabled` keeps a dragged range from spanning a blocked
- * night.
+ * night. `resetOnSelect` forces a clean two-click flow: a click on an already
+ * complete range restarts at that day as the new check-in rather than reshaping
+ * with a stale selection. Without it, an inactive checkout night (e.g. a day
+ * another guest checks in on) is evaluated against the previous checkout and
+ * wrongly rejected, since availability only clears an endpoint mid-selection.
  */
 export function ListingCalendar({
 	availableDates,
@@ -52,6 +56,7 @@ export function ListingCalendar({
 			<Calendar
 				mode="range"
 				excludeDisabled
+				resetOnSelect
 				showOutsideDays={false}
 				numberOfMonths={numberOfMonths}
 				defaultMonth={value?.from ?? today}
