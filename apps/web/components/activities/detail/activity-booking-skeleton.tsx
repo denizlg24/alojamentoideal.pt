@@ -8,8 +8,7 @@ export function ActivityBookingSkeleton() {
 				<Skeleton className="h-24 w-full rounded-xl" />
 				<div className="flex flex-col gap-2">
 					<Skeleton className="h-14 w-full rounded-xl" />
-					<Skeleton className="h-14 w-full rounded-xl" />
-					<Skeleton className="h-14 w-full rounded-xl" />
+					<Skeleton className="h-auto aspect-square w-full rounded-xl" />
 				</div>
 				<Skeleton className="h-11 w-full rounded-md" />
 			</div>
