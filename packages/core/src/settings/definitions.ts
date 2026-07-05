@@ -1,4 +1,5 @@
 import type { AppSettingValue } from "@workspace/db";
+import { DEFAULT_ACTIVITY_IDS } from "../activities/defaults";
 
 export type RuntimeSettingType = "boolean" | "integer" | "string";
 
@@ -6,7 +7,7 @@ export interface RuntimeSettingDefinition {
 	defaultValue: AppSettingValue;
 	description: string;
 	envName?: string;
-	group: "features" | "hostify" | "hostkit";
+	group: "bokun" | "features" | "hostify" | "hostkit";
 	key: string;
 	label: string;
 	max?: number;
@@ -268,6 +269,76 @@ export const runtimeSettingDefinitions = [
 		key: "listing.openaiModel",
 		label: "Listing AI model",
 		type: "string",
+	},
+	{
+		defaultValue: "default",
+		description: "Bokun account scope used by cached activity experiences.",
+		envName: "BOKUN_ACCOUNT_ID",
+		group: "bokun",
+		key: "bokun.accountId",
+		label: "Bokun account id",
+		type: "string",
+	},
+	{
+		defaultValue: DEFAULT_ACTIVITY_IDS.join(","),
+		description: "Comma-separated Bokun activity ids exposed on the site.",
+		envName: "BOKUN_ACTIVITY_IDS",
+		group: "bokun",
+		key: "bokun.activityIds",
+		label: "Activity ids",
+		type: "string",
+	},
+	{
+		defaultValue: "EUR",
+		description: "Currency used for activity advisory prices and booking.",
+		envName: "ACTIVITY_CURRENCY",
+		group: "bokun",
+		key: "bokun.activityCurrency",
+		label: "Activity currency",
+		type: "string",
+	},
+	{
+		defaultValue: "en",
+		description: "Language requested when syncing activity content.",
+		envName: "ACTIVITY_LANG",
+		group: "bokun",
+		key: "bokun.activityLang",
+		label: "Activity language",
+		type: "string",
+	},
+	{
+		defaultValue: 24,
+		description: "Hours between regular Bokun activity sync attempts.",
+		envName: "BOKUN_ACTIVITY_SYNC_INTERVAL_HOURS",
+		group: "bokun",
+		key: "bokun.activitySyncIntervalHours",
+		label: "Activity sync interval",
+		max: 720,
+		min: 1,
+		type: "integer",
+	},
+	{
+		defaultValue: 10,
+		description:
+			"Minutes before an abandoned activity sync lease can be retried.",
+		envName: "BOKUN_ACTIVITY_SYNC_LEASE_MINUTES",
+		group: "bokun",
+		key: "bokun.activitySyncLeaseMinutes",
+		label: "Activity lease minutes",
+		max: 120,
+		min: 1,
+		type: "integer",
+	},
+	{
+		defaultValue: 24,
+		description: "Hours before cached activity content is considered stale.",
+		envName: "BOKUN_ACTIVITY_STALE_AFTER_HOURS",
+		group: "bokun",
+		key: "bokun.activityStaleAfterHours",
+		label: "Activity stale hours",
+		max: 720,
+		min: 1,
+		type: "integer",
 	},
 	{
 		defaultValue: "https://app.hostkit.pt/api/",

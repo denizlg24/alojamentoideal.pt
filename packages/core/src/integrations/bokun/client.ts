@@ -144,7 +144,7 @@ export class BokunClient {
 			) =>
 				this.get(
 					`/activity.json/${segment(id)}/availabilities`,
-					bokunSchemas.objectArray,
+					bokunSchemas.activityAvailabilities,
 					context,
 					query,
 				),

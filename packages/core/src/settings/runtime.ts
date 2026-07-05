@@ -103,6 +103,30 @@ export function validateRuntimeSettingValue(
 	}
 	if (definition.type === "string") {
 		const trimmed = String(coerced).trim();
+		if (key === "bokun.activityCurrency" && trimmed) {
+			if (!/^[A-Za-z]{3}$/.test(trimmed)) {
+				throw new Error(`${definition.label} must be a 3-letter code`);
+			}
+			return trimmed.toUpperCase();
+		}
+		if (key === "bokun.activityIds") {
+			const ids = trimmed
+				.split(",")
+				.map((value) => value.trim())
+				.filter(Boolean);
+			if (ids.length === 0 || ids.some((value) => !/^\d+$/.test(value))) {
+				throw new Error(
+					`${definition.label} must be a comma-separated list of Bokun ids`,
+				);
+			}
+			return [...new Set(ids)].join(",");
+		}
+		if (key === "bokun.activityLang" && trimmed) {
+			if (!/^[A-Za-z]{2,3}(?:[-_][A-Za-z]{2,4})?$/.test(trimmed)) {
+				throw new Error(`${definition.label} must be a language code`);
+			}
+			return trimmed;
+		}
 		if (key === "hostkit.baseUrl" && trimmed) {
 			let parsed: URL;
 			try {

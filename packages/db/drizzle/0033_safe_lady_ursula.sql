@@ -1,0 +1,1 @@
+CREATE INDEX "activity_experience_sync_run_id_idx" ON "activity_experience" USING btree ("sync_run_id");

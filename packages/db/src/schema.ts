@@ -294,6 +294,12 @@ export const userProfile = pgTable("user_profile", {
 export const providerSyncRun = pgTable(
 	"provider_sync_run",
 	{
+		activitiesCreated: integer("activities_created").notNull().default(0),
+		activitiesDisabled: integer("activities_disabled").notNull().default(0),
+		activitiesFailed: integer("activities_failed").notNull().default(0),
+		activitiesSeen: integer("activities_seen").notNull().default(0),
+		activitiesUnchanged: integer("activities_unchanged").notNull().default(0),
+		activitiesUpdated: integer("activities_updated").notNull().default(0),
 		id: text("id").primaryKey(),
 		error: text("error"),
 		finishedAt: timestampWithTimezone("finished_at"),
@@ -344,6 +350,51 @@ export const providerSyncState = pgTable(
 		),
 		index("provider_sync_state_next_run_at_idx").on(table.nextRunAt),
 		index("provider_sync_state_lease_expires_at_idx").on(table.leaseExpiresAt),
+	],
+);
+
+export const activityExperience = pgTable(
+	"activity_experience",
+	{
+		id: text("id").primaryKey(),
+		active: boolean("active").notNull().default(true),
+		city: text("city"),
+		country: text("country"),
+		createdAt: timestampWithTimezone("created_at").notNull().defaultNow(),
+		detail: jsonb("detail").$type<unknown>().notNull(),
+		difficulty: text("difficulty"),
+		durationBucket: text("duration_bucket"),
+		externalAccountId: text("external_account_id").notNull(),
+		externalId: text("external_id").notNull(),
+		fetchedAt: timestampWithTimezone("fetched_at").notNull(),
+		fromPriceAmount: doublePrecision("from_price_amount"),
+		fromPriceCurrency: text("from_price_currency"),
+		provider: text("provider").notNull(),
+		raw: jsonb("raw").$type<unknown>().notNull(),
+		sortOrder: integer("sort_order").notNull().default(0),
+		sourceHash: text("source_hash").notNull(),
+		staleAfter: timestampWithTimezone("stale_after").notNull(),
+		summary: jsonb("summary").$type<unknown>().notNull(),
+		syncRunId: text("sync_run_id").references(() => providerSyncRun.id, {
+			onDelete: "set null",
+		}),
+		title: text("title"),
+		updatedAt: timestampWithTimezone("updated_at").notNull().defaultNow(),
+	},
+	(table) => [
+		uniqueIndex("activity_experience_provider_external_uidx").on(
+			table.provider,
+			table.externalAccountId,
+			table.externalId,
+		),
+		index("activity_experience_active_sort_idx").on(
+			table.active,
+			table.sortOrder,
+			table.externalId,
+		),
+		index("activity_experience_city_idx").on(table.city),
+		index("activity_experience_stale_after_idx").on(table.staleAfter),
+		index("activity_experience_sync_run_id_idx").on(table.syncRunId),
 	],
 );
 
@@ -1777,6 +1828,7 @@ export const schema = {
 	userProfile,
 	providerSyncRun,
 	providerSyncState,
+	activityExperience,
 	accommodationListing,
 	appSetting,
 	accommodationListingNight,
