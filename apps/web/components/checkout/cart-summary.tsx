@@ -78,7 +78,8 @@ function SummaryItemRow({
 			{onEdit && (
 				<div className="pl-[68px]">
 					<button
-						className="text-muted-foreground text-xs underline underline-offset-2"
+						className="text-muted-foreground text-xs underline underline-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+						disabled={repricing}
 						onClick={onEdit}
 						type="button"
 					>

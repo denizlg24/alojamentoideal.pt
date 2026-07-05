@@ -101,9 +101,10 @@ export function useOptimisticStayEdits({
 
 	const commit = async (
 		itemId: string,
+		rollbackCart: CartDto,
 		mutation: (cartId: string) => Promise<unknown>,
 	): Promise<void> => {
-		const cartId = cartRef.current?.id;
+		const cartId = rollbackCart.id;
 		if (!cartId) {
 			return;
 		}
@@ -126,7 +127,7 @@ export function useOptimisticStayEdits({
 			try {
 				applyValidated(await api.validateCart(cartId));
 			} catch {
-				// The notice above still explains what happened.
+				setCart(rollbackCart);
 			}
 			clearRepricing(setRepricingItemIds, itemId);
 		}
@@ -151,6 +152,10 @@ export function useOptimisticStayEdits({
 	};
 
 	const patchStay: OptimisticStayEdits["patchStay"] = (itemId, next) => {
+		const rollbackCart = cartRef.current;
+		if (!rollbackCart) {
+			return;
+		}
 		const guests = capacityForGuests(next.adults, next.children);
 		patchItem(itemId, (item) => ({
 			...item,
@@ -162,7 +167,7 @@ export function useOptimisticStayEdits({
 			infants: next.infants,
 			nights: nightsBetween(next.checkIn, next.checkOut),
 		}));
-		void commit(itemId, (cartId) =>
+		void commit(itemId, rollbackCart, (cartId) =>
 			api.updateCartItem(cartId, itemId, {
 				adults: next.adults,
 				checkIn: next.checkIn,
@@ -176,6 +181,10 @@ export function useOptimisticStayEdits({
 	};
 
 	const removeStay: OptimisticStayEdits["removeStay"] = (itemId) => {
+		const rollbackCart = cartRef.current;
+		if (!rollbackCart) {
+			return;
+		}
 		// Keep the item id in the repricing set so the totals skeleton while the
 		// server re-quotes the remaining stays, even though this card is gone.
 		withRepricing(setRepricingItemIds, itemId);
@@ -188,7 +197,7 @@ export function useOptimisticStayEdits({
 				items: current.items.filter((item) => item.id !== itemId),
 			};
 		});
-		void commit(itemId, (cartId) =>
+		void commit(itemId, rollbackCart, (cartId) =>
 			api.removeCartItem(cartId, itemId, randomIdempotencyKey("remove")),
 		);
 	};

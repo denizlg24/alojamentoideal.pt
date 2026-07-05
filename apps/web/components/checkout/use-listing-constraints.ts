@@ -15,13 +15,13 @@ export const DEFAULT_LISTING_CONSTRAINTS: ListingConstraints = {
 
 async function fetchConstraints(
 	listingId: string,
-): Promise<[string, ListingConstraints]> {
+): Promise<[string, ListingConstraints] | null> {
 	try {
 		const response = await fetch(
 			`/api/catalog/listings/${encodeURIComponent(listingId)}`,
 		);
 		if (!response.ok) {
-			return [listingId, DEFAULT_LISTING_CONSTRAINTS];
+			return null;
 		}
 		const payload = (await response.json()) as {
 			data?: { capacity?: { guests?: number }; minNights?: number };
@@ -34,7 +34,7 @@ async function fetchConstraints(
 			},
 		];
 	} catch {
-		return [listingId, DEFAULT_LISTING_CONSTRAINTS];
+		return null;
 	}
 }
 
@@ -66,7 +66,12 @@ export function useListingConstraints(
 			if (toFetch.length === 0) {
 				return;
 			}
-			const loaded = await Promise.all(toFetch.map(fetchConstraints));
+			const loaded = (await Promise.all(toFetch.map(fetchConstraints))).filter(
+				(entry): entry is [string, ListingConstraints] => entry !== null,
+			);
+			if (loaded.length === 0) {
+				return;
+			}
 			if (!cancelled) {
 				setConstraints((current) => new Map([...current, ...loaded]));
 			}

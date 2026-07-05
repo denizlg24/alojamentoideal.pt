@@ -186,6 +186,7 @@ export function CartView() {
 	// listener can tell our own edits apart from changes made elsewhere.
 	const lastAppliedFingerprintRef = useRef<string>("");
 	const repricingRef = useRef(repricingItemIds);
+	const needsSkippedChangeReplayRef = useRef(false);
 	repricingRef.current = repricingItemIds;
 
 	const items = activeItems(cart);
@@ -203,6 +204,28 @@ export function CartView() {
 			),
 		);
 	}, []);
+
+	const refreshFromStoredCart = useCallback(() => {
+		const fingerprint = readStoredCartFingerprint();
+		if (fingerprint === lastAppliedFingerprintRef.current) {
+			return;
+		}
+		void (async () => {
+			const loaded = await loadStoredCart({ notify: false });
+			if (!loaded || activeItems(loaded).length === 0) {
+				lastAppliedFingerprintRef.current = cartContentFingerprint(loaded);
+				setCart(loaded);
+				setFailures(new Map());
+				return;
+			}
+			try {
+				applyValidation(await api.validateCart(loaded.id));
+			} catch {
+				lastAppliedFingerprintRef.current = cartContentFingerprint(loaded);
+				setCart(loaded);
+			}
+		})();
+	}, [applyValidation]);
 
 	const edits = useOptimisticStayEdits({
 		applyValidated: applyValidation,
@@ -259,27 +282,10 @@ export function CartView() {
 	useEffect(() => {
 		const onChanged = () => {
 			if (repricingRef.current.size > 0) {
+				needsSkippedChangeReplayRef.current = true;
 				return;
 			}
-			const fingerprint = readStoredCartFingerprint();
-			if (fingerprint === lastAppliedFingerprintRef.current) {
-				return;
-			}
-			void (async () => {
-				const loaded = await loadStoredCart({ notify: false });
-				if (!loaded || activeItems(loaded).length === 0) {
-					lastAppliedFingerprintRef.current = cartContentFingerprint(loaded);
-					setCart(loaded);
-					setFailures(new Map());
-					return;
-				}
-				try {
-					applyValidation(await api.validateCart(loaded.id));
-				} catch {
-					lastAppliedFingerprintRef.current = cartContentFingerprint(loaded);
-					setCart(loaded);
-				}
-			})();
+			refreshFromStoredCart();
 		};
 
 		window.addEventListener(CART_CHANGED_EVENT, onChanged);
@@ -288,7 +294,15 @@ export function CartView() {
 			window.removeEventListener(CART_CHANGED_EVENT, onChanged);
 			window.removeEventListener("storage", onChanged);
 		};
-	}, [applyValidation]);
+	}, [refreshFromStoredCart]);
+
+	useEffect(() => {
+		if (repricingItemIds.size > 0 || !needsSkippedChangeReplayRef.current) {
+			return;
+		}
+		needsSkippedChangeReplayRef.current = false;
+		refreshFromStoredCart();
+	}, [repricingItemIds, refreshFromStoredCart]);
 
 	const dialogItem = useMemo(
 		() =>
