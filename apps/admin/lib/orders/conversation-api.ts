@@ -20,8 +20,14 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
 	if (!response.ok) {
 		const body = (await response.json().catch(() => null)) as {
 			error?: string;
+			issues?: { message: string; path: string }[];
 		} | null;
-		throw new Error(body?.error ?? "Request failed.");
+		const detail = body?.issues?.map((i) => i.message).join("; ");
+		throw new Error(
+			detail
+				? `${body?.error ?? "Request failed."} (${detail})`
+				: (body?.error ?? "Request failed."),
+		);
 	}
 	return (await response.json()) as T;
 }

@@ -187,42 +187,56 @@ export class OrderRefundService {
 		// guard mirrors the orders_amount_refunded_lte_paid check so concurrent
 		// refunds can never over-refund.
 		const now = this.#now();
-		const [reservedRow] = await this.#db
-			.update(orderTable)
-			.set({
-				amountRefundedMinor: sql`${orderTable.amountRefundedMinor} + ${input.amountMinor}`,
-				updatedAt: now,
-			})
-			.where(
-				and(
-					eq(orderTable.id, order.id),
-					sql`${orderTable.amountRefundedMinor} + ${input.amountMinor} <= ${orderTable.amountPaidMinor}`,
-				),
-			)
-			.returning({ amountRefundedMinor: orderTable.amountRefundedMinor });
-		if (!reservedRow) {
+		let refundedTotalMinor: number = -1;
+		let idempotencyKey: string | null = null;
+		let recordId: string | null = null;
+		await this.#db.transaction(async (tx) => {
+			const [reservedRow] = await tx
+				.update(orderTable)
+				.set({
+					amountRefundedMinor: sql`${orderTable.amountRefundedMinor} + ${input.amountMinor}`,
+					updatedAt: now,
+				})
+				.where(
+					and(
+						eq(orderTable.id, order.id),
+						sql`${orderTable.amountRefundedMinor} + ${input.amountMinor} <= ${orderTable.amountPaidMinor}`,
+					),
+				)
+				.returning({ amountRefundedMinor: orderTable.amountRefundedMinor });
+			if (!reservedRow) {
+				throw new CommerceError(
+					"refund_amount_exceeds_refundable",
+					"Refund exceeds the amount still refundable on this order.",
+					422,
+				);
+			}
+
+			refundedTotalMinor = reservedRow.amountRefundedMinor;
+
+			idempotencyKey = `manual_refund:${order.id}:${refundedTotalMinor}`;
+			recordId = crypto.randomUUID();
+			await tx.insert(orderRefundTable).values({
+				amountMinor: input.amountMinor,
+				createdByUserId: input.actorUserId ?? null,
+				currency: order.currency,
+				id: recordId,
+				note: input.note?.trim() || null,
+				orderId: order.id,
+				orderItemId,
+				reason: input.reason,
+				status: "pending",
+				stripeRefundIdempotencyKey: idempotencyKey,
+			});
+		});
+
+		if (!idempotencyKey || !recordId) {
 			throw new CommerceError(
-				"refund_amount_exceeds_refundable",
-				"Refund exceeds the amount still refundable on this order.",
-				422,
+				"refund_failed",
+				"Failed to initialize the refund process.",
+				500,
 			);
 		}
-		const refundedTotalMinor = reservedRow.amountRefundedMinor;
-
-		const idempotencyKey = `manual_refund:${order.id}:${crypto.randomUUID()}`;
-		const recordId = crypto.randomUUID();
-		await this.#db.insert(orderRefundTable).values({
-			amountMinor: input.amountMinor,
-			createdByUserId: input.actorUserId ?? null,
-			currency: order.currency,
-			id: recordId,
-			note: input.note?.trim() || null,
-			orderId: order.id,
-			orderItemId,
-			reason: input.reason,
-			status: "pending",
-			stripeRefundIdempotencyKey: idempotencyKey,
-		});
 
 		let refund: RefundResult;
 		try {

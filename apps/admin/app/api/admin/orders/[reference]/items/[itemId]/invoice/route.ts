@@ -16,10 +16,11 @@ const customerSchema = z.object({
 });
 
 const lineSchema = z.object({
-	customDescription: z.string().min(1).max(200),
+	customDescription: z.string().max(200).nullish(),
 	discount: z.number().min(0).max(100),
 	price: z.string().min(1),
 	productId: z.string().min(1).max(40),
+	productLabel: z.string().max(200).nullish(),
 	quantity: z.number().positive(),
 	reasonCode: z.string().max(10).nullish(),
 	type: z.enum(["I", "P", "S"]),
@@ -64,7 +65,15 @@ export const POST = withInvoicingAdmin<AdminOrderItemInvoiceRouteContext>(
 
 		const service = invoicingService();
 		const { customer, invoiceType, lines } = parsed.data;
-
+		if ((customer && !lines) || (!customer && lines)) {
+			return Response.json(
+				{
+					code: "invalid_request",
+					error: "Both `customer` and `lines` must be provided together.",
+				},
+				{ status: 400 },
+			);
+		}
 		if (customer && lines) {
 			const invoice = await service.createOrderItemInvoiceFromLines({
 				customer: {
@@ -77,10 +86,11 @@ export const POST = withInvoicingAdmin<AdminOrderItemInvoiceRouteContext>(
 				},
 				invoiceType,
 				lines: lines.map((line) => ({
-					customDescription: line.customDescription,
+					customDescription: line.customDescription ?? null,
 					discount: line.discount,
 					price: line.price,
 					productId: line.productId,
+					productLabel: line.productLabel ?? null,
 					quantity: line.quantity,
 					reasonCode: line.reasonCode ?? null,
 					type: line.type,

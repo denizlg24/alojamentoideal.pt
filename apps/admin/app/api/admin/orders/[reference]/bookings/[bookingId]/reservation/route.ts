@@ -12,20 +12,29 @@ interface AdminReservationRouteContext {
 
 const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "expected YYYY-MM-DD");
 
-const reservationSchema = z.object({
-	checkIn: isoDate.optional(),
-	checkOut: isoDate.optional(),
-	guests: z.number().int().positive().max(99).optional(),
-	status: z
-		.enum([
-			"accepted",
-			"denied",
-			"cancelled_by_host",
-			"cancelled_by_guest",
-			"no_show",
-		])
-		.optional(),
-});
+const reservationSchema = z
+	.object({
+		checkIn: isoDate.optional(),
+		checkOut: isoDate.optional(),
+		guests: z.number().int().positive().max(99).optional(),
+		status: z
+			.enum([
+				"accepted",
+				"denied",
+				"cancelled_by_host",
+				"cancelled_by_guest",
+				"no_show",
+			])
+			.optional(),
+	})
+	.refine(
+		(v) =>
+			v.status !== undefined ||
+			v.checkIn !== undefined ||
+			v.checkOut !== undefined ||
+			v.guests !== undefined,
+		{ message: "At least one field must be provided." },
+	);
 
 /**
  * Admin-only: manage one Hostify reservation. A `status` transitions the
@@ -63,6 +72,15 @@ export const PUT = withAdminRoute<AdminReservationRouteContext>(
 		const { checkIn, checkOut, guests, status } = parsed.data;
 		try {
 			const service = reservationAdminService();
+			if (status && (checkIn || checkOut || guests)) {
+				return Response.json(
+					{
+						code: "invalid_request",
+						error: "Provide either `status` or detail fields, not both.",
+					},
+					{ status: 400 },
+				);
+			}
 			const result = status
 				? await service.updateReservationStatus({
 						bookingId,

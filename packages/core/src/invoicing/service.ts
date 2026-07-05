@@ -220,12 +220,12 @@ export class InvoicingService {
 		}
 
 		const lines = input.lines
-			.filter((line) => line.customDescription.trim().length > 0)
+			.filter(isFilledInvoiceLine)
 			.map(editableInvoiceLineToDraft);
 		if (lines.length === 0) {
 			throw new InvoicingError(
 				"order_item_not_found",
-				"the invoice needs at least one line with a description",
+				"the invoice needs at least one line with a product, quantity and price",
 			);
 		}
 		const reservationCode = await this.#loadReservationCode(item.id);
@@ -761,6 +761,16 @@ function feeSubtypeFromRawPayload(
 ): string | null {
 	const value = payload?.feeSubtype ?? payload?.type;
 	return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function isFilledInvoiceLine(line: EditableInvoiceLine): boolean {
+	const price = Number(line.price);
+	return (
+		line.productId.trim().length > 0 &&
+		line.quantity > 0 &&
+		Number.isFinite(price) &&
+		price !== 0
+	);
 }
 
 /** Operator-facing error text: no API keys, no guest identity values. */

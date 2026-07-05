@@ -211,12 +211,14 @@ export function invoiceableCharges(
  * the semi-manual invoicing form can round-trip a row without losing fields.
  */
 export interface EditableInvoiceLine {
-	customDescription: string;
+	customDescription?: string | null;
 	/** Whole-percent line discount. */
 	discount: number;
 	/** Unit price in euros, decimal string (e.g. "120.00"). */
 	price: string;
 	productId: string;
+	/** Human product label used when no custom line description is provided. */
+	productLabel?: string | null;
 	quantity: number;
 	reasonCode: string | null;
 	type: "I" | "P" | "S";
@@ -245,6 +247,7 @@ export function toEditableInvoiceLine(
 		price:
 			typeof draft.price === "number" ? draft.price.toString() : draft.price,
 		productId: draft.productId,
+		productLabel: null,
 		quantity: draft.quantity,
 		reasonCode: draft.reasonCode ?? null,
 		type: draft.type ?? "S",
@@ -261,8 +264,12 @@ export function editableInvoiceLineToDraft(
 	line: EditableInvoiceLine,
 ): InvoiceLineDraft {
 	const reason = line.reasonCode?.trim() || null;
+	const customDescription =
+		line.customDescription?.trim() ||
+		line.productLabel?.trim() ||
+		line.productId.trim();
 	return {
-		customDescription: line.customDescription,
+		customDescription,
 		discount: line.discount,
 		price: line.price,
 		productId: line.productId,

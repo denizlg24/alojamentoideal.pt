@@ -264,6 +264,28 @@ describe("editableInvoiceLineToDraft", () => {
 			editableInvoiceLineToDraft(EDITABLE_LINE).reasonCode,
 		).toBeUndefined();
 	});
+
+	it("falls back to the product label when custom description is blank", () => {
+		const draft = editableInvoiceLineToDraft({
+			...EDITABLE_LINE,
+			customDescription: " ",
+			productId: "TMT",
+			productLabel: "Tourist tax",
+		});
+
+		expect(draft.customDescription).toBe("Tourist tax");
+	});
+
+	it("falls back to the product id when no label is provided", () => {
+		const draft = editableInvoiceLineToDraft({
+			...EDITABLE_LINE,
+			customDescription: null,
+			productId: "CUSTOM",
+			productLabel: null,
+		});
+
+		expect(draft.customDescription).toBe("CUSTOM");
+	});
 });
 
 describe("editableInvoiceLinesTotalMinor", () => {

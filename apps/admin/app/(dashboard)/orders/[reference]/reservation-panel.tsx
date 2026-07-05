@@ -46,7 +46,11 @@ export function ReservationPanel({
 	reference,
 }: ReservationPanelProps) {
 	const router = useRouter();
-	const [status, setStatus] = useState<string>("accepted");
+	const [status, setStatus] = useState<string>(
+		STATUS_TARGETS.some((target) => target.value === currentStatus)
+			? currentStatus
+			: "accepted",
+	);
 	const [checkInValue, setCheckInValue] = useState(dateInputValue(checkIn));
 	const [checkOutValue, setCheckOutValue] = useState(dateInputValue(checkOut));
 	const [guestsValue, setGuestsValue] = useState(String(guests ?? ""));

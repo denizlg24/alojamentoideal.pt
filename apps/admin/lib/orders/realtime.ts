@@ -233,7 +233,6 @@ export function useAdminOrderConversation({
 		pusher.connection.bind("disconnected", handleDisconnected);
 		channel.bind("message.created", handleMessage);
 		channel.bind("conversation.updated", handleConversation);
-
 		return () => {
 			channel.unbind("message.created", handleMessage);
 			channel.unbind("conversation.updated", handleConversation);

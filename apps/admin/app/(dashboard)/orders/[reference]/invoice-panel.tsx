@@ -19,6 +19,7 @@ import {
 	DialogContent,
 	DialogDescription,
 	DialogHeader,
+	DialogTitle,
 } from "@workspace/ui/components/dialog";
 import { Input } from "@workspace/ui/components/input";
 import { Label } from "@workspace/ui/components/label";
@@ -64,6 +65,7 @@ function blankLine(): EditableInvoiceLine {
 		discount: 0,
 		price: "0.00",
 		productId: "EXTRAS",
+		productLabel: "Extras",
 		quantity: 1,
 		reasonCode: null,
 		type: "S",
@@ -85,6 +87,27 @@ function linesTotalMinor(lines: EditableInvoiceLine[]): number {
 		total += Math.round((net * (100 + line.vat)) / 100);
 	}
 	return total;
+}
+
+function productLabel(productId: string): string {
+	return (
+		PRODUCT_PRESETS.find((product) => product.id === productId)?.label ??
+		productId
+	);
+}
+
+function filledInvoiceLines(
+	lines: EditableInvoiceLine[],
+): EditableInvoiceLine[] {
+	return lines.filter((line) => {
+		const price = Number(line.price);
+		return (
+			line.productId.trim().length > 0 &&
+			line.quantity > 0 &&
+			Number.isFinite(price) &&
+			price !== 0
+		);
+	});
 }
 
 /**
@@ -120,11 +143,13 @@ export function InvoicePanel({
 	}
 
 	function submit() {
-		const filled = lines.filter(
-			(line) => line.customDescription.trim().length > 0,
-		);
+		const filled = filledInvoiceLines(lines).map((line) => ({
+			...line,
+			customDescription: line.customDescription?.trim() || null,
+			productLabel: line.productLabel?.trim() || productLabel(line.productId),
+		}));
 		if (filled.length === 0) {
-			setError("Add at least one line with a description.");
+			setError("Add at least one line with a product, quantity and price.");
 			return;
 		}
 
@@ -194,10 +219,12 @@ export function InvoicePanel({
 				}}
 			>
 				<DialogContent>
-					<DialogHeader>Create a custom Product</DialogHeader>
-					<DialogDescription>
-						Create a new custom product for this invoice.
-					</DialogDescription>
+					<DialogHeader>
+						<DialogTitle>Create a custom Product</DialogTitle>
+						<DialogDescription>
+							Create a new custom product for this invoice.
+						</DialogDescription>
+					</DialogHeader>
 					<form className="flex w-full flex-col gap-2">
 						<Label htmlFor="product-name">Product Name</Label>
 						<Input
@@ -228,7 +255,7 @@ export function InvoicePanel({
 							onClick={() => {
 								updateLine(createProduct.lineIndex, {
 									productId: createProduct.id,
-									customDescription: createProduct.label,
+									productLabel: createProduct.label,
 								});
 								setCreateProduct({
 									enabled: false,
@@ -396,7 +423,10 @@ export function InvoicePanel({
 													customDescription: event.target.value,
 												})
 											}
-											value={line.customDescription}
+											placeholder={
+												line.productLabel ?? productLabel(line.productId)
+											}
+											value={line.customDescription ?? ""}
 										/>
 									</td>
 									<td className="py-1 pr-2">
@@ -404,7 +434,12 @@ export function InvoicePanel({
 											items={PRODUCT_PRESETS}
 											value={line.productId}
 											onValueChange={(value) => {
-												if (value) updateLine(index, { productId: value });
+												if (value) {
+													updateLine(index, {
+														productId: value,
+														productLabel: productLabel(value),
+													});
+												}
 											}}
 											onInputValueChange={(value) => {
 												setCreateProduct((prev) => ({ ...prev, label: value }));
