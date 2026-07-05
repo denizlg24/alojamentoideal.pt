@@ -15,7 +15,7 @@ import {
 	LISTING_DESCRIPTION_SECTIONS,
 	type LocalizedDescriptionSections,
 } from "./localization";
-import { versionedHash } from "./sync-version";
+import { LISTING_SYNC_VERSION, versionedHash } from "./sync-version";
 
 export interface HostifyListingSections {
 	/**
@@ -78,9 +78,15 @@ export interface ListingCacheProjection {
 	timezone: string | null;
 }
 
+interface ListingCacheProjectionOptions {
+	syncVersion?: number;
+}
+
 export function buildListingCacheProjection(
 	sections: HostifyListingSections,
+	options: ListingCacheProjectionOptions = {},
 ): ListingCacheProjection {
+	const syncVersion = options.syncVersion ?? LISTING_SYNC_VERSION;
 	const raw = sanitizeSections(sections);
 	const listing = asRecord(raw.listing);
 	const translations = asArray(raw.translations);
@@ -113,29 +119,38 @@ export function buildListingCacheProjection(
 	};
 
 	const sectionHashes: ListingSectionHashes = {
-		amenities: versionedHash(amenities),
-		description: versionedHash({ description, raw: raw.description }),
-		details: versionedHash(raw.details),
-		fees: versionedHash(raw.fees),
-		guide: versionedHash(guideText),
-		location: versionedHash({
-			address: readString(listing, "address"),
-			city: readString(listing, "city"),
-			country: readString(listing, "country"),
-			latitude: readNumberFrom(listing, ["lat", "latitude"]),
-			longitude: readNumberFrom(listing, ["lng", "longitude"]),
-			state: readString(listing, "state"),
-			timezone: readString(listing, "timezone"),
-			zipcode: readScalarString(listing, "zipcode"),
-		}),
-		photos: versionedHash(raw.photos),
-		rooms: versionedHash(raw.rooms),
-		status: versionedHash(raw.status),
-		title: versionedHash({
-			name: readString(listing, "name"),
-			nickname: readString(listing, "nickname"),
-		}),
-		translations: versionedHash(translations),
+		amenities: versionedHash(amenities, syncVersion),
+		description: versionedHash(
+			{ description, raw: raw.description },
+			syncVersion,
+		),
+		details: versionedHash(raw.details, syncVersion),
+		fees: versionedHash(raw.fees, syncVersion),
+		guide: versionedHash(guideText, syncVersion),
+		location: versionedHash(
+			{
+				address: readString(listing, "address"),
+				city: readString(listing, "city"),
+				country: readString(listing, "country"),
+				latitude: readNumberFrom(listing, ["lat", "latitude"]),
+				longitude: readNumberFrom(listing, ["lng", "longitude"]),
+				state: readString(listing, "state"),
+				timezone: readString(listing, "timezone"),
+				zipcode: readScalarString(listing, "zipcode"),
+			},
+			syncVersion,
+		),
+		photos: versionedHash(raw.photos, syncVersion),
+		rooms: versionedHash(raw.rooms, syncVersion),
+		status: versionedHash(raw.status, syncVersion),
+		title: versionedHash(
+			{
+				name: readString(listing, "name"),
+				nickname: readString(listing, "nickname"),
+			},
+			syncVersion,
+		),
+		translations: versionedHash(translations, syncVersion),
 	};
 
 	return {
@@ -175,7 +190,7 @@ export function buildListingCacheProjection(
 		]),
 		raw,
 		sectionHashes,
-		sourceHash: versionedHash(raw),
+		sourceHash: versionedHash(raw, syncVersion),
 		timezone: readString(listing, "timezone"),
 	};
 }

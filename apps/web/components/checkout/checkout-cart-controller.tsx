@@ -3,16 +3,25 @@
 import { useEffect, useState } from "react";
 import {
 	CART_CHANGED_EVENT,
-	readCartRouteKey,
+	readStoredCartId,
 } from "@/lib/checkout/cart-store";
 import { CheckoutController } from "./checkout-controller";
 import { CheckoutFallback } from "./checkout-fallback";
 
+/**
+ * Keys the checkout controller on the shared cart id alone. In-place edits
+ * (single-stay inline editing, discount changes) reconcile within the
+ * controller, so this only remounts when the cart id itself changes.
+ */
 export function CheckoutCartController() {
-	const [cartKey, setCartKey] = useState<string | null>(null);
+	const [cartId, setCartId] = useState<string | null>(null);
+	const [ready, setReady] = useState(false);
 
 	useEffect(() => {
-		const refresh = () => setCartKey(readCartRouteKey());
+		const refresh = () => {
+			setCartId(readStoredCartId());
+			setReady(true);
+		};
 
 		refresh();
 		window.addEventListener(CART_CHANGED_EVENT, refresh);
@@ -24,9 +33,9 @@ export function CheckoutCartController() {
 		};
 	}, []);
 
-	return cartKey === null ? (
-		<CheckoutFallback />
+	return ready ? (
+		<CheckoutController key={cartId ?? "empty"} seed={null} />
 	) : (
-		<CheckoutController key={cartKey} seed={null} />
+		<CheckoutFallback />
 	);
 }

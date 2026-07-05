@@ -1,6 +1,7 @@
 import { logger } from "../observability";
 import { getRuntimeSettings } from "../settings";
 import { DEFAULT_ACTIVITY_IDS } from "./defaults";
+import { getActivitySyncVersion } from "./sync-version";
 
 export const ACTIVITY_PROVIDER = "bokun";
 export const ACTIVITY_CACHE_SYNC_TYPE = "activity_cache";
@@ -14,9 +15,11 @@ export interface ActivityCacheConfig {
 	staleAfterHours: number;
 	syncIntervalHours: number;
 	syncLeaseMinutes: number;
+	syncVersion: number;
 }
 
 interface ActivityCacheEnvironment {
+	ACTIVITY_SYNC_VERSION?: string;
 	ACTIVITY_CURRENCY?: string;
 	ACTIVITY_LANG?: string;
 	BOKUN_ACCOUNT_ID?: string;
@@ -43,6 +46,7 @@ export function getActivityCacheConfig(
 	environment: ActivityCacheEnvironment = {
 		ACTIVITY_CURRENCY: process.env.ACTIVITY_CURRENCY,
 		ACTIVITY_LANG: process.env.ACTIVITY_LANG,
+		ACTIVITY_SYNC_VERSION: process.env.ACTIVITY_SYNC_VERSION,
 		BOKUN_ACCOUNT_ID: process.env.BOKUN_ACCOUNT_ID,
 		BOKUN_ACTIVITY_IDS: process.env.BOKUN_ACTIVITY_IDS,
 		BOKUN_ACTIVITY_STALE_AFTER_HOURS:
@@ -97,6 +101,9 @@ export function getActivityCacheConfig(
 			120,
 			10,
 		),
+		syncVersion: getActivitySyncVersion({
+			ACTIVITY_SYNC_VERSION: environment.ACTIVITY_SYNC_VERSION,
+		}),
 	};
 }
 
@@ -105,6 +112,7 @@ export async function getActivityCacheConfigFromSettings(): Promise<ActivityCach
 	return getActivityCacheConfig({
 		ACTIVITY_CURRENCY: String(settings["bokun.activityCurrency"]),
 		ACTIVITY_LANG: String(settings["bokun.activityLang"]),
+		ACTIVITY_SYNC_VERSION: String(settings["bokun.activitySyncVersion"]),
 		BOKUN_ACCOUNT_ID: String(settings["bokun.accountId"]),
 		BOKUN_ACTIVITY_IDS: String(settings["bokun.activityIds"]),
 		BOKUN_ACTIVITY_STALE_AFTER_HOURS: String(

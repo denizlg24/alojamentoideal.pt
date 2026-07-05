@@ -1,5 +1,13 @@
 import type { AppSettingValue } from "@workspace/db";
 import { DEFAULT_ACTIVITY_IDS } from "../activities/defaults";
+import {
+	DEFAULT_ACTIVITY_SYNC_VERSION,
+	MAX_ACTIVITY_SYNC_VERSION,
+} from "../activities/sync-version";
+import {
+	DEFAULT_LISTING_SYNC_VERSION,
+	MAX_LISTING_SYNC_VERSION,
+} from "../listing-cache/sync-version";
 
 export type RuntimeSettingType = "boolean" | "integer" | "string";
 
@@ -71,6 +79,18 @@ export const runtimeSettingDefinitions = [
 		key: "hostify.accountId",
 		label: "Hostify account id",
 		type: "string",
+	},
+	{
+		defaultValue: DEFAULT_LISTING_SYNC_VERSION,
+		description:
+			"Cache-busting version for Hostify listings, reviews and pricing.",
+		envName: "LISTING_SYNC_VERSION",
+		group: "hostify",
+		key: "hostify.listingSyncVersion",
+		label: "Listing sync version",
+		max: MAX_LISTING_SYNC_VERSION,
+		min: 0,
+		type: "integer",
 	},
 	{
 		defaultValue: 10,
@@ -278,6 +298,17 @@ export const runtimeSettingDefinitions = [
 		key: "bokun.accountId",
 		label: "Bokun account id",
 		type: "string",
+	},
+	{
+		defaultValue: DEFAULT_ACTIVITY_SYNC_VERSION,
+		description: "Cache-busting version for Bokun activity experiences.",
+		envName: "ACTIVITY_SYNC_VERSION",
+		group: "bokun",
+		key: "bokun.activitySyncVersion",
+		label: "Activity sync version",
+		max: MAX_ACTIVITY_SYNC_VERSION,
+		min: 0,
+		type: "integer",
 	},
 	{
 		defaultValue: DEFAULT_ACTIVITY_IDS.join(","),

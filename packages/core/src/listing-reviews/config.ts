@@ -1,9 +1,13 @@
+import { getListingSyncVersion } from "../listing-cache/sync-version";
+import { getRuntimeSettings } from "../settings";
+
 export interface ListingReviewSyncConfig {
 	batchSize: number;
 	cronSecret?: string;
 	hostifyAccountId: string;
 	leaseMinutes: number;
 	maxPages: number;
+	syncVersion: number;
 	syncIntervalHours: number;
 }
 
@@ -15,6 +19,7 @@ interface ListingReviewSyncEnvironment {
 	HOSTIFY_REVIEW_SYNC_LEASE_MINUTES?: string;
 	HOSTIFY_REVIEW_SYNC_MAX_PAGES?: string;
 	HOSTIFY_SYNC_CRON_SECRET?: string;
+	LISTING_SYNC_VERSION?: string;
 }
 
 export function getListingReviewSyncConfig(
@@ -28,6 +33,7 @@ export function getListingReviewSyncConfig(
 			process.env.HOSTIFY_REVIEW_SYNC_LEASE_MINUTES,
 		HOSTIFY_REVIEW_SYNC_MAX_PAGES: process.env.HOSTIFY_REVIEW_SYNC_MAX_PAGES,
 		HOSTIFY_SYNC_CRON_SECRET: process.env.HOSTIFY_SYNC_CRON_SECRET,
+		LISTING_SYNC_VERSION: process.env.LISTING_SYNC_VERSION,
 	},
 ): ListingReviewSyncConfig {
 	return {
@@ -61,6 +67,9 @@ export function getListingReviewSyncConfig(
 			24 * 30,
 			24,
 		),
+		syncVersion: getListingSyncVersion({
+			LISTING_SYNC_VERSION: environment.LISTING_SYNC_VERSION,
+		}),
 	};
 }
 
@@ -82,6 +91,7 @@ export async function getListingReviewSyncConfigFromSettings(): Promise<ListingR
 			settings["hostify.reviewSyncMaxPages"],
 		),
 		HOSTIFY_SYNC_CRON_SECRET: process.env.HOSTIFY_SYNC_CRON_SECRET,
+		LISTING_SYNC_VERSION: String(settings["hostify.listingSyncVersion"]),
 	});
 }
 
@@ -103,5 +113,3 @@ function optionalInteger(
 
 	return parsed;
 }
-
-import { getRuntimeSettings } from "../settings";

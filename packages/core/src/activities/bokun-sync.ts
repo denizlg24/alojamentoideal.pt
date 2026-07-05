@@ -14,7 +14,6 @@ import {
 	getActivityCacheConfigFromSettings,
 } from "./config";
 import { toActivityDetail, toActivitySummary } from "./mappers";
-import { ACTIVITY_SYNC_VERSION } from "./sync-version";
 import type { ActivityDetail, ActivitySummary } from "./types";
 
 const MILLISECONDS_PER_HOUR = 60 * 60 * 1000;
@@ -122,7 +121,7 @@ export class BokunActivityCacheSync {
 			now,
 			provider: ACTIVITY_PROVIDER,
 			syncType: ACTIVITY_CACHE_SYNC_TYPE,
-			versionHash: ACTIVITY_SYNC_VERSION,
+			versionHash: this.#config.syncVersion,
 		});
 
 		if (!claim) {
@@ -166,7 +165,7 @@ export class BokunActivityCacheSync {
 				nextRunAt,
 				now: finishedAt,
 				provider: ACTIVITY_PROVIDER,
-				versionHash: ACTIVITY_SYNC_VERSION,
+				versionHash: this.#config.syncVersion,
 			});
 
 			return {
@@ -295,7 +294,10 @@ export class BokunActivityCacheSync {
 		return {
 			detail,
 			raw: sanitizedRaw,
-			sourceHash: stableHash(sanitizedRaw),
+			sourceHash: stableHash({
+				v: this.#config.syncVersion,
+				value: sanitizedRaw,
+			}),
 			summary,
 		};
 	}

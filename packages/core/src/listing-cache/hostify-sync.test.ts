@@ -27,6 +27,7 @@ const baseConfig: ListingCacheConfig = {
 	staleAfterHours: 24,
 	syncMaxPages: 50,
 	syncPerPage: 50,
+	syncVersion: LISTING_SYNC_VERSION,
 };
 
 describe("buildListingCacheProjection amenities", () => {
@@ -277,6 +278,46 @@ describe("HostifyListingCacheSync.pollListings", () => {
 
 		expect(completed.status).toBe("completed");
 		expect(repository.state.versionHash).toBe(LISTING_SYNC_VERSION);
+	});
+
+	test("rewrites unchanged raw content when the sync version changes", async () => {
+		const hostifyListing = listing("1");
+		const oldProjection = buildListingCacheProjection(
+			{
+				amenities: [],
+				description: null,
+				details: null,
+				fees: [],
+				guestGuide: null,
+				listing: hostifyListing,
+				photos: [],
+				rooms: null,
+				status: "Clean",
+				translations: [],
+			},
+			{ syncVersion: LISTING_SYNC_VERSION - 1 },
+		);
+		const repository = new FakeListingCacheRepository();
+		repository.listingStates.set("1", {
+			active: true,
+			latitude: null,
+			longitude: null,
+			processedSourceHash: null,
+			processingStatus: "skipped",
+			sourceHash: oldProjection.sourceHash,
+		});
+		const client = new FakeHostifyClient({
+			1: [hostifyListing],
+		});
+		const sync = createSync({ client, repository });
+
+		const result = await sync.pollListings("poll");
+
+		expect(result.status).toBe("completed");
+		expect(repository.upserts.map((upsert) => upsert.externalId)).toEqual([
+			"1",
+		]);
+		expect(repository.coordinateRefreshes).toHaveLength(0);
 	});
 
 	test("reruns immediately when the stored version is stale despite a future next run", async () => {

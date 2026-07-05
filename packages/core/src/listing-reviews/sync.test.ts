@@ -23,6 +23,7 @@ const baseConfig: ListingReviewSyncConfig = {
 	leaseMinutes: 10,
 	maxPages: 50,
 	syncIntervalHours: 24,
+	syncVersion: LISTING_SYNC_VERSION,
 };
 
 const syncNow = new Date("2026-06-18T12:00:00.000Z");

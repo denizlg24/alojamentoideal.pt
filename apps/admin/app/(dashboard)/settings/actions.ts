@@ -2,6 +2,7 @@
 
 import {
 	deleteHostkitListingApiKey,
+	getRuntimeSettings,
 	type RuntimeSettingKey,
 	runtimeSettingDefinitions,
 	setHostkitListingApiKey,
@@ -11,6 +12,11 @@ import type { AppSettingValue } from "@workspace/db";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { requireAdminUser } from "@/lib/auth/admin";
+
+const MANUAL_RESYNC_VERSION_KEYS = [
+	"hostify.listingSyncVersion",
+	"bokun.activitySyncVersion",
+] as const satisfies readonly RuntimeSettingKey[];
 
 function settingsErrorRedirect(message: string): never {
 	redirect(`/settings?error=${encodeURIComponent(message)}`);
@@ -46,6 +52,34 @@ export async function saveSettings(formData: FormData): Promise<void> {
 
 	revalidatePath("/settings");
 	redirect("/settings?saved=settings");
+}
+
+export async function bumpManualSyncVersion(): Promise<void> {
+	await requireAdminUser();
+
+	try {
+		const settings = await getRuntimeSettings();
+		const values: Partial<Record<RuntimeSettingKey, AppSettingValue>> = {};
+
+		for (const key of MANUAL_RESYNC_VERSION_KEYS) {
+			const current = settings[key];
+			if (typeof current !== "number" || !Number.isInteger(current)) {
+				throw new Error("Sync version settings must be integers");
+			}
+			values[key] = current + 1;
+		}
+
+		await updateRuntimeSettings(values);
+	} catch (error) {
+		settingsErrorRedirect(
+			error instanceof Error
+				? error.message
+				: "Manual resync could not be requested.",
+		);
+	}
+
+	revalidatePath("/settings");
+	redirect("/settings?saved=sync");
 }
 
 export async function saveHostkitListingKey(formData: FormData): Promise<void> {

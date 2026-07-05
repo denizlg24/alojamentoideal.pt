@@ -1,3 +1,4 @@
+import { getListingSyncVersion } from "../listing-cache/sync-version";
 import { getRuntimeSettings, type RuntimeSettings } from "../settings";
 
 export interface AccommodationsConfig {
@@ -13,6 +14,7 @@ export interface AccommodationsConfig {
 	nightlyPriceSyncMaxPages: number;
 	nightlyPriceSyncMaxListings: number;
 	quoteCacheTtlSeconds: number;
+	syncVersion: number;
 }
 
 interface AccommodationsEnvironment {
@@ -29,6 +31,7 @@ interface AccommodationsEnvironment {
 	CRON_SECRET?: string;
 	HOSTIFY_ACCOUNT_ID?: string;
 	HOSTIFY_SYNC_CRON_SECRET?: string;
+	LISTING_SYNC_VERSION?: string;
 }
 
 export function getAccommodationsConfig(
@@ -55,6 +58,7 @@ export function getAccommodationsConfig(
 		CRON_SECRET: process.env.CRON_SECRET,
 		HOSTIFY_ACCOUNT_ID: process.env.HOSTIFY_ACCOUNT_ID,
 		HOSTIFY_SYNC_CRON_SECRET: process.env.HOSTIFY_SYNC_CRON_SECRET,
+		LISTING_SYNC_VERSION: process.env.LISTING_SYNC_VERSION,
 	},
 ): AccommodationsConfig {
 	return {
@@ -124,6 +128,9 @@ export function getAccommodationsConfig(
 			3600,
 			300,
 		),
+		syncVersion: getListingSyncVersion({
+			LISTING_SYNC_VERSION: environment.LISTING_SYNC_VERSION,
+		}),
 	};
 }
 
@@ -160,6 +167,9 @@ export async function getAccommodationsConfigFromSettings(
 		CRON_SECRET: process.env.CRON_SECRET,
 		HOSTIFY_ACCOUNT_ID: String(resolvedSettings["hostify.accountId"]),
 		HOSTIFY_SYNC_CRON_SECRET: process.env.HOSTIFY_SYNC_CRON_SECRET,
+		LISTING_SYNC_VERSION: String(
+			resolvedSettings["hostify.listingSyncVersion"],
+		),
 	});
 }
 

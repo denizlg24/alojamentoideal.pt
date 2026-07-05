@@ -1,3 +1,6 @@
+import { getRuntimeSettings } from "../settings";
+import { getListingSyncVersion } from "./sync-version";
+
 export interface ListingCacheConfig {
 	cronSecret?: string;
 	hostifyAccountId: string;
@@ -10,6 +13,7 @@ export interface ListingCacheConfig {
 	staleAfterHours: number;
 	syncMaxPages: number;
 	syncPerPage: number;
+	syncVersion: number;
 }
 
 interface ListingCacheEnvironment {
@@ -23,6 +27,7 @@ interface ListingCacheEnvironment {
 	HOSTIFY_LISTING_STALE_AFTER_HOURS?: string;
 	HOSTIFY_SYNC_CRON_SECRET?: string;
 	LISTING_LLM_ENABLED?: string;
+	LISTING_SYNC_VERSION?: string;
 	OPENAI_API_KEY?: string;
 	OPENAI_LISTING_MODEL?: string;
 }
@@ -43,6 +48,7 @@ export function getListingCacheConfig(
 		HOSTIFY_LISTING_SYNC_PER_PAGE: process.env.HOSTIFY_LISTING_SYNC_PER_PAGE,
 		HOSTIFY_SYNC_CRON_SECRET: process.env.HOSTIFY_SYNC_CRON_SECRET,
 		LISTING_LLM_ENABLED: process.env.LISTING_LLM_ENABLED,
+		LISTING_SYNC_VERSION: process.env.LISTING_SYNC_VERSION,
 		OPENAI_API_KEY: process.env.OPENAI_API_KEY,
 		OPENAI_LISTING_MODEL: process.env.OPENAI_LISTING_MODEL,
 	},
@@ -95,6 +101,9 @@ export function getListingCacheConfig(
 			100,
 			50,
 		),
+		syncVersion: getListingSyncVersion({
+			LISTING_SYNC_VERSION: environment.LISTING_SYNC_VERSION,
+		}),
 	};
 }
 
@@ -123,6 +132,7 @@ export async function getListingCacheConfigFromSettings(): Promise<ListingCacheC
 		),
 		HOSTIFY_SYNC_CRON_SECRET: process.env.HOSTIFY_SYNC_CRON_SECRET,
 		LISTING_LLM_ENABLED: String(settings["features.listingLlmEnabled"]),
+		LISTING_SYNC_VERSION: String(settings["hostify.listingSyncVersion"]),
 		OPENAI_API_KEY: process.env.OPENAI_API_KEY,
 		OPENAI_LISTING_MODEL: String(settings["listing.openaiModel"]),
 	});
@@ -154,5 +164,3 @@ function optionalInteger(
 
 	return parsed;
 }
-
-import { getRuntimeSettings } from "../settings";

@@ -136,14 +136,13 @@ export function readCachedItemCount(): number {
 }
 
 /**
- * Key the cart/checkout route views remount on. Combines the cart id with the
- * content fingerprint so any cart mutation, including ones that keep the item
- * count stable, produces a new key. Falls back to the cached count for
- * visitors whose storage predates the fingerprint.
+ * Reads the cached fingerprint of the cart's active contents. The `/cart` and
+ * `/checkout` views compare this against the fingerprint they last reconciled
+ * to decide whether a cart changed elsewhere (another tab, or the checkout flow)
+ * and needs an in-place refresh, without remounting mid-edit.
  */
-export function readCartRouteKey(): string {
-	const fingerprint = readCachedFingerprint();
-	return `${readStoredCartId() ?? "empty"}:${fingerprint ?? readCachedItemCount()}`;
+export function readStoredCartFingerprint(): string {
+	return readCachedFingerprint() ?? EMPTY_CART_FINGERPRINT;
 }
 
 function writeCachedItemCount(count: number): void {
