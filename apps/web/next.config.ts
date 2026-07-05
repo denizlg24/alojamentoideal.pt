@@ -26,9 +26,26 @@ const nextConfig: NextConfig = {
 	images: {
 		// Listing/activity photos are served from the Hostify and Bokun CDNs.
 		remotePatterns: [
-			new URL("https://img.hostify.com/**"),
-			new URL("https://bokun.s3.amazonaws.com/**"),
-			new URL("http://bokundemo.s3.amazonaws.com/**"),
+			{
+				protocol: "https",
+				hostname: "img.hostify.com",
+				pathname: "/**",
+			},
+			{
+				protocol: "https",
+				hostname: "bokun.s3.amazonaws.com",
+				pathname: "/**",
+			},
+			{
+				protocol: "http",
+				hostname: "bokundemo.s3.amazonaws.com",
+				pathname: "/**",
+			},
+			{
+				protocol: "https",
+				hostname: "imgcdn.bokun.tools",
+				pathname: "/**",
+			},
 		],
 	},
 	transpilePackages: [

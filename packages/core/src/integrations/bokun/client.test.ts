@@ -132,6 +132,33 @@ describe("BokunClient", () => {
 		expect(calls).toBe(2);
 	});
 
+	it("accepts numeric strings in activity photo dimensions", async () => {
+		const client = clientWith(async () =>
+			Response.json({
+				id: 942570,
+				keyPhoto: {
+					height: "1365",
+					originalUrl: "https://imgcdn.bokun.tools/photo.jpg",
+					width: "2048",
+				},
+				photos: [
+					{
+						height: "1365",
+						originalUrl: "https://imgcdn.bokun.tools/photo.jpg",
+						width: "2048",
+					},
+				],
+				title: "Geres Private Tour",
+			}),
+		);
+
+		const activity = await client.v1.activity.get(942570);
+
+		expect(activity.keyPhoto?.height).toBe(1365);
+		expect(activity.keyPhoto?.width).toBe(2048);
+		expect(activity.photos?.[0]?.height).toBe(1365);
+	});
+
 	it("does not retry mutations", async () => {
 		let calls = 0;
 		const client = makeClient(

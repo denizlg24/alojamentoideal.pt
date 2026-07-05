@@ -20,6 +20,7 @@ interface SettingsPageProps {
 }
 
 const GROUP_LABELS = {
+	bokun: "Bokun activities",
 	features: "Enabled features",
 	hostify: "Hostify sync",
 	hostkit: "Hostkit",
@@ -59,67 +60,77 @@ export default async function SettingsPage({
 
 			<form action={saveSettings} className="mt-8">
 				<div className="space-y-10">
-					{(["features", "hostify", "hostkit"] as const).map((group) => (
-						<section
-							aria-labelledby={`${group}-settings-heading`}
-							className="border-border/60 border-t pt-5"
-							key={group}
-						>
-							<div className="mb-4">
-								<h2
-									className="font-display font-semibold text-base tracking-tight"
-									id={`${group}-settings-heading`}
-								>
-									{GROUP_LABELS[group]}
-								</h2>
-							</div>
-							<div className="divide-y divide-border/60">
-								{runtimeSettingDefinitions
-									.filter((definition) => definition.group === group)
-									.map((definition) => (
-										<div
-											className="grid gap-3 py-3 md:grid-cols-[minmax(0,1fr)_minmax(12rem,18rem)] md:items-center"
-											key={definition.key}
-										>
-											<div>
-												<Label
-													className="font-medium text-sm"
-													htmlFor={definition.key}
-												>
-													{definition.label}
-												</Label>
-												<p className="mt-1 text-muted-foreground text-xs">
-													{definition.description}
-												</p>
-											</div>
-											{definition.type === "boolean" ? (
-												<label className="flex items-center justify-start gap-2 text-sm md:justify-end">
-													<input
-														className="size-4 accent-foreground"
-														defaultChecked={settings[definition.key] === true}
+					{(["features", "hostify", "bokun", "hostkit"] as const).map(
+						(group) => (
+							<section
+								aria-labelledby={`${group}-settings-heading`}
+								className="border-border/60 border-t pt-5"
+								key={group}
+							>
+								<div className="mb-4">
+									<h2
+										className="font-display font-semibold text-base tracking-tight"
+										id={`${group}-settings-heading`}
+									>
+										{GROUP_LABELS[group]}
+									</h2>
+								</div>
+								<div className="divide-y divide-border/60">
+									{runtimeSettingDefinitions
+										.filter((definition) => definition.group === group)
+										.map((definition) => (
+											<div
+												className="grid gap-3 py-3 md:grid-cols-[minmax(0,1fr)_minmax(12rem,18rem)] md:items-center"
+												key={definition.key}
+											>
+												<div>
+													<Label
+														className="font-medium text-sm"
+														htmlFor={definition.key}
+													>
+														{definition.label}
+													</Label>
+													<p className="mt-1 text-muted-foreground text-xs">
+														{definition.description}
+													</p>
+												</div>
+												{definition.type === "boolean" ? (
+													<label className="flex items-center justify-start gap-2 text-sm md:justify-end">
+														<input
+															className="size-4 accent-foreground"
+															defaultChecked={settings[definition.key] === true}
+															id={definition.key}
+															name={definition.key}
+															type="checkbox"
+														/>
+														<span className="text-muted-foreground">
+															Enabled
+														</span>
+													</label>
+												) : (
+													<Input
+														defaultValue={String(
+															settings[definition.key] ?? "",
+														)}
 														id={definition.key}
+														max={
+															"max" in definition ? definition.max : undefined
+														}
+														min={
+															"min" in definition ? definition.min : undefined
+														}
 														name={definition.key}
-														type="checkbox"
+														type={
+															definition.type === "integer" ? "number" : "text"
+														}
 													/>
-													<span className="text-muted-foreground">Enabled</span>
-												</label>
-											) : (
-												<Input
-													defaultValue={String(settings[definition.key] ?? "")}
-													id={definition.key}
-													max={"max" in definition ? definition.max : undefined}
-													min={"min" in definition ? definition.min : undefined}
-													name={definition.key}
-													type={
-														definition.type === "integer" ? "number" : "text"
-													}
-												/>
-											)}
-										</div>
-									))}
-							</div>
-						</section>
-					))}
+												)}
+											</div>
+										))}
+								</div>
+							</section>
+						),
+					)}
 				</div>
 				<div className="mt-6 flex justify-end">
 					<Button type="submit">Save settings</Button>

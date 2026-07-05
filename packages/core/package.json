@@ -20,6 +20,14 @@
 			"types": "./src/accommodations/index.ts",
 			"default": "./src/accommodations/index.ts"
 		},
+		"./activities": {
+			"types": "./src/activities/index.ts",
+			"default": "./src/activities/index.ts"
+		},
+		"./activities/cache": {
+			"types": "./src/activities/cache.ts",
+			"default": "./src/activities/cache.ts"
+		},
 		"./commerce": {
 			"types": "./src/commerce/index.ts",
 			"default": "./src/commerce/index.ts"

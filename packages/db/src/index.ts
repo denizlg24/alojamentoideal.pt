@@ -42,6 +42,7 @@ export {
 	accommodationListingNight,
 	accommodationQuoteSnapshot,
 	account,
+	activityExperience,
 	apiIdempotencyKey,
 	appSetting,
 	bookingGuest,

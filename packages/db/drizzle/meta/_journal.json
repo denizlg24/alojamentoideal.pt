@@ -225,6 +225,13 @@
       "when": 1783245058447,
       "tag": "0031_yummy_jane_foster",
       "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1783262197144,
+      "tag": "0032_nasty_guardsmen",
+      "breakpoints": true
     }
   ]
 }
