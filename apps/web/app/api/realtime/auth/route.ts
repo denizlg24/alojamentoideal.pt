@@ -109,7 +109,7 @@ export const POST = withApiRoute(
 			body.reference,
 		);
 		try {
-			const service = commerceService();
+			const service = await commerceService();
 			const access = await service.resolveOrderAccess(
 				body.reference,
 				accessContext,

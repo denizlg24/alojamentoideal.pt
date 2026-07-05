@@ -7,7 +7,7 @@ import { createHostifyClientFromEnv } from "../integrations/hostify/index";
 import { ListingCacheRepository } from "../listing-cache/repository";
 import { LISTING_SYNC_VERSION } from "../listing-cache/sync-version";
 import type { ListingReviewSyncConfig } from "./config";
-import { getListingReviewSyncConfig } from "./config";
+import { getListingReviewSyncConfigFromSettings } from "./config";
 import { buildListingReviewProjection } from "./normalizer";
 import { ListingReviewRepository } from "./repository";
 
@@ -63,10 +63,10 @@ interface HostifyListingReviewSyncOptions {
 	syncRepository: ListingCacheRepository;
 }
 
-export function createHostifyListingReviewSyncFromEnv() {
+export async function createHostifyListingReviewSyncFromEnv() {
 	return new HostifyListingReviewSync({
 		client: createHostifyClientFromEnv(),
-		config: getListingReviewSyncConfig(),
+		config: await getListingReviewSyncConfigFromSettings(),
 		reviewRepository: new ListingReviewRepository(getDb()),
 		syncRepository: new ListingCacheRepository(getDb()),
 	});

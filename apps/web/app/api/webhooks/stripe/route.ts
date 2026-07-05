@@ -1,5 +1,6 @@
 import * as Sentry from "@sentry/nextjs";
 import type {
+	CommerceService,
 	OrderCompensationFacts,
 	OrderConfirmationFacts,
 	OrderFinalizationEmailKind,
@@ -55,7 +56,7 @@ async function handlePaymentSucceeded(
 	}
 
 	try {
-		const service = commerceService();
+		const service = await commerceService();
 		const paymentMethod = await loadPaymentMethodSummary(
 			stripe,
 			event.paymentIntentId,
@@ -154,7 +155,7 @@ async function loadPaymentMethodSummary(
  * customer email. Shared by the webhook and any future inline caller.
  */
 async function finalizeReservation(
-	service: ReturnType<typeof commerceService>,
+	service: CommerceService,
 	orderId: string,
 	paymentIntentId: string,
 ): Promise<void> {
@@ -232,7 +233,7 @@ async function finalizeReservation(
  * logged and left for the reconciler to retry, never surfaced to Stripe.
  */
 async function sendPendingNoticeEmail(
-	service: ReturnType<typeof commerceService>,
+	service: CommerceService,
 	facts: OrderConfirmationFacts,
 ): Promise<void> {
 	if (!facts.email) {
@@ -261,7 +262,7 @@ async function sendPendingNoticeEmail(
 }
 
 async function sendFinalizationEmail(
-	service: ReturnType<typeof commerceService>,
+	service: CommerceService,
 	kind: OrderFinalizationEmailKind,
 	facts: OrderConfirmationFacts | OrderCompensationFacts,
 	send: () => Promise<void>,
@@ -324,7 +325,7 @@ async function handlePaymentFailed(
 		return;
 	}
 
-	await commerceService().recordOrderPaymentFailure(event.orderId, {
+	await (await commerceService()).recordOrderPaymentFailure(event.orderId, {
 		failureCode: event.failureCode,
 		failureDetail: event.failureDetail,
 	});
@@ -347,7 +348,9 @@ async function handleIdentityUpdated(
 			: undefined;
 
 	if (event.bookingGuestId) {
-		const guestId = await commerceService().applyBookingGuestIdentityStatus({
+		const guestId = await (
+			await commerceService()
+		).applyBookingGuestIdentityStatus({
 			bookingGuestId: event.bookingGuestId,
 			sessionId: event.sessionId,
 			status: event.status,

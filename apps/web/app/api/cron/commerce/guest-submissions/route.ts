@@ -20,7 +20,7 @@ export const GET = withApiRoute(
 			return Response.json({ error: "Unauthorized" }, { status: 401 });
 		}
 
-		const summary = await guestComplianceService().run(20, {
+		const summary = await (await guestComplianceService()).run(20, {
 			onGuestInfoReminder: sendGuestInfoReminderEmail,
 		});
 		return Response.json({ data: summary, success: true });

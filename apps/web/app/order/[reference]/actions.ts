@@ -24,7 +24,7 @@ export async function redeemOrderAccess(
 ): Promise<RedeemOrderAccessResult> {
 	const user = await getCurrentUser();
 	try {
-		await commerceService().redeemMemberToken(reference, token, {
+		await (await commerceService()).redeemMemberToken(reference, token, {
 			userId: user?.id ?? null,
 		});
 	} catch (error) {

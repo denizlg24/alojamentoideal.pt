@@ -79,7 +79,7 @@ export default async function OrderDetailPage({
 	}
 
 	const access = adminOrderAccess(row);
-	const service = commerceService();
+	const service = await commerceService();
 	const invoicing = invoicingService();
 	const [detail, invoices, refunds] = await Promise.all([
 		service.readOrderDetail(access),
@@ -112,7 +112,7 @@ export default async function OrderDetailPage({
 	const itemTitleById = new Map(
 		detail.items.map((item) => [item.id, item.title]),
 	);
-	const invoicingIsEnabled = invoicingEnabled();
+	const invoicingIsEnabled = await invoicingEnabled();
 	const activeInvoiceItemIds = new Set(
 		invoices
 			.filter(

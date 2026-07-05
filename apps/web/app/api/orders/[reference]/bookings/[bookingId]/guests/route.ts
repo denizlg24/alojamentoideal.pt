@@ -22,7 +22,7 @@ export const GET = withApiRoute<OrderBookingGuestsRouteContext>(
 		const accessContext = await resolveOrderAccessContext(request, reference);
 
 		try {
-			const service = commerceService();
+			const service = await commerceService();
 			const access = await service.resolveOrderAccess(reference, accessContext);
 			const guests = await service.readBookingGuests(access, bookingId);
 			return Response.json(guests);
@@ -50,7 +50,7 @@ export const PUT = withApiRoute<OrderBookingGuestsRouteContext>(
 
 		const accessContext = await resolveOrderAccessContext(request, reference);
 		try {
-			const service = commerceService();
+			const service = await commerceService();
 			const access = await service.resolveOrderAccess(reference, accessContext);
 			const guests = await service.updateBookingGuests(
 				access,

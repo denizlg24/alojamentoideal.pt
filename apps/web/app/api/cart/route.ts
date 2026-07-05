@@ -20,7 +20,10 @@ export const POST = withApiRoute(
 		const owner = await resolveCartOwner(request);
 
 		try {
-			const result = await commerceService().createCart(parsed.data, owner);
+			const result = await (await commerceService()).createCart(
+				parsed.data,
+				owner,
+			);
 			const response = Response.json(result);
 			response.headers.append("Set-Cookie", cartCookie(result.cart.cartToken));
 			return response;

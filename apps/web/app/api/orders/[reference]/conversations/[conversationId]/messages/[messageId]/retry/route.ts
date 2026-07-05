@@ -35,7 +35,7 @@ export const POST = withApiRoute<RetryConversationMessageRouteContext>(
 		const accessContext = await resolveOrderAccessContext(request, reference);
 
 		try {
-			const service = commerceService();
+			const service = await commerceService();
 			const access = await service.resolveOrderAccess(reference, accessContext);
 			const message = await service.retryConversationMessage(
 				access,

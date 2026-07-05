@@ -26,7 +26,7 @@ export const POST = withApiRoute(
 
 		try {
 			return Response.json(
-				await commerceService().claimCart(
+				await (await commerceService()).claimCart(
 					{ cartToken, userId: user.id },
 					cartToken,
 				),

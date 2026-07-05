@@ -24,7 +24,7 @@ export const GET = withApiRoute(
 			return Response.json({ error: "Unauthorized" }, { status: 401 });
 		}
 
-		const sync = createNightlyPriceSyncFromEnv();
+		const sync = await createNightlyPriceSyncFromEnv();
 		const result = await sync.pollPrices("poll");
 
 		if ((result.data?.nightsSynced ?? 0) > 0) {

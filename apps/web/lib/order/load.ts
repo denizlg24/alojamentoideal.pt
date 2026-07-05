@@ -27,7 +27,7 @@ export const loadOrderForRequest = cache(
 	async (reference: string): Promise<LoadedOrder | null> => {
 		const accessContext = await resolveOrderAccessFromCookies(reference);
 		try {
-			const service = commerceService();
+			const service = await commerceService();
 			const access = await service.resolveOrderAccess(reference, accessContext);
 			const detail = await service.readOrderDetail(access);
 			return { access, detail };

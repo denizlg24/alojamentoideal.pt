@@ -29,7 +29,7 @@ export const POST = withApiRoute<OrderMemberRouteContext>(
 		const { memberId, reference } = await context.params;
 		const accessContext = await resolveOrderAccessContext(request, reference);
 		try {
-			const service = commerceService();
+			const service = await commerceService();
 			const access = await service.resolveOrderAccess(reference, accessContext);
 			const detail = await service.readOrderDetail(access);
 			const accommodationTitle = orderInviteTitle(detail.items);

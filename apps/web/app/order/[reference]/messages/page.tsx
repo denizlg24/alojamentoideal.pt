@@ -51,11 +51,9 @@ async function OrderMessagesRoute({ params }: OrderMessagesPageProps) {
 	let messagesLoadError = false;
 	if (conversation) {
 		try {
-			initialMessages = await commerceService().readConversationMessages(
-				loaded.access,
-				conversation.id,
-				{ limit: 50 },
-			);
+			initialMessages = await (
+				await commerceService()
+			).readConversationMessages(loaded.access, conversation.id, { limit: 50 });
 		} catch (error) {
 			console.error("Failed to load order conversation messages", error);
 			messagesLoadError = true;

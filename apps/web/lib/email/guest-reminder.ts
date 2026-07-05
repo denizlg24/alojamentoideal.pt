@@ -26,7 +26,7 @@ export async function sendGuestInfoReminderEmail(
 	}
 
 	const token = generateMemberToken();
-	await commerceService().activateOwnerAccessToken(
+	await (await commerceService()).activateOwnerAccessToken(
 		facts.orderId,
 		facts.email,
 		token,

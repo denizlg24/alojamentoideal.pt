@@ -24,7 +24,9 @@ export const POST = withAdminRoute<AdminOrderAcceptRouteContext>(
 		}
 
 		try {
-			const result = await commerceService().confirmOrderReservations(row.id);
+			const result = await (await commerceService()).confirmOrderReservations(
+				row.id,
+			);
 			return Response.json({ data: result, success: true });
 		} catch (error) {
 			const handled = commerceErrorResponse(error);

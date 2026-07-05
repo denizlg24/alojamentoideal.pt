@@ -31,7 +31,7 @@ export const POST = withApiRoute(
 		const owner = await resolveCartOwner(request);
 
 		try {
-			const service = commerceService();
+			const service = await commerceService();
 			// With an order id, re-read that order directly; without one, resolve the
 			// payable order the cart was converted into (converted-cart resume).
 			const order = parsed.data.orderId

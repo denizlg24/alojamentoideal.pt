@@ -1,3 +1,8 @@
+import {
+	anyHostkitListingCredentialConfigured,
+	getRuntimeSettings,
+	resolveEncryptedHostkitApiKey,
+} from "../../settings";
 import { HostkitClient } from "./client";
 import { HostkitConfigurationError } from "./errors";
 
@@ -80,6 +85,34 @@ export function createHostkitClientForListing(
 			environment.HOSTKIT_TIMEOUT_MS,
 		),
 		uid: environment.HOSTKIT_UID ?? undefined,
+	});
+}
+
+export async function isHostkitConfiguredFromSettings(): Promise<boolean> {
+	if (await anyHostkitListingCredentialConfigured()) {
+		return true;
+	}
+	return isHostkitConfigured();
+}
+
+export async function createHostkitClientForListingFromSettings(
+	listingId: string,
+): Promise<HostkitClient | null> {
+	const settings = await getRuntimeSettings();
+	const apiKey =
+		(await resolveEncryptedHostkitApiKey(listingId)) ??
+		resolveHostkitApiKey(listingId);
+	if (apiKey === null) {
+		return null;
+	}
+
+	return new HostkitClient({
+		apiKey,
+		baseUrl: String(settings["hostkit.baseUrl"] || ""),
+		maxReadRetries: Number(settings["hostkit.maxReadRetries"]),
+		retryDelayMs: Number(settings["hostkit.retryDelayMs"]),
+		timeoutMs: Number(settings["hostkit.timeoutMs"]),
+		uid: String(settings["hostkit.uid"] || "") || undefined,
 	});
 }
 

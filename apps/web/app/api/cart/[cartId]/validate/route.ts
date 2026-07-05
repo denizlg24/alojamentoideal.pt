@@ -16,7 +16,9 @@ export const POST = withApiRoute<CartValidateRouteContext>(
 		const owner = await resolveCartOwner(request);
 
 		try {
-			return Response.json(await commerceService().validateCart(cartId, owner));
+			return Response.json(
+				await (await commerceService()).validateCart(cartId, owner),
+			);
 		} catch (error) {
 			const response = commerceErrorResponse(error);
 			if (response) {

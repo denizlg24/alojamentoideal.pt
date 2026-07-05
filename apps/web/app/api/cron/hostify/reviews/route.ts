@@ -25,7 +25,7 @@ export const GET = withApiRoute(
 			return Response.json({ error: "Unauthorized" }, { status: 401 });
 		}
 
-		const sync = createHostifyListingReviewSyncFromEnv();
+		const sync = await createHostifyListingReviewSyncFromEnv();
 		const result = await sync.pollReviews("poll");
 
 		const changedListingExternalIds =

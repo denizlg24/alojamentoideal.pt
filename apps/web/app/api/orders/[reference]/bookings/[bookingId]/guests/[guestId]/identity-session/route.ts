@@ -36,7 +36,7 @@ export const POST = withApiRoute<OrderGuestIdentitySessionRouteContext>(
 		const accessContext = await resolveOrderAccessContext(request, reference);
 
 		try {
-			const service = commerceService();
+			const service = await commerceService();
 			const access = await service.resolveOrderAccess(reference, accessContext);
 
 			let stripe: ReturnType<typeof createStripeClientFromEnv>;

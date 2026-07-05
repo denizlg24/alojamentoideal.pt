@@ -51,7 +51,9 @@ export interface GuestComplianceServiceOptions {
 	/** Provider name whose bookings are covered by Hostkit (Hostify). */
 	provider?: string;
 	/** Returns the property-scoped Hostkit client, or null when not set up. */
-	resolveHostkitClient: (listingId: string) => HostkitClient | null;
+	resolveHostkitClient: (
+		listingId: string,
+	) => HostkitClient | null | Promise<HostkitClient | null>;
 	/**
 	 * Fallback for holds persisted before the Hostify confirmation code was
 	 * available in `rawOperationalPayload` (re-reads the reservation).
@@ -564,7 +566,7 @@ export class GuestComplianceService {
 			return;
 		}
 
-		const client = this.#resolveHostkitClient(booking.hostifyListingId);
+		const client = await this.#resolveHostkitClient(booking.hostifyListingId);
 		if (!client) {
 			// Not an attempt: the property simply has no Hostkit key yet. Keep the
 			// job alive on a slow cadence so provisioning the key picks it up.

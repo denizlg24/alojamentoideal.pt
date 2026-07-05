@@ -434,6 +434,27 @@ export const accommodationListing = pgTable(
 	],
 );
 
+export type AppSettingValue = boolean | number | string;
+
+export const appSetting = pgTable("app_settings", {
+	key: text("key").primaryKey(),
+	value: jsonb("value").$type<AppSettingValue>().notNull(),
+	createdAt: timestampWithTimezone("created_at").notNull().defaultNow(),
+	updatedAt: timestampWithTimezone("updated_at").notNull().defaultNow(),
+});
+
+export const listingHostkitCredential = pgTable(
+	"listing_hostkit_credentials",
+	{
+		listingExternalId: text("listing_external_id").primaryKey(),
+		apiKeyEncrypted: bytea("api_key_encrypted").notNull(),
+		keyHint: text("key_hint"),
+		createdAt: timestampWithTimezone("created_at").notNull().defaultNow(),
+		updatedAt: timestampWithTimezone("updated_at").notNull().defaultNow(),
+	},
+	(table) => [index("listing_hostkit_credentials_hint_idx").on(table.keyHint)],
+);
+
 export interface AccommodationListingNightRawContent {
 	calendar: unknown;
 }
@@ -1757,10 +1778,12 @@ export const schema = {
 	providerSyncRun,
 	providerSyncState,
 	accommodationListing,
+	appSetting,
 	accommodationListingNight,
 	observabilityEvent,
 	listingReview,
 	listingReviewSummary,
+	listingHostkitCredential,
 	cart,
 	cartItem,
 	accommodationQuoteSnapshot,

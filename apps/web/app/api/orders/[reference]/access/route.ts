@@ -45,7 +45,7 @@ export const POST = withApiRoute<OrderAccessRouteContext>(
 		const user = await getServerUser(request);
 
 		try {
-			const access = await commerceService().redeemMemberToken(
+			const access = await (await commerceService()).redeemMemberToken(
 				reference,
 				token,
 				{

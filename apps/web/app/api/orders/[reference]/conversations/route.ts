@@ -16,7 +16,7 @@ export const GET = withApiRoute<OrderConversationsRouteContext>(
 		const accessContext = await resolveOrderAccessContext(request, reference);
 
 		try {
-			const service = commerceService();
+			const service = await commerceService();
 			const access = await service.resolveOrderAccess(reference, accessContext);
 			const conversations = await service.readOrderConversations(access);
 			return Response.json({ conversations });

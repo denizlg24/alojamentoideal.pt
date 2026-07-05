@@ -54,7 +54,7 @@ export const GET = withApiRoute<ConversationMessagesRouteContext>(
 		const accessContext = await resolveOrderAccessContext(request, reference);
 
 		try {
-			const service = commerceService();
+			const service = await commerceService();
 			const access = await service.resolveOrderAccess(reference, accessContext);
 			const limit = readLimit(request);
 			if (limit === null) {
@@ -100,7 +100,7 @@ export const POST = withApiRoute<ConversationMessagesRouteContext>(
 
 		const accessContext = await resolveOrderAccessContext(request, reference);
 		try {
-			const service = commerceService();
+			const service = await commerceService();
 			const access = await service.resolveOrderAccess(reference, accessContext);
 			const message = await service.sendConversationMessage(
 				access,

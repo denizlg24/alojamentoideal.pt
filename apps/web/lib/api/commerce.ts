@@ -1,7 +1,7 @@
 import {
 	type AccommodationQuoteResult,
 	AccommodationQuoteService,
-	getAccommodationsConfig,
+	getAccommodationsConfigFromSettings,
 } from "@workspace/core/accommodations";
 import {
 	type CartOwner,
@@ -26,6 +26,7 @@ import {
 	StripeConfigurationError,
 } from "@workspace/core/integrations/stripe";
 import { getRedis } from "@workspace/core/redis";
+import { getRuntimeSettings } from "@workspace/core/settings";
 import type { AppliedDiscountSnapshot } from "@workspace/db";
 import { CART_COOKIE_NAME, getDb } from "@workspace/db";
 import { cookies } from "next/headers";
@@ -62,12 +63,11 @@ function orderMemberCookieName(reference: string): string {
  * When disabled, the reserve-first saga runs end-to-end against a no-op gateway so
  * no real bookings are placed in the Hostify account. See `StubReservationGateway`.
  */
-const hostifyBookingsEnabled = process.env.HOSTIFY_BOOKINGS_ENABLED !== "false";
-
 let warnedHostifyDisabled = false;
 
 function resolveHostifyGateway(
 	hostifyClient: ReturnType<typeof createHostifyClientFromEnv>,
+	hostifyBookingsEnabled: boolean,
 ): ProviderReservationGateway {
 	if (hostifyBookingsEnabled) {
 		return new HostifyReservationGateway({ client: hostifyClient });
@@ -244,10 +244,15 @@ function optionalStripeClient(): ReturnType<
  * intentional: the service is stateless and the underlying Hostify, Redis and
  * Postgres clients are themselves pooled/singletons, so this is cheap.
  */
-export function commerceService(): CommerceService {
-	const config = getAccommodationsConfig();
+export async function commerceService(): Promise<CommerceService> {
+	const [config, settings] = await Promise.all([
+		getAccommodationsConfigFromSettings(),
+		getRuntimeSettings(),
+	]);
 	const hostifyClient = createHostifyClientFromEnv();
 	const stripe = optionalStripeClient();
+	const hostifyBookingsEnabled =
+		settings["features.hostifyBookingsEnabled"] === true;
 	const quoteService = new AccommodationQuoteService({
 		client: hostifyClient,
 		currency: config.currency,
@@ -259,7 +264,7 @@ export function commerceService(): CommerceService {
 		accountId: config.hostifyAccountId,
 		// Default on; Finance can switch to manual-hold via env (D4).
 		autoRefundOnFailure:
-			process.env.COMMERCE_AUTO_REFUND !== "false" && stripe !== null,
+			settings["features.commerceAutoRefund"] === true && stripe !== null,
 		currency: config.currency,
 		db: getDb(),
 		provider: HOSTIFY_PROVIDER,
@@ -273,7 +278,7 @@ export function commerceService(): CommerceService {
 		// replaces the live gateway when HOSTIFY_BOOKINGS_ENABLED=false.
 		resolveReservationGateway: (provider) =>
 			provider === HOSTIFY_PROVIDER
-				? resolveHostifyGateway(hostifyClient)
+				? resolveHostifyGateway(hostifyClient, hostifyBookingsEnabled)
 				: undefined,
 		resolveConversationGateway: (provider) =>
 			provider === HOSTIFY_PROVIDER

@@ -1,5 +1,6 @@
-import { createHostkitClientForListing } from "@workspace/core/integrations/hostkit";
+import { createHostkitClientForListingFromSettings } from "@workspace/core/integrations/hostkit";
 import { InvoicingError, InvoicingService } from "@workspace/core/invoicing";
+import { getRuntimeSettings } from "@workspace/core/settings";
 import { getDb } from "@workspace/db";
 import { getAdminUser } from "../auth/admin";
 import { type ApiRouteOptions, type RouteHandler, withApiRoute } from "./route";
@@ -9,15 +10,16 @@ import { type ApiRouteOptions, type RouteHandler, withApiRoute } from "./route";
  * able to touch real financial documents until the business flips
  * HOSTKIT_INVOICING_ENABLED=true.
  */
-export function invoicingEnabled(): boolean {
-	return process.env.HOSTKIT_INVOICING_ENABLED === "true";
+export async function invoicingEnabled(): Promise<boolean> {
+	const settings = await getRuntimeSettings();
+	return settings["features.hostkitInvoicingEnabled"] === true;
 }
 
 export function invoicingService(): InvoicingService {
 	return new InvoicingService({
 		db: getDb(),
 		resolveHostkitClient: (listingId) =>
-			createHostkitClientForListing(listingId),
+			createHostkitClientForListingFromSettings(listingId),
 	});
 }
 
@@ -34,7 +36,7 @@ export async function rejectUnlessInvoicingAdmin(
 	if (!admin) {
 		return Response.json({ error: "Not found" }, { status: 404 });
 	}
-	if (options.mutation && !invoicingEnabled()) {
+	if (options.mutation && !(await invoicingEnabled())) {
 		return Response.json(
 			{
 				code: "invoicing_disabled",

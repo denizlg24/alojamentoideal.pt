@@ -33,7 +33,7 @@ async function OrderGuestsRoute({ params }: OrderGuestsPageProps) {
 		return <OrderAccessDenied />;
 	}
 
-	const service = commerceService();
+	const service = await commerceService();
 	const user = await getCurrentUser();
 	const canReuseAccountIdentity = user
 		? (await accountProfileRepository().getProfile(user.id)).identity.status ===

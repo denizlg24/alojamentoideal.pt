@@ -46,14 +46,14 @@ export const PUT = withAdminRoute<AdminBookingGuestsRouteContext>(
 		}
 
 		try {
-			const guests = await commerceService().updateBookingGuests(
+			const guests = await (await commerceService()).updateBookingGuests(
 				adminOrderAccess(row),
 				bookingId,
 				parsed.data.guests,
 			);
 
 			try {
-				await guestComplianceService().sweepEligibleBookings();
+				await (await guestComplianceService()).sweepEligibleBookings();
 			} catch (error) {
 				logger.warn("post-edit compliance sweep failed", {
 					bookingId,

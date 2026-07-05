@@ -19,7 +19,7 @@ export const GET = withApiRoute(
 			return Response.json({ error: "Unauthorized" }, { status: 401 });
 		}
 
-		const summary = await commerceService().reconcileConversations();
+		const summary = await (await commerceService()).reconcileConversations();
 		return Response.json({ data: summary, success: true });
 	},
 );

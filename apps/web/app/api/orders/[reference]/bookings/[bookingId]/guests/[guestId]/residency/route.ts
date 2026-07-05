@@ -40,7 +40,7 @@ export const POST = withApiRoute<OrderGuestResidencyRouteContext>(
 
 		const accessContext = await resolveOrderAccessContext(request, reference);
 		try {
-			const service = commerceService();
+			const service = await commerceService();
 			const access = await service.resolveOrderAccess(reference, accessContext);
 			const guests = await service.patchGuestResidency(
 				access,
