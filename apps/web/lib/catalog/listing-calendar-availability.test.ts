@@ -46,4 +46,24 @@ describe("listing calendar availability", () => {
 		expect(disabled("2026-06-23", selection)).toBe(true);
 		expect(unavailable("2026-06-23", selection)).toBe(true);
 	});
+
+	test("blocks a closed-to-arrival night from being a check-in", () => {
+		const cta = new Set(["2026-06-22"]);
+		const selection = { checkIn: null, checkOut: null };
+
+		expect(
+			isListingCalendarDateDisabled("2026-06-22", activeNights, selection, cta),
+		).toBe(true);
+		// Still an active night, so it is not struck through as unavailable.
+		expect(unavailable("2026-06-22", selection)).toBe(false);
+	});
+
+	test("ignores closed-to-arrival when the night is only passed through", () => {
+		const cta = new Set(["2026-06-22"]);
+		const selection = { checkIn: "2026-06-21", checkOut: null };
+
+		expect(
+			isListingCalendarDateDisabled("2026-06-22", activeNights, selection, cta),
+		).toBe(false);
+	});
 });

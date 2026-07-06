@@ -44,20 +44,61 @@ export const hostifyInvoiceSchema = entitySchema.extend({
 	type: nullableStringSchema,
 });
 
+/**
+ * `statusMeta` carries the reservation behind a `booked` night. Present only for
+ * reservation-held days; `null` for open or manually blocked days.
+ */
+export const hostifyCalendarStatusMetaSchema = z.looseObject({
+	// OTA confirmation codes are alphanumeric on some channels and purely numeric
+	// on others (e.g. Booking.com), so this is string | number, not just string.
+	confirmationCode: nullableIdSchema,
+	reservationId: nullableIdSchema,
+});
+
+/**
+ * One day of a listing's calendar. Hostify migrated this endpoint from calendar
+ * v1 to v2 and changed the fields we depend on, so the mapping was reworked:
+ *
+ * - `base_price` (v1, snake_case) became `basePrice` (v2, camelCase); the v1 key
+ *   is gone. Both are modelled so a listing still on v1 keeps parsing.
+ * - `is_manual_blocked` / `is_preparation_blocked` are gone. Availability now
+ *   lives entirely in `status` (`available` | `booked` | `unavailable`), with the
+ *   reason in `statusNote` (`reservation` | `manual-blockage` | `smart-availability`).
+ *   A night is bookable iff `status === "available"`.
+ * - `cta` / `ctd` are booleans in v2 (v1 sent numbers) - closed-to-arrival and
+ *   closed-to-departure for the day. `*_v2` mirror the effective value and
+ *   `*_o_v2` are the raw per-day overrides (`-1` = unset). We read the effective
+ *   `cta` / `ctd`.
+ * - `min_stay` is dynamic per day (v2 allows single/orphan nights); `max_stay`
+ *   and the `*_o` variants are the raw overrides.
+ */
 export const hostifyCalendarEntrySchema = entitySchema.extend({
+	basePrice: nullableNumberSchema,
 	base_price: nullableNumberSchema,
-	cta: z.number().nullable().optional(),
-	ctd: z.number().nullable().optional(),
+	cta: z.boolean().nullable().optional(),
+	cta_o_v2: nullableNumberSchema,
+	cta_v2: z.boolean().nullable().optional(),
+	ctd: z.boolean().nullable().optional(),
+	ctd_o_v2: nullableNumberSchema,
+	ctd_v2: z.boolean().nullable().optional(),
 	currency: nullableStringSchema,
 	date: z.string(),
+	defaultStatus: nullableStringSchema,
 	is_manual_blocked: z.number().nullable().optional(),
 	is_preparation_blocked: z.number().nullable().optional(),
 	listing_id: nullableIdSchema,
+	max_stay: nullableNumberSchema,
+	max_stay_o: nullableNumberSchema,
 	min_stay: z.number().nullable().optional(),
+	min_stay_o: nullableNumberSchema,
 	note: nullableStringSchema,
 	price: nullableNumberSchema,
 	reservation_id: nullableIdSchema,
+	reservation_ids: z.array(idSchema).nullable().optional(),
 	status: nullableStringSchema,
+	statusMeta: hostifyCalendarStatusMetaSchema.nullable().optional(),
+	statusNote: nullableStringSchema,
+	status_o: nullableNumberSchema,
 });
 
 export const hostifyCustomStaySchema = entitySchema.extend({

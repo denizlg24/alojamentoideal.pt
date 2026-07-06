@@ -142,11 +142,14 @@ function BookingWidgetInner({
 	const [cartFlyIcons, setCartFlyIcons] = useState<CartFlyIcon[]>([]);
 
 	const availabilityState = useBookingAvailability(listingId, minNights);
+
 	const availability =
 		availabilityState.status === "ready"
 			? availabilityState.availability
 			: null;
 	const availableDates = availability?.availableDates ?? null;
+	const ctaDates = availability?.ctaDates ?? null;
+	const ctdDates = availability?.ctdDates ?? null;
 
 	// Once the calendar loads, preselect the soonest valid stay unless the visitor
 	// already arrived with dates in the URL or has picked some.
@@ -184,6 +187,12 @@ function BookingWidgetInner({
 	const nights = checkIn && checkOut ? nightsBetween(checkIn, checkOut) : 0;
 	const minStayError = Boolean(checkIn && checkOut && nights < minStay);
 
+	// Guards a stay seeded from the URL that violates a v2 arrival/departure
+	// restriction; the calendar itself already prevents picking these.
+	const arrivalBlocked = Boolean(checkIn && ctaDates?.includes(checkIn));
+	const departureBlocked = Boolean(checkOut && ctdDates?.includes(checkOut));
+	const restrictionError = arrivalBlocked || departureBlocked;
+
 	const reserveHref =
 		checkIn && checkOut
 			? `/homes/${listingId}/book?${new URLSearchParams({
@@ -199,6 +208,7 @@ function BookingWidgetInner({
 		quote.status === "ready" &&
 		!guestLimitError &&
 		!minStayError &&
+		!restrictionError &&
 		reserveHref !== null;
 
 	useEffect(() => {
@@ -343,6 +353,8 @@ function BookingWidgetInner({
 				<PopoverContent align="end" className="w-auto p-2">
 					<ListingCalendar
 						availableDates={availableDates}
+						ctaDates={ctaDates}
+						ctdDates={ctdDates}
 						numberOfMonths={numberOfMonths}
 						onChange={handleRangeSelect}
 						value={range}
@@ -383,6 +395,8 @@ function BookingWidgetInner({
 		<div className="flex justify-center rounded-xl border p-2">
 			<ListingCalendar
 				availableDates={availableDates}
+				ctaDates={ctaDates}
+				ctdDates={ctdDates}
 				numberOfMonths={1}
 				onChange={setRange}
 				value={range}
@@ -403,6 +417,8 @@ function BookingWidgetInner({
 
 	const renderBookingMessage = () => (
 		<BookingMessage
+			arrivalBlocked={arrivalBlocked}
+			departureBlocked={departureBlocked}
 			guestLimitError={guestLimitError}
 			maxGuests={maxGuests}
 			minStay={minStay}
@@ -628,12 +644,16 @@ function MobilePriceSummary({
 }
 
 function BookingMessage({
+	arrivalBlocked,
+	departureBlocked,
 	guestLimitError,
 	maxGuests,
 	minStay,
 	minStayError,
 	quote,
 }: {
+	arrivalBlocked: boolean;
+	departureBlocked: boolean;
 	guestLimitError: boolean;
 	maxGuests: number | null;
 	minStay: number;
@@ -645,6 +665,15 @@ function BookingMessage({
 			<p className="rounded-lg bg-destructive/10 px-3 py-2 text-destructive text-sm">
 				This home cannot accommodate that many guests
 				{maxGuests === null ? "." : `; it sleeps up to ${maxGuests}.`}
+			</p>
+		);
+	}
+	if (arrivalBlocked || departureBlocked) {
+		return (
+			<p className="rounded-lg bg-amber-50 px-3 py-2 text-amber-900 text-sm dark:bg-amber-950 dark:text-amber-200">
+				{arrivalBlocked
+					? "Check-in isn't available on that date. Please choose a different arrival day."
+					: "Checkout isn't available on that date. Please choose a different departure day."}
 			</p>
 		);
 	}

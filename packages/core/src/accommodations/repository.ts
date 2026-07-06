@@ -4,6 +4,7 @@ import {
 	type Database,
 } from "@workspace/db";
 import { and, asc, eq, gte, inArray, lt, min, sql } from "drizzle-orm";
+import { normalizeCurrencyCode } from "./currency";
 
 export interface AccommodationScope {
 	accountId: string;
@@ -13,6 +14,8 @@ export interface AccommodationScope {
 export interface UpsertNightInput {
 	active: boolean;
 	basePrice: number | null;
+	cta: boolean | null;
+	ctd: boolean | null;
 	currency: string | null;
 	date: string;
 	fetchedAt: Date;
@@ -34,6 +37,10 @@ export interface NightlyPriceSummary {
 
 export interface ListingNight {
 	active: boolean;
+	/** Closed-to-arrival: this day cannot be a check-in. */
+	cta: boolean | null;
+	/** Closed-to-departure: this day cannot be a checkout. */
+	ctd: boolean | null;
 	date: string;
 	minStay: number | null;
 	price: number | null;
@@ -84,13 +91,27 @@ export class AccommodationPricingRepository {
 			return;
 		}
 
+		// Postgres rejects an INSERT ... ON CONFLICT whose batch touches the same
+		// conflict target (listing + date) twice, so collapse duplicates to the last
+		// entry before building the values.
+		const deduped = Array.from(
+			new Map(
+				inputs.map((input) => [
+					`${input.listingExternalId}:${input.date}`,
+					input,
+				]),
+			).values(),
+		);
+
 		const now = new Date();
 		await this.#db
 			.insert(accommodationListingNight)
 			.values(
-				inputs.map((input) => ({
+				deduped.map((input) => ({
 					active: input.active,
 					basePrice: input.basePrice,
+					cta: input.cta,
+					ctd: input.ctd,
 					currency: input.currency,
 					date: input.date,
 					externalAccountId: scope.accountId,
@@ -112,6 +133,8 @@ export class AccommodationPricingRepository {
 				set: {
 					active: sql`excluded.active`,
 					basePrice: sql`excluded.base_price`,
+					cta: sql`excluded.cta`,
+					ctd: sql`excluded.ctd`,
 					currency: sql`excluded.currency`,
 					fetchedAt: sql`excluded.fetched_at`,
 					minStay: sql`excluded.min_stay`,
@@ -147,6 +170,8 @@ export class AccommodationPricingRepository {
 		const rows = await this.#db
 			.select({
 				active: accommodationListingNight.active,
+				cta: accommodationListingNight.cta,
+				ctd: accommodationListingNight.ctd,
 				date: accommodationListingNight.date,
 				minStay: accommodationListingNight.minStay,
 				price: accommodationListingNight.price,
@@ -165,6 +190,8 @@ export class AccommodationPricingRepository {
 
 		return rows.map((row) => ({
 			active: row.active,
+			cta: row.cta,
+			ctd: row.ctd,
 			date: row.date,
 			minStay: row.minStay,
 			price: row.price === null ? null : Number(row.price),
@@ -209,16 +236,26 @@ export class AccommodationPricingRepository {
 				accommodationListingNight.currency,
 			);
 
-		return new Map(
-			rows.map((row) => [
-				`${row.listingId}:${row.currency}`,
-				{
-					currency: row.currency,
-					fromPrice: row.fromPrice === null ? null : Number(row.fromPrice),
+		const result = new Map<string, NightlyPriceSummary>();
+		for (const row of rows) {
+			const currency = normalizeCurrencyCode(row.currency, input.currency);
+			const fromPrice = row.fromPrice === null ? null : Number(row.fromPrice);
+			const existing = result.get(row.listingId);
+
+			if (
+				!existing ||
+				(fromPrice !== null &&
+					(existing.fromPrice === null || fromPrice < existing.fromPrice))
+			) {
+				result.set(row.listingId, {
+					currency,
+					fromPrice,
 					listingId: row.listingId,
-				},
-			]),
-		);
+				});
+			}
+		}
+
+		return result;
 	}
 
 	/**
@@ -286,7 +323,7 @@ export class AccommodationPricingRepository {
 
 			result.set(row.listingId, {
 				available: allNightsActive && minStaySatisfied,
-				currency: row.currency,
+				currency: normalizeCurrencyCode(row.currency, input.currency),
 				listingId: row.listingId,
 				nightlyFrom: row.nightlyFrom === null ? null : Number(row.nightlyFrom),
 				nights: input.nights,

@@ -32,6 +32,12 @@ export function findEarliestStay(
 		.sort((a, b) => a.date.localeCompare(b.date));
 
 	for (const start of candidates) {
+		// Closed-to-arrival: the day is open for stays passing through but cannot be
+		// a check-in, so it can never be the start of the earliest stay.
+		if (start.cta) {
+			continue;
+		}
+
 		const minNights = Math.max(start.minStay ?? defaultMinNights, 1);
 		let windowOk = true;
 		for (let offset = 0; offset < minNights; offset += 1) {
@@ -42,13 +48,22 @@ export function findEarliestStay(
 			}
 		}
 
-		if (windowOk) {
-			return {
-				checkIn: start.date,
-				checkOut: addDaysIso(start.date, minNights),
-				nights: minNights,
-			};
+		if (!windowOk) {
+			continue;
 		}
+
+		// Closed-to-departure: the checkout day cannot be a departure. It is the
+		// night after the stay, so an unsynced day (not in the map) is unrestricted.
+		const checkOut = addDaysIso(start.date, minNights);
+		if (byDate.get(checkOut)?.ctd) {
+			continue;
+		}
+
+		return {
+			checkIn: start.date,
+			checkOut,
+			nights: minNights,
+		};
 	}
 
 	return null;

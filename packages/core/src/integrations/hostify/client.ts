@@ -1,4 +1,5 @@
 import type { z } from "zod";
+import { logger } from "../../observability";
 import {
 	HostifyApiError,
 	HostifyConfigurationError,
@@ -1183,6 +1184,17 @@ export class HostifyClient {
 
 			const result = schema.safeParse(payload);
 			if (!result.success) {
+				logger.error("Hostify returned an unexpected response shape", {
+					cause: result.error,
+					issues: result.error.issues.map((issue) => ({
+						code: issue.code,
+						message: issue.message,
+						path: issue.path.map(String).join(".") || "(root)",
+					})),
+					requestId,
+					responseShape: describeShape(payload),
+				});
+
 				throw new HostifyResponseValidationError(
 					"Hostify returned an unexpected response shape",
 					{
