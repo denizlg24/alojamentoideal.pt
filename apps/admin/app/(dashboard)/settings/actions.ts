@@ -25,9 +25,24 @@ function settingsErrorRedirect(message: string): never {
 export async function saveSettings(formData: FormData): Promise<void> {
 	await requireAdminUser();
 
+	// Each settings accordion submits its own form tagged with `__group`, so only
+	// that group's definitions are read. This keeps saves partial (collapsed
+	// groups are unmounted and would otherwise submit no fields) and lets a
+	// checkbox's absence mean "off" without wiping the other groups.
+	const group = String(formData.get("__group") ?? "").trim();
+	const definitions = group
+		? runtimeSettingDefinitions.filter(
+				(definition) => definition.group === group,
+			)
+		: runtimeSettingDefinitions;
+
+	if (definitions.length === 0) {
+		settingsErrorRedirect("Unknown settings section.");
+	}
+
 	const values: Partial<Record<RuntimeSettingKey, AppSettingValue>> = {};
 	try {
-		for (const definition of runtimeSettingDefinitions) {
+		for (const definition of definitions) {
 			if (definition.type === "boolean") {
 				values[definition.key as RuntimeSettingKey] =
 					formData.get(definition.key) === "on";

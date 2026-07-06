@@ -63,12 +63,12 @@ export function ObservabilityFilters() {
 
 	return (
 		<form
-			className="flex items-center gap-3"
+			className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:gap-3"
 			data-pending={pending || undefined}
 			onSubmit={handleSubmit}
 		>
 			<Input
-				className="w-56"
+				className="w-full sm:w-56"
 				defaultValue={searchParams.get("q") ?? ""}
 				name="q"
 				placeholder="Search name, route or provider"
@@ -76,6 +76,7 @@ export function ObservabilityFilters() {
 			/>
 			<NativeSelect
 				aria-label="Filter by severity"
+				className="w-full sm:w-auto"
 				defaultValue={searchParams.get("severity") ?? ""}
 				onChange={(event) => apply({ severity: event.target.value })}
 			>
@@ -87,6 +88,7 @@ export function ObservabilityFilters() {
 			</NativeSelect>
 			<NativeSelect
 				aria-label="Filter by type"
+				className="w-full sm:w-auto"
 				defaultValue={searchParams.get("type") ?? ""}
 				onChange={(event) => apply({ type: event.target.value })}
 			>
@@ -98,6 +100,7 @@ export function ObservabilityFilters() {
 			</NativeSelect>
 			<NativeSelect
 				aria-label="Filter by time window"
+				className="w-full sm:w-auto"
 				defaultValue={searchParams.get("window") ?? "7d"}
 				onChange={(event) => apply({ window: event.target.value })}
 			>
