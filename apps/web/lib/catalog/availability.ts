@@ -1,8 +1,6 @@
 import {
 	AccommodationPricingRepository,
 	addDaysIso,
-	type EarliestStay,
-	findEarliestStay,
 	type ListingNight,
 } from "@workspace/core/accommodations";
 import type { CatalogScope } from "@workspace/core/catalog";
@@ -35,7 +33,6 @@ export interface BookingAvailability {
 	ctaDates: string[];
 	/** Dates closed to departure: cannot be selected as a checkout. */
 	ctdDates: string[];
-	earliestStay: EarliestStay | null;
 	/** Arrival-night minimum stay overrides from the synced calendar. */
 	minStayByDate: Record<string, number>;
 }
@@ -51,8 +48,8 @@ function todayIso(): string {
 
 /**
  * Loads the listing's nightly calendar and reduces it to the compact shape the
- * booking card needs: the set of bookable dates (to cross out the rest), the
- * per-date arrival min-stay, and the soonest valid stay to preselect.
+ * booking card needs: the set of bookable dates (to cross out the rest) and the
+ * per-date arrival min-stay.
  */
 export async function getListingBookingAvailability(
 	externalId: string,
@@ -82,17 +79,11 @@ export async function getListingBookingAvailability(
 			)
 		: new Set<string>();
 
-	return buildBookingAvailability(
-		nights,
-		from,
-		minNights,
-		quoteBlockedArrivals,
-	);
+	return buildBookingAvailability(nights, minNights, quoteBlockedArrivals);
 }
 
 export function buildBookingAvailability(
 	nights: ListingNight[],
-	from: string,
 	minNights = 1,
 	quoteBlockedArrivals: ReadonlySet<string> = new Set(),
 ): BookingAvailability {
@@ -130,11 +121,6 @@ export function buildBookingAvailability(
 		availableDates,
 		ctaDates: [...ctaDates],
 		ctdDates,
-		earliestStay: findEarliestStay(
-			applyQuoteBlockedArrivals(nights, quoteBlockedArrivals),
-			from,
-			minNights,
-		),
 		minStayByDate,
 	};
 }
@@ -247,25 +233,11 @@ function minimumNightsForArrival(
 	return Math.max(night.minStay ?? minNights, 1);
 }
 
-function applyQuoteBlockedArrivals(
-	nights: ListingNight[],
-	quoteBlockedArrivals: ReadonlySet<string>,
-): ListingNight[] {
-	if (quoteBlockedArrivals.size === 0) {
-		return nights;
-	}
-
-	return nights.map((night) =>
-		quoteBlockedArrivals.has(night.date) ? { ...night, cta: true } : night,
-	);
-}
-
 function emptyBookingAvailability(): BookingAvailability {
 	return {
 		availableDates: null,
 		ctaDates: [],
 		ctdDates: [],
-		earliestStay: null,
 		minStayByDate: {},
 	};
 }

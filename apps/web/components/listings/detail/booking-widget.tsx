@@ -26,7 +26,7 @@ import { format } from "date-fns";
 import { ChevronDown, ShoppingCart } from "lucide-react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { type MouseEvent, useEffect, useRef, useState } from "react";
+import { type MouseEvent, useEffect, useState } from "react";
 import type { DateRange } from "react-day-picker";
 import { nightsBetween, parseIsoDate, toIsoDate } from "@/lib/catalog/dates";
 import { capacityForGuests, MAX_INFANTS } from "@/lib/catalog/guests";
@@ -152,20 +152,6 @@ function BookingWidgetInner({
 	const availableDates = availability?.availableDates ?? null;
 	const ctaDates = availability?.ctaDates ?? null;
 	const ctdDates = availability?.ctdDates ?? null;
-
-	// Once the calendar loads, preselect the soonest valid stay unless the visitor
-	// already arrived with dates in the URL or has picked some.
-	const presetDone = useRef(false);
-	useEffect(() => {
-		if (presetDone.current || range || !availability?.earliestStay) {
-			return;
-		}
-		presetDone.current = true;
-		setRange({
-			from: parseIsoDate(availability.earliestStay.checkIn),
-			to: parseIsoDate(availability.earliestStay.checkOut),
-		});
-	}, [availability, range]);
 
 	const checkIn = range?.from ? toIsoDate(range.from) : null;
 	const checkOut = range?.to ? toIsoDate(range.to) : null;
@@ -504,7 +490,11 @@ function BookingWidgetInner({
 			<div className="hidden lg:block">
 				<div className="sticky top-24 rounded-2xl border bg-card p-6 shadow-lg">
 					<div className="flex flex-col gap-4">
-						<PriceHeader currency={currency} quote={quote} />
+						<PriceHeader
+							currency={currency}
+							loading={availabilityLoading}
+							quote={quote}
+						/>
 						{popoverInputs(2)}
 						{renderBookingMessage()}
 						{renderReserveActions()}
@@ -530,9 +520,15 @@ function BookingWidgetInner({
 			<div className="fixed inset-x-0 bottom-0 z-40 border-t bg-background px-6 pt-3 pb-[calc(env(safe-area-inset-bottom)+1rem)] lg:hidden">
 				<Drawer>
 					<div className="flex items-center justify-between gap-4">
-						<MobilePriceSummary currency={currency} quote={quote} />
+						<MobilePriceSummary
+							currency={currency}
+							loading={availabilityLoading}
+							quote={quote}
+						/>
 						<DrawerTrigger asChild>
-							<Button size="lg">Reserve</Button>
+							<Button size="lg" disabled={availabilityLoading}>
+								Reserve
+							</Button>
 						</DrawerTrigger>
 					</div>
 					<DrawerContent>
@@ -541,7 +537,11 @@ function BookingWidgetInner({
 						</DrawerHeader>
 						<div className="max-h-[70vh] overflow-y-auto px-4 pb-8">
 							<div className="flex flex-col gap-4">
-								<PriceHeader currency={currency} quote={quote} />
+								<PriceHeader
+									currency={currency}
+									loading={availabilityLoading}
+									quote={quote}
+								/>
 								<Accordion type="single" collapsible className="w-full">
 									<AccordionItem value="dates">
 										<AccordionTrigger>
@@ -592,11 +592,16 @@ function DateCell({ date, label }: { date: Date | undefined; label: string }) {
 
 function PriceHeader({
 	currency,
+	loading = false,
 	quote,
 }: {
 	currency: string;
+	loading?: boolean;
 	quote: QuoteState;
 }) {
+	if (loading || quote.status === "loading") {
+		return <Skeleton className="h-7 w-32" />;
+	}
 	if (quote.status === "ready") {
 		return (
 			<div className="flex items-baseline gap-1.5">
@@ -612,9 +617,6 @@ function PriceHeader({
 			</div>
 		);
 	}
-	if (quote.status === "loading") {
-		return <Skeleton className="h-7 w-32" />;
-	}
 	return (
 		<span className="font-medium text-base text-muted-foreground">
 			Add dates for prices
@@ -624,11 +626,16 @@ function PriceHeader({
 
 function MobilePriceSummary({
 	currency,
+	loading = false,
 	quote,
 }: {
 	currency: string;
+	loading?: boolean;
 	quote: QuoteState;
 }) {
+	if (loading || quote.status === "loading") {
+		return <Skeleton className="h-9 w-24" />;
+	}
 	if (quote.status === "ready") {
 		return (
 			<div className="flex flex-col">
@@ -640,9 +647,6 @@ function MobilePriceSummary({
 				</span>
 			</div>
 		);
-	}
-	if (quote.status === "loading") {
-		return <Skeleton className="h-9 w-24" />;
 	}
 	return <span className="font-medium text-sm">Add dates for prices</span>;
 }
