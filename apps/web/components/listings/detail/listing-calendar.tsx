@@ -25,15 +25,19 @@ import {
  */
 export function ListingCalendar({
 	availableDates,
+	className,
 	ctaDates = null,
 	ctdDates = null,
+	loading = false,
 	numberOfMonths = 1,
 	onChange,
 	value,
 }: {
 	availableDates: string[] | null;
+	className?: string;
 	ctaDates?: string[] | null;
 	ctdDates?: string[] | null;
+	loading?: boolean;
 	numberOfMonths?: number;
 	onChange: (range: DateRange | undefined) => void;
 	value: DateRange | undefined;
@@ -56,7 +60,11 @@ export function ListingCalendar({
 		checkOut: value?.to ? toIsoDate(value.to) : null,
 	};
 
+	// While the synced availability is still loading, block every date: with no
+	// availability yet the matchers below would treat the listing as unrestricted
+	// and let the visitor pick a stay we cannot validate.
 	const isDisabled = (date: Date) =>
+		loading ||
 		date < today ||
 		isListingCalendarDateDisabled(
 			toIsoDate(date),
@@ -83,12 +91,14 @@ export function ListingCalendar({
 	};
 
 	return (
-		<div className="flex flex-col gap-1">
+		<div className="flex flex-col gap-1" aria-busy={loading || undefined}>
 			<Calendar
 				mode="range"
 				excludeDisabled
 				resetOnSelect
+				fixedWeeks
 				showOutsideDays={false}
+				className={className}
 				numberOfMonths={numberOfMonths}
 				defaultMonth={value?.from ?? today}
 				selected={value}

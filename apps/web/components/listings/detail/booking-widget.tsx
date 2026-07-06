@@ -148,6 +148,7 @@ function BookingWidgetInner({
 		availabilityState.status === "ready"
 			? availabilityState.availability
 			: null;
+	const availabilityLoading = availabilityState.status === "loading";
 	const availableDates = availability?.availableDates ?? null;
 	const ctaDates = availability?.ctaDates ?? null;
 	const ctdDates = availability?.ctdDates ?? null;
@@ -355,6 +356,7 @@ function BookingWidgetInner({
 						availableDates={availableDates}
 						ctaDates={ctaDates}
 						ctdDates={ctdDates}
+						loading={availabilityLoading}
 						numberOfMonths={numberOfMonths}
 						onChange={handleRangeSelect}
 						value={range}
@@ -395,8 +397,10 @@ function BookingWidgetInner({
 		<div className="flex justify-center rounded-xl border p-2">
 			<ListingCalendar
 				availableDates={availableDates}
+				className="w-full! bg-transparent"
 				ctaDates={ctaDates}
 				ctdDates={ctdDates}
+				loading={availabilityLoading}
 				numberOfMonths={1}
 				onChange={setRange}
 				value={range}
