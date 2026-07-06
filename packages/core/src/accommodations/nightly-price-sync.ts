@@ -492,7 +492,7 @@ function isEntryActive(entry: HostifyCalendarEntry): boolean {
 	return (
 		entry.price !== null &&
 		entry.price !== undefined &&
-		entry.reservation_id === null &&
+		(entry.reservation_id === null || entry.reservation_id === undefined) &&
 		entry.is_manual_blocked !== 1 &&
 		entry.is_preparation_blocked !== 1
 	);

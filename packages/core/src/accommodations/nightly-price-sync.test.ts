@@ -137,6 +137,25 @@ describe("NightlyPriceSync.pollPrices", () => {
 		expect(pricing.upserts[0]?.currency).toBe("EUR");
 	});
 
+	test("keeps v1 open nights active when reservation_id is omitted", async () => {
+		const pricing = new FakePricingRepository(["1"]);
+		const syncRepository = new FakeSyncRepository(true);
+		const sync = new NightlyPriceSync({
+			client: new FakeV1MissingReservationIdClient() as never,
+			config: baseConfig,
+			now: () => new Date("2026-06-18T12:00:00.000Z"),
+			repository: pricing as unknown as AccommodationPricingRepository,
+			syncRepository: syncRepository as unknown as ListingCacheRepository,
+		});
+
+		await sync.pollPrices("poll");
+
+		expect(pricing.upserts[0]).toMatchObject({
+			active: true,
+			reservationId: null,
+		});
+	});
+
 	test("dedupes and terminates when v2 repeats the whole window per page", async () => {
 		const pricing = new FakePricingRepository(["1"]);
 		const syncRepository = new FakeSyncRepository(true);
@@ -314,6 +333,32 @@ class FakeV2CurrencySymbolClient {
 						price: 90,
 						reservation_id: null,
 						status: "available",
+					},
+				],
+				listing_id: query.listing_id,
+				success: true,
+			};
+		},
+	};
+}
+
+class FakeV1MissingReservationIdClient {
+	readonly calendar = {
+		list: async (query: { listing_id: string | number; page: number }) => {
+			if (query.page > 1) {
+				return { calendar: [], listing_id: query.listing_id, success: true };
+			}
+			return {
+				calendar: [
+					{
+						base_price: 90,
+						currency: "EUR",
+						date: "2026-06-18",
+						id: `${query.listing_id}_2026-06-18`,
+						is_manual_blocked: 0,
+						is_preparation_blocked: 0,
+						min_stay: 1,
+						price: 90,
 					},
 				],
 				listing_id: query.listing_id,

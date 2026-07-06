@@ -68,11 +68,14 @@ export function ListingCalendar({
 	const isUnavailable = (date: Date) =>
 		isListingCalendarDateUnavailable(toIsoDate(date), availableSet, selection);
 
+	const isClosedToDeparture = (date: Date) =>
+		ctdSet?.has(toIsoDate(date)) ?? false;
+
 	// Closed-to-departure cannot go through the `disabled` matcher (it would also
 	// block a stay from spanning the night). Reject a checkout that lands on a ctd
 	// day here instead, keeping the arrival so the visitor can pick another exit.
 	const handleSelect = (range: DateRange | undefined) => {
-		if (range?.to && ctdSet?.has(toIsoDate(range.to))) {
+		if (range?.to && isClosedToDeparture(range.to)) {
 			onChange(range.from ? { from: range.from, to: undefined } : undefined);
 			return;
 		}
@@ -93,15 +96,22 @@ export function ListingCalendar({
 				disabled={isDisabled}
 				startMonth={today}
 				modifiers={{
+					closedToDeparture: (date) =>
+						date >= today && isClosedToDeparture(date),
 					unavailable: (date) => date >= today && isUnavailable(date),
 				}}
-				modifiersClassNames={{ unavailable: "line-through opacity-50" }}
+				modifiersClassNames={{
+					closedToDeparture: "line-through decoration-dashed opacity-70",
+					unavailable: "line-through opacity-50",
+				}}
 				components={{
 					DayButton: (props) => (
 						<CalendarDayButton
 							{...props}
 							className={cn(
 								props.className,
+								props.modifiers.closedToDeparture &&
+									"line-through decoration-dashed opacity-70",
 								props.modifiers.unavailable && "line-through opacity-50",
 							)}
 						/>

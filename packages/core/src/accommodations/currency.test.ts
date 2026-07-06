@@ -14,5 +14,6 @@ describe("normalizeCurrencyCode", () => {
 	test("falls back when the provider value is not an ISO currency code", () => {
 		expect(normalizeCurrencyCode("Euro", "eur")).toBe("EUR");
 		expect(normalizeCurrencyCode(null, "not-a-code")).toBe("EUR");
+		expect(normalizeCurrencyCode("ZZZ")).toBe("EUR");
 	});
 });

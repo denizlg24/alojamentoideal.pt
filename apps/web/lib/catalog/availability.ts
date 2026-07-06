@@ -9,6 +9,7 @@ import type { CatalogScope } from "@workspace/core/catalog";
 import { getDb } from "@workspace/db";
 
 const WINDOW_DAYS = 365;
+const QUOTE_VERIFICATION_CONCURRENCY = 4;
 
 export interface MinimumStayCandidate {
 	checkIn: string;
@@ -145,20 +146,52 @@ async function quoteBlockedArrivalDates(
 ): Promise<Set<string>> {
 	const blocked = new Set<string>();
 	const nightsByDate = new Map(nights.map((night) => [night.date, night]));
+	const candidates: MinimumStayCandidate[] = [];
 
 	for (const night of nights) {
 		const candidate = minimumStayCandidate(night, nightsByDate, minNights);
 		if (!candidate || !shouldVerifyCandidate(candidate, nightsByDate)) {
 			continue;
 		}
-
-		const bookable = await verifyBookableStay(candidate);
-		if (!bookable) {
-			blocked.add(candidate.checkIn);
-		}
+		candidates.push(candidate);
 	}
 
+	await verifyCandidatesWithConcurrency(
+		candidates,
+		verifyBookableStay,
+		blocked,
+	);
+
 	return blocked;
+}
+
+async function verifyCandidatesWithConcurrency(
+	candidates: MinimumStayCandidate[],
+	verifyBookableStay: VerifyBookableStay,
+	blocked: Set<string>,
+): Promise<void> {
+	let nextIndex = 0;
+	const workerCount = Math.min(
+		QUOTE_VERIFICATION_CONCURRENCY,
+		candidates.length,
+	);
+
+	const workers = Array.from({ length: workerCount }, async () => {
+		for (;;) {
+			const candidate = candidates[nextIndex];
+			nextIndex += 1;
+			if (!candidate) {
+				return;
+			}
+
+			const bookable = await verifyBookableStay(candidate);
+			if (!bookable) {
+				blocked.add(candidate.checkIn);
+			}
+		}
+	});
+
+	await Promise.all(workers);
 }
 
 function shouldVerifyCandidate(

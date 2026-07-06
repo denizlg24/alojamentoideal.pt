@@ -1,6 +1,7 @@
 const DEFAULT_CURRENCY_CODE = "EUR";
 const ISO_CURRENCY_CODE_PATTERN = /^[A-Z]{3}$/;
 const SYMBOL_CURRENCY_CODES = new Map<string, string>([["€", "EUR"]]);
+const SUPPORTED_CURRENCY_CODES = new Set(Intl.supportedValuesOf("currency"));
 
 export function normalizeCurrencyCode(
 	value: string | null | undefined,
@@ -34,10 +35,9 @@ function normalizeCurrencyCandidate(
 		return null;
 	}
 
-	try {
-		new Intl.NumberFormat("en", { currency: code, style: "currency" });
-		return code;
-	} catch {
+	if (!SUPPORTED_CURRENCY_CODES.has(code)) {
 		return null;
 	}
+
+	return code;
 }

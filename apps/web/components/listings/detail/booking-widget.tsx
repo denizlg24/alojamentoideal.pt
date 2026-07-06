@@ -31,6 +31,7 @@ import type { DateRange } from "react-day-picker";
 import { nightsBetween, parseIsoDate, toIsoDate } from "@/lib/catalog/dates";
 import { capacityForGuests, MAX_INFANTS } from "@/lib/catalog/guests";
 import { formatListingMoney } from "@/lib/catalog/pricing-display";
+import { getStayRestriction } from "@/lib/catalog/stay-restriction";
 import { cartHasOverlappingStay } from "@/lib/checkout/cart-matching";
 import {
 	addStayToCart,
@@ -189,9 +190,8 @@ function BookingWidgetInner({
 
 	// Guards a stay seeded from the URL that violates a v2 arrival/departure
 	// restriction; the calendar itself already prevents picking these.
-	const arrivalBlocked = Boolean(checkIn && ctaDates?.includes(checkIn));
-	const departureBlocked = Boolean(checkOut && ctdDates?.includes(checkOut));
-	const restrictionError = arrivalBlocked || departureBlocked;
+	const { arrivalBlocked, departureBlocked, restrictionError } =
+		getStayRestriction(checkIn, checkOut, availability);
 
 	const reserveHref =
 		checkIn && checkOut
