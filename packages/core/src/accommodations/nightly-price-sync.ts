@@ -7,6 +7,7 @@ import {
 import { ListingCacheRepository } from "../listing-cache/repository";
 import type { AccommodationsConfig } from "./config";
 import { getAccommodationsConfigFromSettings } from "./config";
+import { normalizeCurrencyCode } from "./currency";
 import type {
 	AccommodationPricingRepository,
 	AccommodationScope,
@@ -344,7 +345,12 @@ export class NightlyPriceSync {
 		range: { endDate: string; startDate: string },
 		maxPages: number,
 	): Promise<HostifyCalendarEntry[]> {
-		const entries: HostifyCalendarEntry[] = [];
+		// Keyed by date so a repeated day always resolves to a single entry.
+		// Calendar v2 ignores `page`/`per_page` and returns the entire window on
+		// every page, so paging blindly would stack duplicate dates and blow up the
+		// upsert's ON CONFLICT. We stop as soon as a page contributes no new date;
+		// v1 (which paginates) still terminates on the empty page below.
+		const byDate = new Map<string, HostifyCalendarEntry>();
 
 		for (let page = 1; page <= maxPages; page += 1) {
 			const response = await this.#client.calendar.list({
@@ -359,10 +365,20 @@ export class NightlyPriceSync {
 				break;
 			}
 
-			entries.push(...response.calendar);
+			let newDates = 0;
+			for (const entry of response.calendar) {
+				if (!byDate.has(entry.date)) {
+					newDates += 1;
+				}
+				byDate.set(entry.date, entry);
+			}
+
+			if (newDates === 0) {
+				break;
+			}
 		}
 
-		return entries;
+		return [...byDate.values()];
 	}
 }
 
@@ -436,8 +452,10 @@ function toUpsertInput(
 
 	return {
 		active: isEntryActive(entry),
-		basePrice: entry.base_price ?? null,
-		currency: entry.currency ?? options.currency,
+		basePrice: entry.basePrice ?? entry.base_price ?? null,
+		cta: entry.cta ?? null,
+		ctd: entry.ctd ?? null,
+		currency: normalizeCurrencyCode(entry.currency, options.currency),
 		date: entry.date,
 		fetchedAt: options.fetchedAt,
 		listingExternalId: listingId,
@@ -458,14 +476,25 @@ function toUpsertInput(
 }
 
 function isEntryActive(entry: HostifyCalendarEntry): boolean {
+	// Calendar v2 collapses availability into `status`: a day is bookable only
+	// when it is explicitly "available". "booked" (reservation) and "unavailable"
+	// (manual-blockage / smart-availability) are both closed. This replaces the v1
+	// heuristic that keyed off `is_manual_blocked` / `is_preparation_blocked` and a
+	// "blocked" status - fields v2 no longer returns, which left blocked nights
+	// looking bookable.
 	const status = entry.status?.toLowerCase();
+	if (status) {
+		return status === "available";
+	}
+
+	// Defensive fallback for a listing still on the v1 shape (no `status`): a day
+	// is open when it is priced, unreserved and not flagged blocked.
 	return (
 		entry.price !== null &&
 		entry.price !== undefined &&
-		entry.reservation_id === null &&
+		(entry.reservation_id === null || entry.reservation_id === undefined) &&
 		entry.is_manual_blocked !== 1 &&
-		entry.is_preparation_blocked !== 1 &&
-		status !== "blocked"
+		entry.is_preparation_blocked !== 1
 	);
 }
 

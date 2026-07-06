@@ -47,12 +47,12 @@ export function OrdersFilters() {
 	return (
 		<form
 			key={searchParams.toString()}
-			className="flex items-center gap-3"
+			className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-3"
 			data-pending={pending || undefined}
 			onSubmit={handleSubmit}
 		>
 			<Input
-				className="w-64"
+				className="w-full sm:w-64"
 				defaultValue={searchParams.get("q") ?? ""}
 				name="q"
 				placeholder="Search reference, name or email"
@@ -60,6 +60,7 @@ export function OrdersFilters() {
 			/>
 			<NativeSelect
 				aria-label="Filter by status"
+				className="w-full sm:w-auto"
 				defaultValue={searchParams.get("status") ?? ""}
 				onChange={(event) => apply({ status: event.target.value })}
 			>

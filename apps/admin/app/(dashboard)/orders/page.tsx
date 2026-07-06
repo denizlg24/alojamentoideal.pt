@@ -51,7 +51,7 @@ export default async function OrdersPage({ searchParams }: OrdersPageProps) {
 
 	return (
 		<div className="mx-auto max-w-5xl">
-			<div className="flex items-end justify-between">
+			<div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between sm:gap-6">
 				<div>
 					<h1 className="font-display font-semibold text-xl tracking-tight">
 						Orders

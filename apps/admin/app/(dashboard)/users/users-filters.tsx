@@ -27,9 +27,13 @@ export function UsersFilters() {
 	}
 
 	return (
-		<form data-pending={pending || undefined} onSubmit={handleSubmit}>
+		<form
+			className="w-full sm:w-auto"
+			data-pending={pending || undefined}
+			onSubmit={handleSubmit}
+		>
 			<Input
-				className="w-64"
+				className="w-full sm:w-64"
 				defaultValue={searchParams.get("q") ?? ""}
 				name="q"
 				placeholder="Search by email"

@@ -516,6 +516,10 @@ export const accommodationListingNight = pgTable(
 		id: text("id").primaryKey(),
 		active: boolean("active").notNull().default(true),
 		basePrice: doublePrecision("base_price"),
+		// Hostify calendar v2 per-day restrictions: closed-to-arrival (no check-in
+		// on this day) and closed-to-departure (no checkout on this day).
+		cta: boolean("cta"),
+		ctd: boolean("ctd"),
 		currency: text("currency"),
 		date: date("date", { mode: "string" }).notNull(),
 		externalAccountId: text("external_account_id").notNull(),

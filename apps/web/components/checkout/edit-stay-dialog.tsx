@@ -24,6 +24,7 @@ import { useBookingAvailability } from "@/components/listings/detail/use-booking
 import { GuestFields } from "@/components/search/guest-selector";
 import { nightsBetween, parseIsoDate, toIsoDate } from "@/lib/catalog/dates";
 import { capacityForGuests } from "@/lib/catalog/guests";
+import { getStayRestriction } from "@/lib/catalog/stay-restriction";
 import { formatStayRangeLong, guestSummaryLabel } from "@/lib/checkout/format";
 import type {
 	EditStayValue,
@@ -61,6 +62,8 @@ export function EditStayDialog({
 			? availabilityState.availability
 			: null;
 	const availableDates = availability?.availableDates ?? null;
+	const ctaDates = availability?.ctaDates ?? null;
+	const ctdDates = availability?.ctdDates ?? null;
 
 	const [range, setRange] = useState<DateRange | undefined>(() => ({
 		from: parseIsoDate(value.checkIn),
@@ -97,6 +100,8 @@ export function EditStayDialog({
 		: minNights;
 	const nights = checkIn && checkOut ? nightsBetween(checkIn, checkOut) : 0;
 	const tooShort = Boolean(checkIn && checkOut && nights < minStay);
+	const { arrivalBlocked, departureBlocked, restrictionError } =
+		getStayRestriction(checkIn, checkOut, availability);
 
 	const capacity = capacityForGuests(guests.adults, guests.children);
 	const overCapacity = maxGuests !== null && capacity > maxGuests;
@@ -111,7 +116,11 @@ export function EditStayDialog({
 		infants: guests.infants,
 	});
 
-	const canSave = Boolean(checkIn && checkOut) && !tooShort && !overCapacity;
+	const canSave =
+		Boolean(checkIn && checkOut) &&
+		!tooShort &&
+		!overCapacity &&
+		!restrictionError;
 	const changed =
 		checkIn !== value.checkIn ||
 		checkOut !== value.checkOut ||
@@ -163,11 +172,22 @@ export function EditStayDialog({
 								<div className="flex justify-center">
 									<ListingCalendar
 										availableDates={availableDates}
+										ctaDates={ctaDates}
+										ctdDates={ctdDates}
 										numberOfMonths={1}
 										onChange={setRange}
 										value={range}
 									/>
 								</div>
+								{restrictionError && (
+									<p className="text-amber-700 text-sm dark:text-amber-300">
+										{arrivalBlocked
+											? "Check-in isn't available on that date."
+											: departureBlocked
+												? "Checkout isn't available on that date."
+												: null}
+									</p>
+								)}
 								{tooShort && (
 									<p className="text-amber-700 text-sm dark:text-amber-300">
 										This home has a {minStay}-night minimum stay for those

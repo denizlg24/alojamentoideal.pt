@@ -6,7 +6,15 @@ function night(
 	date: string,
 	overrides: Partial<ListingNight> = {},
 ): ListingNight {
-	return { active: true, date, minStay: null, price: 100, ...overrides };
+	return {
+		active: true,
+		cta: null,
+		ctd: null,
+		date,
+		minStay: null,
+		price: 100,
+		...overrides,
+	};
 }
 
 describe("addDaysIso", () => {
@@ -70,6 +78,24 @@ describe("findEarliestStay", () => {
 			checkIn: "2026-06-23",
 			checkOut: "2026-06-25",
 			nights: 2,
+		});
+	});
+
+	test("skips a closed-to-arrival earliest night", () => {
+		const nights = [night("2026-06-21", { cta: true }), night("2026-06-22")];
+		expect(findEarliestStay(nights, "2026-06-21")?.checkIn).toBe("2026-06-22");
+	});
+
+	test("skips a stay whose checkout lands on a closed-to-departure night", () => {
+		const nights = [
+			night("2026-06-21"),
+			night("2026-06-22", { ctd: true }),
+			night("2026-06-23"),
+		];
+		expect(findEarliestStay(nights, "2026-06-21")).toEqual({
+			checkIn: "2026-06-22",
+			checkOut: "2026-06-23",
+			nights: 1,
 		});
 	});
 

@@ -1,5 +1,6 @@
 import { getListingSyncVersion } from "../listing-cache/sync-version";
 import { getRuntimeSettings, type RuntimeSettings } from "../settings";
+import { normalizeCurrencyCode } from "./currency";
 
 export interface AccommodationsConfig {
 	availabilityCacheTtlSeconds: number;
@@ -70,7 +71,7 @@ export function getAccommodationsConfig(
 			60,
 		),
 		cronSecret: environment.HOSTIFY_SYNC_CRON_SECRET ?? environment.CRON_SECRET,
-		currency: environment.ACCOMMODATION_CURRENCY ?? "EUR",
+		currency: normalizeCurrencyCode(environment.ACCOMMODATION_CURRENCY),
 		hostifyAccountId: environment.HOSTIFY_ACCOUNT_ID ?? "default",
 		liveSearchCandidateLimit: optionalInteger(
 			"ACCOMMODATION_LIVE_SEARCH_CANDIDATE_LIMIT",

@@ -25,11 +25,15 @@ import {
  */
 export function ListingCalendar({
 	availableDates,
+	ctaDates = null,
+	ctdDates = null,
 	numberOfMonths = 1,
 	onChange,
 	value,
 }: {
 	availableDates: string[] | null;
+	ctaDates?: string[] | null;
+	ctdDates?: string[] | null;
 	numberOfMonths?: number;
 	onChange: (range: DateRange | undefined) => void;
 	value: DateRange | undefined;
@@ -39,6 +43,14 @@ export function ListingCalendar({
 		() => (availableDates ? new Set(availableDates) : null),
 		[availableDates],
 	);
+	const ctaSet = useMemo(
+		() => (ctaDates ? new Set(ctaDates) : null),
+		[ctaDates],
+	);
+	const ctdSet = useMemo(
+		() => (ctdDates ? new Set(ctdDates) : null),
+		[ctdDates],
+	);
 	const selection = {
 		checkIn: value?.from ? toIsoDate(value.from) : null,
 		checkOut: value?.to ? toIsoDate(value.to) : null,
@@ -46,10 +58,29 @@ export function ListingCalendar({
 
 	const isDisabled = (date: Date) =>
 		date < today ||
-		isListingCalendarDateDisabled(toIsoDate(date), availableSet, selection);
+		isListingCalendarDateDisabled(
+			toIsoDate(date),
+			availableSet,
+			selection,
+			ctaSet,
+		);
 
 	const isUnavailable = (date: Date) =>
 		isListingCalendarDateUnavailable(toIsoDate(date), availableSet, selection);
+
+	const isClosedToDeparture = (date: Date) =>
+		ctdSet?.has(toIsoDate(date)) ?? false;
+
+	// Closed-to-departure cannot go through the `disabled` matcher (it would also
+	// block a stay from spanning the night). Reject a checkout that lands on a ctd
+	// day here instead, keeping the arrival so the visitor can pick another exit.
+	const handleSelect = (range: DateRange | undefined) => {
+		if (range?.to && isClosedToDeparture(range.to)) {
+			onChange(range.from ? { from: range.from, to: undefined } : undefined);
+			return;
+		}
+		onChange(range);
+	};
 
 	return (
 		<div className="flex flex-col gap-1">
@@ -61,19 +92,26 @@ export function ListingCalendar({
 				numberOfMonths={numberOfMonths}
 				defaultMonth={value?.from ?? today}
 				selected={value}
-				onSelect={onChange}
+				onSelect={handleSelect}
 				disabled={isDisabled}
 				startMonth={today}
 				modifiers={{
+					closedToDeparture: (date) =>
+						date >= today && isClosedToDeparture(date),
 					unavailable: (date) => date >= today && isUnavailable(date),
 				}}
-				modifiersClassNames={{ unavailable: "line-through opacity-50" }}
+				modifiersClassNames={{
+					closedToDeparture: "line-through decoration-dashed opacity-70",
+					unavailable: "line-through opacity-50",
+				}}
 				components={{
 					DayButton: (props) => (
 						<CalendarDayButton
 							{...props}
 							className={cn(
 								props.className,
+								props.modifiers.closedToDeparture &&
+									"line-through decoration-dashed opacity-70",
 								props.modifiers.unavailable && "line-through opacity-50",
 							)}
 						/>
