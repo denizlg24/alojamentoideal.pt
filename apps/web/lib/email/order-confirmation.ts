@@ -1,5 +1,6 @@
 import {
 	buildOrderConfirmationEmail as buildBrandedOrderConfirmationEmail,
+	type EmailAttachment,
 	type EmailMessage,
 	getEmailSender,
 	type OrderConfirmationEmailInput,
@@ -10,6 +11,7 @@ import {
 } from "@workspace/core/commerce";
 import type { OrderBillingAddressSnapshot } from "@workspace/db";
 import { commerceService } from "@/lib/api/commerce";
+import { fetchActivityDocumentsByCode } from "@/lib/order/activity";
 import { countryName } from "@/lib/site/countries";
 import { orderHubUrl } from "./order-url";
 
@@ -187,6 +189,38 @@ export function buildOrderConfirmationEmail(
  * token is activated before sending so an accepted email never carries a dead
  * "Manage reservation" CTA; only its hash is persisted.
  */
+/**
+ * Ticket + invoice PDFs for every confirmed activity on the order, attached to
+ * the confirmation email. Best-effort: a provider hiccup drops the affected
+ * attachment (the guest can always download it from the order hub) rather than
+ * blocking the email.
+ */
+async function activityDocumentAttachments(
+	facts: OrderConfirmationFacts,
+): Promise<EmailAttachment[]> {
+	const attachments: EmailAttachment[] = [];
+	for (const activity of facts.activities) {
+		const code = activity.productConfirmationCode;
+		if (!code) {
+			continue;
+		}
+		const documents = await fetchActivityDocumentsByCode(code);
+		if (documents.ticket) {
+			attachments.push({
+				content: documents.ticket,
+				filename: `ticket-${code}.pdf`,
+			});
+		}
+		if (documents.invoice) {
+			attachments.push({
+				content: documents.invoice,
+				filename: `invoice-${code}.pdf`,
+			});
+		}
+	}
+	return attachments;
+}
+
 export async function sendOrderConfirmationEmail(
 	facts: OrderConfirmationFacts,
 ): Promise<void> {
@@ -197,8 +231,10 @@ export async function sendOrderConfirmationEmail(
 		token,
 	);
 	const manageUrl = orderHubUrl(facts.publicReference, token);
+	const attachments = await activityDocumentAttachments(facts);
 	await getEmailSender().send({
 		to: facts.email,
 		...buildOrderConfirmationEmail(facts, manageUrl),
+		...(attachments.length > 0 ? { attachments } : {}),
 	});
 }

@@ -37,7 +37,14 @@ export interface EmailMessage {
 	text: string;
 }
 
+/** A file attached to an outbound email. Content is base64-encoded. */
+export interface EmailAttachment {
+	content: string;
+	filename: string;
+}
+
 export interface OutboundEmail extends EmailMessage {
+	attachments?: EmailAttachment[];
 	to: string;
 }
 
@@ -72,6 +79,10 @@ class ResendEmailSender implements EmailSender {
 
 	async send(email: OutboundEmail): Promise<void> {
 		const { error } = await this.#client.emails.send({
+			attachments: email.attachments?.map((attachment) => ({
+				content: Buffer.from(attachment.content, "base64"),
+				filename: attachment.filename,
+			})),
 			from: this.#from,
 			html: email.html,
 			subject: email.subject,
@@ -122,6 +133,8 @@ interface EmailTemplates {
 	orderInviteText?: string;
 	orderGuestReminderHtml?: string;
 	orderGuestReminderText?: string;
+	activityQuestionsReminderHtml?: string;
+	activityQuestionsReminderText?: string;
 }
 
 async function loadTemplates(): Promise<EmailTemplates> {
@@ -871,6 +884,82 @@ function orderGuestReminderFallbackText(
 		`Add guest details: ${input.manageUrl}`,
 		"",
 		"Portugal requires guest registration for each stay. It only takes a few minutes, and it helps keep check-in smooth.",
+		"",
+		`The ${APP_NAME} team`,
+	].join("\n");
+}
+
+export interface ActivityQuestionsReminderEmailInput {
+	/** Human-readable activity date, e.g. "12 Aug 2026". */
+	activityDate: string;
+	activityTitle: string;
+	manageUrl: string;
+	missingQuestionCount: number;
+	orderNumber: string;
+}
+
+/**
+ * Reminder that the activity operator still needs answers to required booking
+ * questions before the departure date. Same degrade path as the other order
+ * emails: branded template when the emails package ships one, plain fallback
+ * otherwise.
+ */
+export function buildActivityQuestionsReminderEmail(
+	input: ActivityQuestionsReminderEmailInput,
+): EmailMessage {
+	const subject = `Information needed for your activity on booking ${safeSubjectPart(input.orderNumber)}`;
+
+	if (TEMPLATES.activityQuestionsReminderHtml) {
+		const replacements = {
+			ACTIVITY_DATE: escapeHtml(input.activityDate),
+			ACTIVITY_TITLE: escapeHtml(input.activityTitle),
+			APP_NAME,
+			CURRENT_YEAR,
+			MANAGE_URL: escapeHtml(input.manageUrl),
+			MISSING_QUESTIONS: input.missingQuestionCount.toString(),
+			ORDER_NUMBER: escapeHtml(input.orderNumber),
+		};
+		const html = applyPlaceholders(
+			TEMPLATES.activityQuestionsReminderHtml,
+			replacements,
+		);
+		const text = TEMPLATES.activityQuestionsReminderText
+			? applyPlaceholders(TEMPLATES.activityQuestionsReminderText, {
+					...replacements,
+					ACTIVITY_DATE: input.activityDate,
+					ACTIVITY_TITLE: input.activityTitle,
+					MANAGE_URL: input.manageUrl,
+					ORDER_NUMBER: input.orderNumber,
+				})
+			: activityQuestionsReminderFallbackText(input);
+		return { html, subject, text };
+	}
+
+	const text = activityQuestionsReminderFallbackText(input);
+	return { html: activityQuestionsReminderFallbackHtml(input), subject, text };
+}
+
+function activityQuestionsReminderFallbackHtml(
+	input: ActivityQuestionsReminderEmailInput,
+): string {
+	return `<div style="font-family:system-ui,sans-serif;line-height:1.5"><p>Hi,</p><p>The operator of ${escapeHtml(input.activityTitle)} still needs ${input.missingQuestionCount === 1 ? "an answer to 1 question" : `answers to ${input.missingQuestionCount} questions`} before your activity on ${escapeHtml(input.activityDate)}.</p><p><a href="${escapeHtml(input.manageUrl)}">Complete your booking information</a></p><p>It only takes a couple of minutes and helps the operator prepare your experience.</p><p>The ${APP_NAME} team</p></div>`;
+}
+
+function activityQuestionsReminderFallbackText(
+	input: ActivityQuestionsReminderEmailInput,
+): string {
+	return [
+		"Hi,",
+		"",
+		`The operator of ${input.activityTitle} still needs ${
+			input.missingQuestionCount === 1
+				? "an answer to 1 question"
+				: `answers to ${input.missingQuestionCount} questions`
+		} before your activity on ${input.activityDate}.`,
+		"",
+		`Complete your booking information: ${input.manageUrl}`,
+		"",
+		"It only takes a couple of minutes and helps the operator prepare your experience.",
 		"",
 		`The ${APP_NAME} team`,
 	].join("\n");

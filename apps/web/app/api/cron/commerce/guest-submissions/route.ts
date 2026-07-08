@@ -2,6 +2,7 @@ import { getAccommodationsConfig } from "@workspace/core/accommodations";
 import { isAuthorizedCronRequest } from "@workspace/core/listing-cache";
 import { guestComplianceService } from "@/lib/api/compliance";
 import { withApiRoute } from "@/lib/api/route";
+import { sendActivityQuestionsReminderEmail } from "@/lib/email/activity-questions-reminder";
 import { sendGuestInfoReminderEmail } from "@/lib/email/guest-reminder";
 
 export const GET = withApiRoute(
@@ -21,6 +22,7 @@ export const GET = withApiRoute(
 		}
 
 		const summary = await (await guestComplianceService()).run(20, {
+			onActivityQuestionsReminder: sendActivityQuestionsReminderEmail,
 			onGuestInfoReminder: sendGuestInfoReminderEmail,
 		});
 		return Response.json({ data: summary, success: true });

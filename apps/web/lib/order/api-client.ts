@@ -1,3 +1,4 @@
+import type { BookingQuestionAnswerUpdate } from "@workspace/core/activities";
 import type {
 	BookingGuestList,
 	BookingGuestUpdateInput,
@@ -47,6 +48,17 @@ const base = (reference: string) => `/api/orders/${seg(reference)}`;
 
 export function getOrderDetail(reference: string): Promise<OrderDetail> {
 	return request<OrderDetail>(base(reference));
+}
+
+export function saveActivityQuestionAnswers(
+	reference: string,
+	itemId: string,
+	answers: BookingQuestionAnswerUpdate[],
+): Promise<void> {
+	return request<void>(
+		`${base(reference)}/items/${seg(itemId)}/questions`,
+		jsonBody({ answers }, "PUT"),
+	);
 }
 
 // --- Conversations (F2) ---

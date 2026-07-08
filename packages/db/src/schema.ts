@@ -1448,6 +1448,11 @@ export const conversation = pgTable(
 		uniqueIndex("conversations_provider_thread_uidx")
 			.on(table.provider, table.externalThreadId)
 			.where(sql`${table.externalThreadId} is not null`),
+		// One order-level internal conversation per order; provider-backed rows
+		// are keyed per booking/thread instead.
+		uniqueIndex("conversations_internal_order_uidx")
+			.on(table.orderId)
+			.where(sql`${table.provider} = 'internal'`),
 		index("conversations_active_sync_idx")
 			.on(table.lastSyncedAt)
 			.where(

@@ -355,8 +355,9 @@ export function ConversationPanel({
 			</div>
 			{conversationId === null ? (
 				<p className="mt-3 text-muted-foreground text-sm">
-					No conversation is linked yet. The conversation cron will create one
-					after the Hostify booking thread is available.
+					No conversation exists yet. The conversation cron creates one once the
+					booking is confirmed: a Hostify thread when the reservation has one,
+					otherwise an in-app conversation.
 				</p>
 			) : (
 				<div className="mt-3 space-y-3">

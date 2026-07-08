@@ -19,7 +19,7 @@ const DEFAULT_RETRY_DELAY_MS = 250;
 
 type HttpMethod = "DELETE" | "GET" | "POST" | "PUT";
 type Query = object;
-type ResponseType = "json" | "text";
+type ResponseType = "binary" | "json" | "text";
 
 interface RequestOptions<TSchema extends z.ZodType> {
 	body?: unknown;
@@ -521,7 +521,7 @@ export class BokunClient {
 				productConfirmationCode: string,
 				context?: T.BokunRequestContext,
 			) =>
-				this.getText(
+				this.getBinary(
 					`/booking.json/accommodation-booking/${segment(productConfirmationCode)}/ticket`,
 					context,
 				),
@@ -535,7 +535,7 @@ export class BokunClient {
 				productConfirmationCode: string,
 				context?: T.BokunRequestContext,
 			) =>
-				this.getText(
+				this.getBinary(
 					`/booking.json/activity-booking/${segment(productConfirmationCode)}/ticket`,
 					context,
 				),
@@ -557,12 +557,12 @@ export class BokunClient {
 					context,
 				),
 			getSummary: (id: T.BokunId, context?: T.BokunRequestContext) =>
-				this.getText(`/booking.json/${segment(id)}/summary`, context),
+				this.getBinary(`/booking.json/${segment(id)}/summary`, context),
 			getTransportTicket: (
 				productConfirmationCode: string,
 				context?: T.BokunRequestContext,
 			) =>
-				this.getText(
+				this.getBinary(
 					`/booking.json/transport-booking/${segment(productConfirmationCode)}/ticket`,
 					context,
 				),
@@ -731,6 +731,30 @@ export class BokunClient {
 					bokunSchemas.productListDescriptions,
 					context,
 					query,
+				),
+		},
+
+		question: {
+			answerBookingQuestions: (
+				activityBookingId: T.BokunId,
+				body: T.BokunBookingQuestionsAnswerRequest,
+				context?: T.BokunRequestContext,
+			) =>
+				this.mutate(
+					"POST",
+					`/question.json/booking/${segment(activityBookingId)}`,
+					body,
+					bokunSchemas.object,
+					context,
+				),
+			getBookingQuestions: (
+				parentBookingId: T.BokunId,
+				context?: T.BokunRequestContext,
+			) =>
+				this.get(
+					`/question.json/booking/${segment(parentBookingId)}`,
+					bokunSchemas.object,
+					context,
 				),
 		},
 	};
@@ -1313,7 +1337,8 @@ export class BokunClient {
 		return this.request({ context, method: "GET", path, query, schema });
 	}
 
-	private getText(
+	/** GET returning the raw response body base64-encoded (PDF tickets/summaries). */
+	private getBinary(
 		path: string,
 		context?: T.BokunRequestContext,
 		query?: Query,
@@ -1323,7 +1348,7 @@ export class BokunClient {
 			method: "GET",
 			path,
 			query,
-			responseType: "text",
+			responseType: "binary",
 			schema: bokunSchemas.text,
 		});
 	}
@@ -1429,13 +1454,29 @@ export class BokunClient {
 			const response = await this.#fetch(url, {
 				body: body === undefined ? undefined : JSON.stringify(body),
 				headers: {
-					Accept: responseType === "text" ? "*/*" : "application/json",
+					Accept: responseType === "json" ? "application/json" : "*/*",
 					"Content-Type": "application/json;charset=UTF-8",
 					...signedHeaders,
 				},
 				method,
 				signal: controller.signal,
 			});
+
+			if (responseType === "binary") {
+				if (!response.ok) {
+					const text = await response.text();
+					throw new BokunApiError(
+						`Bokun request failed with status ${response.status}`,
+						response.status,
+						{
+							providerMessage: redactBokunText(text, [this.#secretKey]),
+							requestId,
+						},
+					);
+				}
+				const buffer = await response.arrayBuffer();
+				return schema.parse(Buffer.from(buffer).toString("base64"));
+			}
 
 			if (responseType === "text") {
 				const text = await response.text();

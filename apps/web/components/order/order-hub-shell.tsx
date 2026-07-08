@@ -3,21 +3,36 @@ import Image from "next/image";
 import type { ReactNode } from "react";
 import { SiteFooter } from "@/components/home/site-footer";
 import { SiteHeader } from "@/components/home/site-header";
-import { formatStayRangeLong } from "@/lib/checkout/format";
+import {
+	formatActivityDateLong,
+	formatStayRangeLong,
+} from "@/lib/checkout/format";
 import { OrderSectionNav } from "./order-section-nav";
 import { OrderStatusBadge } from "./order-status-badge";
 
-function staySummary(
+function itemSummary(
 	item: OrderDetail["items"][number] | undefined,
 ): string | null {
-	if (!item?.checkIn || !item.checkOut) {
+	if (!item) {
 		return null;
 	}
-	const range = formatStayRangeLong(item.checkIn, item.checkOut);
-	if (item.guests && item.guests > 0) {
-		return `${range} · ${item.guests} ${item.guests === 1 ? "guest" : "guests"}`;
+	if (item.checkIn && item.checkOut) {
+		const range = formatStayRangeLong(item.checkIn, item.checkOut);
+		if (item.guests && item.guests > 0) {
+			return `${range} · ${item.guests} ${item.guests === 1 ? "guest" : "guests"}`;
+		}
+		return range;
 	}
-	return range;
+	if (item.type === "activity" && item.activityDate) {
+		const date = formatActivityDateLong(item.activityDate);
+		if (item.totalParticipants != null && item.totalParticipants > 0) {
+			return `${date} · ${item.totalParticipants} ${
+				item.totalParticipants === 1 ? "participant" : "participants"
+			}`;
+		}
+		return date;
+	}
+	return null;
 }
 
 /**
@@ -54,13 +69,23 @@ export function OrderHubShell({
 	children: ReactNode;
 }) {
 	const item = detail.items[0];
-	const multiStay = detail.items.length > 1;
-	const title = multiStay
-		? `Your ${detail.items.length} stays`
+	const multiItem = detail.items.length > 1;
+	const allStays =
+		detail.items.length > 0 &&
+		detail.items.every((entry) => entry.type === "accommodation");
+	const hasStays = detail.items.some((entry) => entry.type === "accommodation");
+	const firstActivity = detail.items.find((entry) => entry.type === "activity");
+	const title = multiItem
+		? allStays
+			? `Your ${detail.items.length} stays`
+			: `Your ${detail.items.length} bookings`
 		: (item?.title ?? "Your booking");
-	const summary = multiStay
-		? multiStaySummary(detail.items)
-		: staySummary(item);
+	const summary = multiItem
+		? allStays
+			? multiStaySummary(detail.items)
+			: null
+		: itemSummary(item);
+	const root = `/order/${encodeURIComponent(detail.reference)}`;
 
 	return (
 		<div className="flex min-h-screen flex-col">
@@ -94,8 +119,15 @@ export function OrderHubShell({
 					</header>
 
 					<OrderSectionNav
+						activityHref={
+							firstActivity
+								? `${root}/activity/${encodeURIComponent(firstActivity.id)}`
+								: null
+						}
 						reference={detail.reference}
+						showGuests={hasStays}
 						showMessages={detail.role === "owner"}
+						showStay={hasStays}
 					/>
 
 					{children}

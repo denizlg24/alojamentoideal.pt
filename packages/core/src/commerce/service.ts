@@ -56,6 +56,7 @@ import { trackEvent } from "../observability";
 import {
 	type ConversationMessageDto,
 	type ConversationSummary,
+	INTERNAL_CONVERSATION_PROVIDER,
 	noopRealtimePublisher,
 	normalizeConversationPreview,
 	type ProviderConversationGateway,
@@ -204,6 +205,7 @@ const conversationSummarySelection = {
 	id: conversationTable.id,
 	lastMessageAt: conversationTable.lastMessageAt,
 	lastMessagePreview: conversationTable.lastMessagePreview,
+	provider: conversationTable.provider,
 	providerBookingId: conversationTable.providerBookingId,
 	status: conversationTable.status,
 	unreadCount: conversationTable.unreadCount,
@@ -1398,6 +1400,7 @@ export class CommerceService {
 			this.#db
 				.select({
 					externalThreadId: conversationTable.externalThreadId,
+					provider: conversationTable.provider,
 					status: conversationTable.status,
 				})
 				.from(conversationTable)
@@ -2841,7 +2844,12 @@ export class CommerceService {
 			access,
 			conversationId,
 		);
-		if (conversation.status === "archived" || !conversation.externalThreadId) {
+		const isInternal = conversation.provider === INTERNAL_CONVERSATION_PROVIDER;
+		const externalThreadId = conversation.externalThreadId;
+		if (
+			conversation.status === "archived" ||
+			(!isInternal && externalThreadId === null)
+		) {
 			throw new CommerceError(
 				"conversation_unavailable",
 				"This conversation is not ready yet.",
@@ -2882,6 +2890,30 @@ export class CommerceService {
 			excludeSocketId,
 		);
 
+		if (isInternal || externalThreadId === null) {
+			// Internal conversation: no provider hop, the stored message is the
+			// delivered message.
+			const delivered = await this.#markConversationMessageDelivered(
+				access.order.id,
+				conversationId,
+				pending.id,
+				null,
+				now,
+				excludeSocketId,
+			);
+			trackEvent({
+				metadata: {
+					conversationId,
+					messageId: delivered.id,
+					orderId: access.order.id,
+				},
+				name: "conversation_message_sent",
+				provider: conversation.provider,
+				type: "integration",
+			});
+			return delivered;
+		}
+
 		const gateway = this.#conversationGatewayFor(conversation.provider);
 		if (!gateway) {
 			return this.#markConversationMessageFailed(
@@ -2895,7 +2927,7 @@ export class CommerceService {
 
 		try {
 			const externalMessageId = await gateway.sendMessage(
-				conversation.externalThreadId,
+				externalThreadId,
 				body,
 				pending.id,
 			);
@@ -2961,7 +2993,12 @@ export class CommerceService {
 			access,
 			conversationId,
 		);
-		if (conversation.status === "archived" || !conversation.externalThreadId) {
+		const isInternal = conversation.provider === INTERNAL_CONVERSATION_PROVIDER;
+		const externalThreadId = conversation.externalThreadId;
+		if (
+			conversation.status === "archived" ||
+			(!isInternal && externalThreadId === null)
+		) {
 			throw new CommerceError(
 				"conversation_unavailable",
 				"This conversation is not ready yet.",
@@ -3002,6 +3039,30 @@ export class CommerceService {
 			excludeSocketId,
 		);
 
+		if (isInternal || externalThreadId === null) {
+			// Internal conversation: no provider hop, the stored message is the
+			// delivered message.
+			const delivered = await this.#markConversationMessageDelivered(
+				access.order.id,
+				conversationId,
+				pending.id,
+				null,
+				now,
+				excludeSocketId,
+			);
+			trackEvent({
+				metadata: {
+					conversationId,
+					messageId: delivered.id,
+					orderId: access.order.id,
+				},
+				name: "conversation_host_message_sent",
+				provider: conversation.provider,
+				type: "integration",
+			});
+			return delivered;
+		}
+
 		const gateway = this.#conversationGatewayFor(conversation.provider);
 		if (!gateway) {
 			return this.#markConversationMessageFailed(
@@ -3015,7 +3076,7 @@ export class CommerceService {
 
 		try {
 			const externalMessageId = await gateway.sendHostReply(
-				conversation.externalThreadId,
+				externalThreadId,
 				body,
 			);
 			const delivered = await this.#markConversationMessageDelivered(
@@ -3073,7 +3134,12 @@ export class CommerceService {
 			access,
 			conversationId,
 		);
-		if (conversation.status === "archived" || !conversation.externalThreadId) {
+		const isInternal = conversation.provider === INTERNAL_CONVERSATION_PROVIDER;
+		const externalThreadId = conversation.externalThreadId;
+		if (
+			conversation.status === "archived" ||
+			(!isInternal && externalThreadId === null)
+		) {
 			throw new CommerceError(
 				"conversation_unavailable",
 				"This conversation is not ready yet.",
@@ -3135,6 +3201,17 @@ export class CommerceService {
 			excludeSocketId,
 		);
 
+		if (isInternal || externalThreadId === null) {
+			return this.#markConversationMessageDelivered(
+				access.order.id,
+				conversationId,
+				messageId,
+				null,
+				new Date(),
+				excludeSocketId,
+			);
+		}
+
 		const gateway = this.#conversationGatewayFor(conversation.provider);
 		if (!gateway) {
 			return this.#markConversationMessageFailed(
@@ -3148,7 +3225,7 @@ export class CommerceService {
 
 		try {
 			const externalMessageId = await gateway.sendMessage(
-				conversation.externalThreadId,
+				externalThreadId,
 				pending.body,
 				messageId,
 			);
@@ -3213,6 +3290,12 @@ export class CommerceService {
 			.limit(limit);
 
 		for (const row of missingRows) {
+			// Providers without an inbox gateway (e.g. Bokun) never get a
+			// per-booking conversation; their orders chat through the order-level
+			// internal conversation provisioned below.
+			if (!this.#conversationGatewayFor(row.provider)) {
+				continue;
+			}
 			summary.scanned += 1;
 			try {
 				const provisioned = await this.#provisionConversation(row, now);
@@ -3227,6 +3310,43 @@ export class CommerceService {
 				this.#trackConversationReconciliationFailure(
 					row.provider,
 					row.providerBookingId,
+					error,
+				);
+			}
+		}
+
+		await this.#archiveStaleBokunConversations(now);
+
+		const internalCandidates = await this.#db
+			.select({ orderId: orderTable.id })
+			.from(orderTable)
+			.leftJoin(
+				conversationTable,
+				and(
+					eq(conversationTable.orderId, orderTable.id),
+					inArray(conversationTable.status, ["pending", "active"]),
+				),
+			)
+			.where(
+				and(eq(orderTable.status, "confirmed"), isNull(conversationTable.id)),
+			)
+			.limit(limit);
+
+		for (const candidate of internalCandidates) {
+			summary.scanned += 1;
+			try {
+				const created = await this.#provisionInternalConversation(
+					candidate.orderId,
+					now,
+				);
+				if (created) {
+					summary.provisioned += 1;
+				}
+			} catch (error) {
+				summary.failed += 1;
+				this.#trackConversationReconciliationFailure(
+					INTERNAL_CONVERSATION_PROVIDER,
+					candidate.orderId,
 					error,
 				);
 			}
@@ -3247,6 +3367,10 @@ export class CommerceService {
 			.limit(limit);
 
 		for (const conversation of conversationRows) {
+			// Internal conversations have no external thread to link or sync.
+			if (conversation.provider === INTERNAL_CONVERSATION_PROVIDER) {
+				continue;
+			}
 			summary.scanned += 1;
 			try {
 				const ready =
@@ -3321,10 +3445,19 @@ export class CommerceService {
 
 		const itemRows = await this.#db
 			.select({
+				activityBokunActivityId: activityItemDetailTable.bokunActivityId,
 				activityDate: activityItemDetailTable.activityDate,
+				activityDropoffPlaceId: activityItemDetailTable.dropoffPlaceId,
+				activityExternalAccountId: activityItemDetailTable.externalAccountId,
+				activityPickupPlaceId: activityItemDetailTable.pickupPlaceId,
+				activityProvider: activityItemDetailTable.provider,
+				activityRateId: activityItemDetailTable.rateId,
+				activityRoomNumber: activityItemDetailTable.roomNumber,
+				activityStartTimeId: activityItemDetailTable.startTimeId,
 				activityTotalParticipants: activityItemDetailTable.totalParticipants,
 				adults: accommodationItemDetailTable.adults,
 				bookingId: providerBookingTable.id,
+				bookingTransactionId: providerBookingTable.providerTransactionId,
 				bookingNeedsRecovery: providerBookingTable.needsRecovery,
 				bookingStatus: providerBookingTable.normalizedStatus,
 				checkIn: accommodationItemDetailTable.checkIn,
@@ -3440,6 +3573,24 @@ export class CommerceService {
 		}
 
 		const items: OrderDetailItem[] = visibleItemRows.map((row) => ({
+			activity:
+				isOwner &&
+				row.type === "activity" &&
+				row.activityBokunActivityId &&
+				row.activityExternalAccountId &&
+				row.activityProvider
+					? {
+							bokunActivityId: row.activityBokunActivityId,
+							dropoffPlaceId: row.activityDropoffPlaceId,
+							externalAccountId: row.activityExternalAccountId,
+							pickupPlaceId: row.activityPickupPlaceId,
+							productConfirmationCode: row.bookingTransactionId,
+							provider: row.activityProvider,
+							rateId: row.activityRateId,
+							roomNumber: row.activityRoomNumber,
+							startTimeId: row.activityStartTimeId,
+						}
+					: null,
 			activityDate: row.activityDate,
 			adults: row.adults,
 			charges: isOwner ? (chargesByItem.get(row.id) ?? []) : null,
@@ -3585,6 +3736,7 @@ export class CommerceService {
 		id: string;
 		lastMessageAt: Date | null;
 		lastMessagePreview: string | null;
+		provider: string;
 		providerBookingId: string | null;
 		status: ConversationSummary["status"];
 		unreadCount: number;
@@ -3594,6 +3746,7 @@ export class CommerceService {
 			id: row.id,
 			lastMessageAt: row.lastMessageAt?.toISOString() ?? null,
 			lastMessagePreview: row.lastMessagePreview,
+			provider: row.provider,
 			providerBookingId: row.providerBookingId,
 			status: row.status,
 			unreadCount: row.unreadCount,
@@ -3800,6 +3953,76 @@ export class CommerceService {
 		} catch (error) {
 			this.#trackRealtimePublishFailure(conversationId, error);
 		}
+	}
+
+	/**
+	 * Archives leftover per-booking Bokun conversations from before the
+	 * order-level internal chat existed. Bokun has no inbox, so these rows could
+	 * never link a thread; archiving them lets the internal provisioning pass
+	 * pick their orders up. Bounded to the explicit provider so a transiently
+	 * missing gateway can never archive a linkable conversation.
+	 */
+	async #archiveStaleBokunConversations(now: Date): Promise<void> {
+		await this.#db
+			.update(conversationTable)
+			.set({ status: "archived", updatedAt: now })
+			.where(
+				and(
+					eq(conversationTable.provider, "bokun"),
+					eq(conversationTable.status, "pending"),
+					isNull(conversationTable.externalThreadId),
+				),
+			);
+	}
+
+	/**
+	 * Creates the order-level internal conversation for a confirmed order whose
+	 * bookings have no provider inbox (e.g. activity-only orders). Orders with a
+	 * gateway-capable booking keep chatting through the provider thread instead,
+	 * so guests never face two chats for one order.
+	 */
+	async #provisionInternalConversation(
+		orderId: string,
+		now: Date,
+	): Promise<boolean> {
+		const providerRows = await this.#db
+			.selectDistinct({ provider: providerBookingTable.provider })
+			.from(providerBookingTable)
+			.where(eq(providerBookingTable.orderId, orderId));
+		if (
+			providerRows.some((row) =>
+				Boolean(this.#conversationGatewayFor(row.provider)),
+			)
+		) {
+			return false;
+		}
+
+		const [created] = await this.#db
+			.insert(conversationTable)
+			.values({
+				createdAt: now,
+				externalThreadId: null,
+				id: crypto.randomUUID(),
+				lastMessagePreview: null,
+				orderId,
+				provider: INTERNAL_CONVERSATION_PROVIDER,
+				providerBookingId: null,
+				status: "active",
+				unreadCount: 0,
+				updatedAt: now,
+			})
+			.onConflictDoNothing()
+			.returning({ id: conversationTable.id });
+
+		if (created) {
+			trackEvent({
+				metadata: { conversationId: created.id, orderId },
+				name: "conversation_provisioned_internal",
+				provider: INTERNAL_CONVERSATION_PROVIDER,
+				type: "integration",
+			});
+		}
+		return Boolean(created);
 	}
 
 	async #provisionConversation(
@@ -4803,6 +5026,12 @@ export class CommerceService {
 				await tx.insert(providerBookingTable).values({
 					createdAt: now,
 					externalAccountId: rows.detail.externalAccountId,
+					// Reuses the guest-info reminder cadence to nudge the guest about
+					// required provider questions left unanswered before the activity.
+					guestReminderEmailNextAt: nextGuestInfoReminderAt(
+						now,
+						activityStartsAt,
+					),
 					id: providerBookingId,
 					normalizedStatus: "pending",
 					orderId,
@@ -8021,6 +8250,7 @@ export class CommerceService {
 				.map((booking) => ({
 					activityDate: booking.activityDate,
 					imageUrl: booking.imageUrlSnapshot,
+					productConfirmationCode: booking.providerTransactionId,
 					title: booking.titleSnapshot ?? "Your Alojamento Ideal activity",
 					totalParticipants: booking.totalParticipants,
 				})),

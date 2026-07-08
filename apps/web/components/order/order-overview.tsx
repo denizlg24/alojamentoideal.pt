@@ -1,6 +1,7 @@
 import type { OrderDetail } from "@workspace/core/commerce";
 import {
 	ChevronRight,
+	Compass,
 	Home,
 	MessageCircle,
 	ReceiptText,
@@ -148,7 +149,7 @@ function DisabledActionRow({
 function conversationSubtitle(detail: OrderDetail): string {
 	switch (detail.conversationAvailability) {
 		case "available":
-			return "Message the Alojamento Ideal team about your stay";
+			return "Message the Alojamento Ideal team about your booking";
 		case "pending":
 			return "Chat opens once your booking is confirmed";
 		default:
@@ -255,6 +256,8 @@ export function OrderOverview({ detail }: { detail: OrderDetail }) {
 	const root = `/order/${encodeURIComponent(detail.reference)}`;
 	const body = statusBody(detail);
 	const pricing = detail.pricing;
+	const hasStays = detail.items.some((item) => item.type === "accommodation");
+	const activityItems = detail.items.filter((item) => item.type === "activity");
 
 	return (
 		<div className="flex flex-col gap-8">
@@ -410,23 +413,38 @@ export function OrderOverview({ detail }: { detail: OrderDetail }) {
 						title="Messages"
 					/>
 				)}
-				<LinkRow
-					href={`${root}/stay`}
-					icon={<Home className="size-4" />}
-					subtitle="Photos, amenities, directions and house guide"
-					title="Stay details"
-				/>
-				<LinkRow
-					href={`${root}/guests`}
-					icon={<Users className="size-4" />}
-					subtitle={guestsSubtitle(detail)}
-					title="Guest registration"
-				/>
-				<DisabledActionRow
-					icon={<ReceiptText className="size-4" />}
-					subtitle="Invoice generation is not available yet"
-					title="Generate invoice"
-				/>
+				{hasStays && (
+					<LinkRow
+						href={`${root}/stay`}
+						icon={<Home className="size-4" />}
+						subtitle="Photos, amenities, directions and house guide"
+						title="Stay details"
+					/>
+				)}
+				{activityItems.map((item) => (
+					<LinkRow
+						href={`${root}/activity/${encodeURIComponent(item.id)}`}
+						icon={<Compass className="size-4" />}
+						key={item.id}
+						subtitle="Tickets, meeting point and booking information"
+						title={activityItems.length > 1 ? item.title : "Activity details"}
+					/>
+				))}
+				{hasStays && (
+					<LinkRow
+						href={`${root}/guests`}
+						icon={<Users className="size-4" />}
+						subtitle={guestsSubtitle(detail)}
+						title="Guest registration"
+					/>
+				)}
+				{hasStays && (
+					<DisabledActionRow
+						icon={<ReceiptText className="size-4" />}
+						subtitle="Invoice generation is not available yet"
+						title="Generate invoice"
+					/>
+				)}
 			</section>
 		</div>
 	);

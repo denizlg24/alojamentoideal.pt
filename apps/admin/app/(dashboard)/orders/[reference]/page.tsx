@@ -2,6 +2,7 @@ import {
 	type ConversationMessageDto,
 	type ConversationSummary,
 	conversationChannelName,
+	INTERNAL_CONVERSATION_PROVIDER,
 } from "@workspace/core/commerce";
 import {
 	Table,
@@ -64,7 +65,9 @@ function primaryConversation(
 ): ConversationSummary | null {
 	const live = conversations.find(
 		(conversation) =>
-			conversation.status === "active" && conversation.externalThreadId,
+			conversation.status === "active" &&
+			(conversation.externalThreadId !== null ||
+				conversation.provider === INTERNAL_CONVERSATION_PROVIDER),
 	);
 	return live ?? conversations[0] ?? null;
 }

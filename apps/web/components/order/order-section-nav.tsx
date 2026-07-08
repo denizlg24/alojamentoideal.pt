@@ -16,26 +16,40 @@ interface Section {
  * the active tab is derived from the pathname rather than client state.
  */
 export function OrderSectionNav({
+	activityHref,
 	reference,
+	showGuests,
 	showMessages,
+	showStay,
 }: {
+	/** First activity item's section href; null when the order has none. */
+	activityHref: string | null;
 	reference: string;
+	showGuests: boolean;
 	showMessages: boolean;
+	showStay: boolean;
 }) {
 	const pathname = usePathname();
 	const root = `/order/${encodeURIComponent(reference)}`;
 
 	const sections: Section[] = [
 		{ href: root, key: "overview", label: "Overview" },
-		{ href: `${root}/stay`, key: "stay", label: "Stay" },
-		{ href: `${root}/guests`, key: "guests", label: "Guests" },
 	];
 	if (showMessages) {
-		sections.splice(1, 0, {
+		sections.push({
 			href: `${root}/messages`,
 			key: "messages",
 			label: "Messages",
 		});
+	}
+	if (showStay) {
+		sections.push({ href: `${root}/stay`, key: "stay", label: "Stay" });
+	}
+	if (activityHref) {
+		sections.push({ href: activityHref, key: "activity", label: "Activity" });
+	}
+	if (showGuests) {
+		sections.push({ href: `${root}/guests`, key: "guests", label: "Guests" });
 	}
 
 	return (
@@ -44,8 +58,10 @@ export function OrderSectionNav({
 				const active =
 					section.key === "overview"
 						? pathname === root
-						: pathname === section.href ||
-							pathname.startsWith(`${section.href}/`);
+						: section.key === "activity"
+							? pathname.startsWith(`${root}/activity/`)
+							: pathname === section.href ||
+								pathname.startsWith(`${section.href}/`);
 				return (
 					<Link
 						aria-current={active ? "page" : undefined}

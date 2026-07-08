@@ -1,15 +1,10 @@
 "use client";
 
 import { Button } from "@workspace/ui/components/button";
-import { Checkbox } from "@workspace/ui/components/checkbox";
 import { Input } from "@workspace/ui/components/input";
 import { Label } from "@workspace/ui/components/label";
 import { NativeSelect } from "@workspace/ui/components/native-select";
 import { Skeleton } from "@workspace/ui/components/skeleton";
-import { Textarea } from "@workspace/ui/components/textarea";
-import { cn } from "@workspace/ui/lib/utils";
-import { Check, ChevronLeft, ChevronRight } from "lucide-react";
-import { type ReactNode, useState } from "react";
 import {
 	type ActivityBookingDescription,
 	type ActivityBookingDraft,
@@ -20,6 +15,8 @@ import {
 	placeAsksRoom,
 	resolvePlaceId,
 } from "@/lib/activities/booking-details";
+import { ActivityQuestionControl } from "./activity-question-control";
+import { PassengerStepCarousel } from "./passenger-step-carousel";
 import type {
 	ActivityBookingEntry,
 	UseActivityBookingDetails,
@@ -34,100 +31,6 @@ interface ActivityQuestionsFormProps {
 type ReadyActivityBookingEntry = ActivityBookingEntry & {
 	state: Extract<ActivityBookingEntry["state"], { status: "ready" }>;
 };
-
-function inputTypeFor(dataFormat: string | null): string {
-	switch (dataFormat) {
-		case "EMAIL_ADDRESS":
-			return "email";
-		case "PHONE_NUMBER":
-			return "tel";
-		default:
-			return "text";
-	}
-}
-
-function QuestionControl({
-	entry,
-	value,
-	invalid,
-	onChange,
-}: {
-	entry: ActivityQuestionEntry;
-	value: string;
-	invalid: boolean;
-	onChange: (value: string) => void;
-}) {
-	const { field, key } = entry;
-
-	if (isBooleanField(field)) {
-		return (
-			<label className="flex items-start gap-2" htmlFor={key}>
-				<Checkbox
-					aria-invalid={invalid}
-					checked={value === "true"}
-					id={key}
-					onCheckedChange={(checked) =>
-						onChange(checked === true ? "true" : "")
-					}
-				/>
-				<span className="text-sm leading-tight">{field.label}</span>
-			</label>
-		);
-	}
-
-	// Bokun multi-select required questions are rare; a single choice keeps the
-	// answer payload valid. Revisit if a multi-value required question appears.
-	if (field.selectFromOptions && field.options.length > 0) {
-		return (
-			<div className="flex flex-col gap-1.5">
-				<Label htmlFor={key}>{field.label}</Label>
-				<NativeSelect
-					aria-invalid={invalid}
-					className="w-full"
-					id={key}
-					onChange={(event) => onChange(event.target.value)}
-					value={value}
-				>
-					<option value="">Select an option</option>
-					{field.options.map((option) => (
-						<option key={option.value} value={option.value}>
-							{option.label}
-						</option>
-					))}
-				</NativeSelect>
-			</div>
-		);
-	}
-
-	if (field.dataType.toUpperCase() === "LONG_TEXT") {
-		return (
-			<div className="flex flex-col gap-1.5">
-				<Label htmlFor={key}>{field.label}</Label>
-				<Textarea
-					aria-invalid={invalid}
-					id={key}
-					onChange={(event) => onChange(event.target.value)}
-					rows={3}
-					value={value}
-				/>
-			</div>
-		);
-	}
-
-	const isDate = field.dataType.toUpperCase() === "DATE";
-	return (
-		<div className="flex flex-col gap-1.5">
-			<Label htmlFor={key}>{field.label}</Label>
-			<Input
-				aria-invalid={invalid}
-				id={key}
-				onChange={(event) => onChange(event.target.value)}
-				type={isDate ? "date" : inputTypeFor(field.dataFormat)}
-				value={value}
-			/>
-		</div>
-	);
-}
 
 function PlaceControl({
 	cartItemId,
@@ -212,101 +115,6 @@ function hasMainContactQuestions(
 	);
 }
 
-/**
- * One passenger at a time with a numbered step indicator, so a large party does
- * not turn into a long scroll of repeated question blocks. Steps are freely
- * navigable (the overall submit gate still enforces completeness); the indicator
- * marks done passengers and flags any left empty once a submit is attempted.
- */
-function PassengerCarousel({
-	groups,
-	draft,
-	showErrors,
-	renderQuestion,
-}: {
-	groups: ActivityPassengerGroup[];
-	draft: ActivityBookingDraft;
-	showErrors: boolean;
-	renderQuestion: (question: ActivityQuestionEntry) => ReactNode;
-}) {
-	const [step, setStep] = useState(0);
-	const active = Math.min(step, groups.length - 1);
-	const group = groups[active];
-	if (!group) {
-		return null;
-	}
-
-	return (
-		<div className="flex flex-col gap-3">
-			<div className="flex flex-wrap items-center gap-1.5">
-				{groups.map((entry, index) => {
-					const complete = isPassengerComplete(entry, draft);
-					const isActive = index === active;
-					return (
-						<button
-							aria-current={isActive}
-							aria-label={entry.label}
-							className={cn(
-								"flex size-7 items-center justify-center rounded-full border font-medium text-xs transition-colors",
-								isActive
-									? "border-primary bg-primary text-primary-foreground"
-									: complete
-										? "border-emerald-500 text-emerald-600 dark:text-emerald-400"
-										: showErrors
-											? "border-destructive text-destructive"
-											: "border-border text-muted-foreground",
-							)}
-							key={entry.participantIndex}
-							onClick={() => setStep(index)}
-							type="button"
-						>
-							{complete && !isActive ? (
-								<Check className="size-3.5" />
-							) : (
-								index + 1
-							)}
-						</button>
-					);
-				})}
-			</div>
-
-			<div className="flex items-center justify-between">
-				<p className="font-medium text-sm">{group.label}</p>
-				<span className="text-muted-foreground text-xs">
-					Guest {active + 1} of {groups.length}
-				</span>
-			</div>
-
-			{group.questions.map(renderQuestion)}
-
-			<div className="flex items-center justify-between gap-2 pt-1">
-				<Button
-					disabled={active === 0}
-					onClick={() => setStep((value) => Math.max(0, value - 1))}
-					size="sm"
-					type="button"
-					variant="ghost"
-				>
-					<ChevronLeft className="size-4" />
-					Back
-				</Button>
-				<Button
-					disabled={active >= groups.length - 1}
-					onClick={() =>
-						setStep((value) => Math.min(groups.length - 1, value + 1))
-					}
-					size="sm"
-					type="button"
-					variant="outline"
-				>
-					Next
-					<ChevronRight className="size-4" />
-				</Button>
-			</div>
-		</div>
-	);
-}
-
 function ItemQuestions({
 	entry,
 	description,
@@ -326,8 +134,9 @@ function ItemQuestions({
 	const asksRoom = placeAsksRoom(description.pickup, pickupId);
 
 	const renderQuestion = (question: ActivityQuestionEntry) => (
-		<QuestionControl
-			entry={question}
+		<ActivityQuestionControl
+			field={question.field}
+			id={question.key}
 			invalid={answerInvalid(question, draft, showErrors)}
 			key={question.key}
 			onChange={(value) => setAnswer(item.id, question.key, value)}
@@ -375,11 +184,14 @@ function ItemQuestions({
 			{description.activityQuestions.map(renderQuestion)}
 
 			{description.passengers.length > 1 ? (
-				<PassengerCarousel
-					draft={draft}
-					groups={description.passengers}
-					renderQuestion={renderQuestion}
+				<PassengerStepCarousel
 					showErrors={showErrors}
+					steps={description.passengers.map((group) => ({
+						complete: isPassengerComplete(group, draft),
+						content: group.questions.map(renderQuestion),
+						key: String(group.participantIndex),
+						label: group.label,
+					}))}
 				/>
 			) : (
 				description.passengers.map((group) => (
@@ -415,8 +227,9 @@ export function ActivityMainContactQuestions({
 			{visible.map((entry, index) => {
 				const { draft, item } = entry;
 				const renderQuestion = (question: ActivityQuestionEntry) => (
-					<QuestionControl
-						entry={question}
+					<ActivityQuestionControl
+						field={question.field}
+						id={question.key}
 						invalid={answerInvalid(question, draft, showErrors)}
 						key={question.key}
 						onChange={(value) =>

@@ -158,6 +158,8 @@ export interface OrderConfirmationStay {
 export interface OrderConfirmationActivity {
 	activityDate: string;
 	imageUrl: string | null;
+	/** Provider code of the product booking; keys ticket/invoice PDF fetches. */
+	productConfirmationCode: string | null;
 	title: string;
 	totalParticipants: number;
 }

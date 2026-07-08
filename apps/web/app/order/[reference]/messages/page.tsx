@@ -1,6 +1,7 @@
 import {
 	type ConversationMessageDto,
 	conversationChannelName,
+	INTERNAL_CONVERSATION_PROVIDER,
 	type OrderConversationSummary,
 } from "@workspace/core/commerce";
 import type { Metadata } from "next";
@@ -21,13 +22,15 @@ interface OrderMessagesPageProps {
 	params: Promise<{ reference: string }>;
 }
 
-/** Prefer a live thread, else the first conversation, else none. */
+/** Prefer a chat-ready conversation, else the first one, else none. */
 function primaryConversation(
 	conversations: OrderConversationSummary[],
 ): OrderConversationSummary | null {
 	const live = conversations.find(
 		(conversation) =>
-			conversation.status === "active" && conversation.externalThreadId,
+			conversation.status === "active" &&
+			(conversation.externalThreadId !== null ||
+				conversation.provider === INTERNAL_CONVERSATION_PROVIDER),
 	);
 	return live ?? conversations[0] ?? null;
 }

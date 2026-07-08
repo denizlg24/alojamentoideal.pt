@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX "conversations_internal_order_uidx" ON "conversations" USING btree ("order_id") WHERE "conversations"."provider" = 'internal';

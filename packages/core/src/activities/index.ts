@@ -1,4 +1,19 @@
 export type {
+	ActivityAnsweredQuestion,
+	ActivityBookingPassengerQuestions,
+	ActivityBookingQuestionGroup,
+	ActivityBookingQuestionsSnapshot,
+	BookingQuestionAnswerGroup,
+	BookingQuestionAnswerUpdate,
+	BookingQuestionsCompleteness,
+} from "./booking-questions";
+export {
+	applyBookingQuestionAnswers,
+	buildBookingQuestionsAnswerBody,
+	normalizeActivityBookingQuestions,
+	summarizeBookingQuestionsCompleteness,
+} from "./booking-questions";
+export type {
 	ActivityBookingSchema,
 	ActivityPassengerQuestions,
 	ActivityPickupSchema,
