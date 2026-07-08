@@ -35,13 +35,6 @@ async function activityTransferDestination(
 	if (order.activityItemCount === 0) {
 		return null;
 	}
-	if (order.accommodationItemCount > 0) {
-		throw new CommerceError(
-			"order_not_payable",
-			"Mixed home and activity checkout is not available yet.",
-			409,
-		);
-	}
 
 	const settings = await getRuntimeSettings();
 	const destination = String(
@@ -156,7 +149,16 @@ export async function buildPaymentIntentResponse(
 	}
 
 	const stripeStartedAt = performance.now();
-	const transferDestination = await activityTransferDestination(order);
+	// Activity-only orders settle wholly to Detours (on_behalf_of + full-charge
+	// transfer). Mixed orders keep the platform as merchant of record and route
+	// only the activity share via transfer_data.amount. A mixed order whose
+	// activity share is zero has nothing to transfer (Stripe rejects amount 0).
+	const mixedOrder =
+		order.accommodationItemCount > 0 && order.activityItemCount > 0;
+	const transferDestination =
+		mixedOrder && order.activityTotalMinor <= 0
+			? null
+			: await activityTransferDestination(order);
 	const snapshot = await createOrUpdatePaymentIntent(stripe, {
 		amountMinor: order.totalMinor,
 		cartId,
@@ -165,9 +167,11 @@ export async function buildPaymentIntentResponse(
 		existingPaymentIntentId: order.stripePaymentIntentId,
 		// Deterministic per order: one intent per draft order, retry-safe.
 		idempotencyKey: `pi:${order.orderId}`,
-		onBehalfOf: transferDestination,
+		onBehalfOf: mixedOrder ? null : transferDestination,
 		orderId: order.orderId,
 		publicReference: order.publicReference,
+		transferAmountMinor:
+			mixedOrder && transferDestination ? order.activityTotalMinor : null,
 		transferDestination,
 	});
 	const stripeMs = elapsedSince(stripeStartedAt);

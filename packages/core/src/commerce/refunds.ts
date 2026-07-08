@@ -153,6 +153,18 @@ export class OrderRefundService {
 			);
 		}
 
+		const [activityItem] = await this.#db
+			.select({ id: orderItemTable.id })
+			.from(orderItemTable)
+			.where(
+				and(
+					eq(orderItemTable.orderId, order.id),
+					eq(orderItemTable.type, "activity"),
+				),
+			)
+			.limit(1);
+		const hasActivityItems = Boolean(activityItem);
+
 		const refundableBefore = order.amountPaidMinor - order.amountRefundedMinor;
 		if (input.amountMinor > refundableBefore) {
 			throw new CommerceError(
@@ -245,6 +257,10 @@ export class OrderRefundService {
 				idempotencyKey,
 				paymentIntentId: order.stripePaymentIntentId,
 				reason: stripeRefundReason(input.reason),
+				// Activity orders are destination charges: reverse the transfer so
+				// the refunded share comes back from Detours (proportionally on
+				// partial refunds).
+				reverseTransfer: hasActivityItems,
 			});
 		} catch (error) {
 			await this.#db

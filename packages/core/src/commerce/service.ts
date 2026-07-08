@@ -879,17 +879,24 @@ export class CommerceService {
 			);
 		}
 
-		const itemTypes = await this.#db
-			.select({ type: orderItemTable.type })
+		const items = await this.#db
+			.select({
+				totalMinor: orderItemTable.totalMinor,
+				type: orderItemTable.type,
+			})
 			.from(orderItemTable)
 			.where(eq(orderItemTable.orderId, row.id));
+		const activityItems = items.filter((item) => item.type === "activity");
 
 		return {
-			accommodationItemCount: itemTypes.filter(
+			accommodationItemCount: items.filter(
 				(item) => item.type === "accommodation",
 			).length,
-			activityItemCount: itemTypes.filter((item) => item.type === "activity")
-				.length,
+			activityItemCount: activityItems.length,
+			activityTotalMinor: activityItems.reduce(
+				(sum, item) => sum + item.totalMinor,
+				0,
+			),
 			cartId: row.cartId,
 			checkoutExpiresAt: row.checkoutExpiresAt
 				? row.checkoutExpiresAt.toISOString()
@@ -6457,6 +6464,11 @@ export class CommerceService {
 			idempotencyKey: prepared.idempotencyKey,
 			paymentIntentId: prepared.paymentIntentId,
 			reason: "requested_by_customer",
+			// Activity orders are destination charges; without a reversal the
+			// transferred share would stay on the Detours balance after the refund.
+			reverseTransfer: prepared.context.bookings.some(
+				(booking) => booking.itemType === "activity",
+			),
 		});
 
 		const result = await this.#db.transaction(async (tx) => {

@@ -58,6 +58,26 @@ describe("createRefund", () => {
 		expect(calls[0]?.opts.idempotencyKey).toBe("refund:order-2:pi_y:full");
 	});
 
+	test("reverses the destination transfer when requested", async () => {
+		const { calls, stripe } = fakeStripe();
+		await createRefund(stripe, {
+			idempotencyKey: "refund:order-3:pi_z:full",
+			paymentIntentId: "pi_z",
+			reverseTransfer: true,
+		});
+		expect(calls[0]?.params.reverse_transfer).toBe(true);
+	});
+
+	test("omits reverse_transfer for plain platform charges", async () => {
+		const { calls, stripe } = fakeStripe();
+		await createRefund(stripe, {
+			idempotencyKey: "refund:order-4:pi_w:full",
+			paymentIntentId: "pi_w",
+			reverseTransfer: false,
+		});
+		expect(calls[0]?.params.reverse_transfer).toBeUndefined();
+	});
+
 	test("rejects a missing caller-provided idempotency key before Stripe", async () => {
 		const { calls, stripe } = fakeStripe();
 		await expect(

@@ -23,10 +23,16 @@ export interface PaymentIntentParams {
 	orderId: string;
 	publicReference: string;
 	/**
-	 * Stripe Connect destination for a destination charge. When set, the whole
-	 * charge is transferred to this connected account (no `transfer_data.amount`),
-	 * matching the activity-only money split (data-architecture 2.4). Left unset
-	 * for accommodation-only orders, which settle on the platform balance.
+	 * Minor-unit portion of the charge routed to `transferDestination`. Set for
+	 * mixed orders so only the activity share reaches the connected account; left
+	 * unset for activity-only orders, where the whole charge transfers.
+	 */
+	transferAmountMinor?: number | null;
+	/**
+	 * Stripe Connect destination for a destination charge. Activity-only orders
+	 * omit `transferAmountMinor`, so the whole charge is transferred, matching
+	 * the activity-only money split (data-architecture 2.4). Left unset for
+	 * accommodation-only orders, which settle on the platform balance.
 	 */
 	transferDestination?: string | null;
 }
@@ -142,14 +148,28 @@ export async function createOrUpdatePaymentIntent(
 			);
 		}
 
-		if (
-			UPDATABLE_STATUSES.has(existing.status) &&
-			existing.amount !== params.amountMinor
-		) {
-			const updated = await stripe.paymentIntents.update(existing.id, {
-				amount: params.amountMinor,
-			});
-			return toSnapshot(updated);
+		if (UPDATABLE_STATUSES.has(existing.status)) {
+			const updateParams: Stripe.PaymentIntentUpdateParams = {};
+			if (existing.amount !== params.amountMinor) {
+				updateParams.amount = params.amountMinor;
+			}
+			// `transfer_data.destination` is immutable after creation, so only the
+			// transferred amount can drift and only intents created with
+			// `transfer_data` accept a patch.
+			if (
+				existing.transfer_data &&
+				params.transferAmountMinor != null &&
+				existing.transfer_data.amount !== params.transferAmountMinor
+			) {
+				updateParams.transfer_data = { amount: params.transferAmountMinor };
+			}
+			if (Object.keys(updateParams).length > 0) {
+				const updated = await stripe.paymentIntents.update(
+					existing.id,
+					updateParams,
+				);
+				return toSnapshot(updated);
+			}
 		}
 
 		return toSnapshot(existing);
@@ -164,13 +184,23 @@ export async function createOrUpdatePaymentIntent(
 			environment: params.environment,
 			orderId: params.orderId,
 			publicReference: params.publicReference,
+			...(params.transferAmountMinor != null
+				? { activityTotalMinor: String(params.transferAmountMinor) }
+				: {}),
 		},
 	};
 
 	if (params.transferDestination) {
-		// Destination charge with no `amount`: the full charge routes to the
-		// connected account, so an activity-only order settles to Detours.
-		createParams.transfer_data = { destination: params.transferDestination };
+		// Destination charge. Without `amount` the full charge routes to the
+		// connected account (activity-only order settles to Detours); with
+		// `amount` only the activity share transfers (mixed order, platform keeps
+		// the stay portion and stays merchant of record).
+		createParams.transfer_data = {
+			destination: params.transferDestination,
+			...(params.transferAmountMinor != null
+				? { amount: params.transferAmountMinor }
+				: {}),
+		};
 		if (params.onBehalfOf) {
 			createParams.on_behalf_of = params.onBehalfOf;
 		}
