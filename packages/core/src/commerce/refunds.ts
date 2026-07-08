@@ -7,7 +7,12 @@ import {
 	order as orderTable,
 } from "@workspace/db";
 import { and, asc, eq, sql } from "drizzle-orm";
-import type { RefundRequest, RefundResult } from "../integrations/stripe";
+import type {
+	RefundRequest,
+	RefundResult,
+	TransferReversalRequest,
+	TransferReversalResult,
+} from "../integrations/stripe";
 import { trackEvent } from "../observability";
 import { CommerceError } from "./errors";
 
@@ -16,6 +21,14 @@ export interface OrderRefundServiceOptions {
 	now?: () => Date;
 	/** Issues the Stripe refund; absent when Stripe is not configured. */
 	refundPayment?: (request: RefundRequest) => Promise<RefundResult>;
+	/**
+	 * Reverses the Detours share of a destination charge alongside the refund
+	 * (legacy parity: explicit `transfers.createReversal`, not the proportional
+	 * `reverse_transfer` flag). Absent when Stripe is not configured.
+	 */
+	reverseActivityTransfer?: (
+		request: TransferReversalRequest,
+	) => Promise<TransferReversalResult | null>;
 }
 
 export interface RefundOrderInput {
@@ -37,10 +50,51 @@ export interface RefundOrderResult {
 	refundedTotalMinor: number;
 	/** Amount still refundable after this refund. */
 	refundableMinor: number;
+	/**
+	 * Set when the refund succeeded but the Detours transfer reversal failed;
+	 * the reversal must then be completed manually in the Stripe dashboard.
+	 */
+	transferReversalError?: string;
 }
 
 /** Preset refund fractions surfaced in the operator UI. */
 export const REFUND_PRESET_PERCENTS = [25, 50, 100] as const;
+
+/**
+ * How much of a refund must be pulled back from the Detours connected account.
+ * Pure so the attribution rules stay testable:
+ * - activity-only order: the whole refund came from transferred money
+ * - mixed order, refund attributed to an activity item: the whole refund
+ * - mixed order, refund attributed to a stay item: nothing
+ * - mixed order, unattributed: prorated by the activity share of the total
+ * Always capped at the activity total, since no more than that was transferred.
+ */
+export function activityReversalAmountMinor(input: {
+	activityTotalMinor: number;
+	attributedItemType: "accommodation" | "activity" | null;
+	orderTotalMinor: number;
+	refundMinor: number;
+}): number {
+	if (input.activityTotalMinor <= 0 || input.refundMinor <= 0) {
+		return 0;
+	}
+	if (input.attributedItemType === "accommodation") {
+		return 0;
+	}
+	const cap = Math.min(input.refundMinor, input.activityTotalMinor);
+	if (
+		input.attributedItemType === "activity" ||
+		input.activityTotalMinor >= input.orderTotalMinor
+	) {
+		return cap;
+	}
+	return Math.min(
+		cap,
+		Math.round(
+			(input.refundMinor * input.activityTotalMinor) / input.orderTotalMinor,
+		),
+	);
+}
 
 /**
  * Minor-unit amount for a preset percentage of the still-refundable total. 100%
@@ -99,11 +153,13 @@ export class OrderRefundService {
 	readonly #db: Database;
 	readonly #now: () => Date;
 	readonly #refundPayment: OrderRefundServiceOptions["refundPayment"];
+	readonly #reverseActivityTransfer: OrderRefundServiceOptions["reverseActivityTransfer"];
 
 	constructor(options: OrderRefundServiceOptions) {
 		this.#db = options.db;
 		this.#now = options.now ?? (() => new Date());
 		this.#refundPayment = options.refundPayment;
+		this.#reverseActivityTransfer = options.reverseActivityTransfer;
 	}
 
 	async listOrderRefunds(orderId: string): Promise<OrderRefund[]> {
@@ -138,6 +194,7 @@ export class OrderRefundService {
 				currency: orderTable.currency,
 				id: orderTable.id,
 				stripePaymentIntentId: orderTable.stripePaymentIntentId,
+				totalMinor: orderTable.totalMinor,
 			})
 			.from(orderTable)
 			.where(eq(orderTable.id, input.orderId))
@@ -153,17 +210,21 @@ export class OrderRefundService {
 			);
 		}
 
-		const [activityItem] = await this.#db
-			.select({ id: orderItemTable.id })
+		const [activityTotals] = await this.#db
+			.select({
+				totalMinor:
+					sql<number>`coalesce(sum(${orderItemTable.totalMinor}), 0)`.mapWith(
+						Number,
+					),
+			})
 			.from(orderItemTable)
 			.where(
 				and(
 					eq(orderItemTable.orderId, order.id),
 					eq(orderItemTable.type, "activity"),
 				),
-			)
-			.limit(1);
-		const hasActivityItems = Boolean(activityItem);
+			);
+		const activityTotalMinor = activityTotals?.totalMinor ?? 0;
 
 		const refundableBefore = order.amountPaidMinor - order.amountRefundedMinor;
 		if (input.amountMinor > refundableBefore) {
@@ -175,9 +236,10 @@ export class OrderRefundService {
 		}
 
 		const orderItemId = input.orderItemId ?? null;
+		let attributedItemType: "accommodation" | "activity" | null = null;
 		if (orderItemId) {
 			const [item] = await this.#db
-				.select({ id: orderItemTable.id })
+				.select({ id: orderItemTable.id, type: orderItemTable.type })
 				.from(orderItemTable)
 				.where(
 					and(
@@ -193,6 +255,10 @@ export class OrderRefundService {
 					422,
 				);
 			}
+			attributedItemType =
+				item.type === "activity" || item.type === "accommodation"
+					? item.type
+					: null;
 		}
 
 		// Reserve the amount on the order aggregate before hitting Stripe. The
@@ -257,10 +323,6 @@ export class OrderRefundService {
 				idempotencyKey,
 				paymentIntentId: order.stripePaymentIntentId,
 				reason: stripeRefundReason(input.reason),
-				// Activity orders are destination charges: reverse the transfer so
-				// the refunded share comes back from Detours (proportionally on
-				// partial refunds).
-				reverseTransfer: hasActivityItems,
 			});
 		} catch (error) {
 			await this.#db
@@ -288,13 +350,60 @@ export class OrderRefundService {
 			);
 		}
 
+		// Legacy-parity transfer reversal: pull the activity share of the refund
+		// back from Detours with an explicit reversal amount. Runs after the
+		// refund like the legacy app did; a reversal failure never unwinds the
+		// refund, it is surfaced for manual follow-up in the Stripe dashboard.
+		const reversalAmountMinor = activityReversalAmountMinor({
+			activityTotalMinor,
+			attributedItemType,
+			orderTotalMinor: order.totalMinor,
+			refundMinor: input.amountMinor,
+		});
+		let transferReversal: TransferReversalResult | null = null;
+		let transferReversalError: string | undefined;
+		if (reversalAmountMinor > 0) {
+			const reverseActivityTransfer = this.#reverseActivityTransfer;
+			if (!reverseActivityTransfer) {
+				transferReversalError =
+					"Transfer reversals are unavailable: Stripe is not configured.";
+			} else {
+				try {
+					transferReversal = await reverseActivityTransfer({
+						amountMinor: reversalAmountMinor,
+						idempotencyKey: `${idempotencyKey}:reversal`,
+						paymentIntentId: order.stripePaymentIntentId,
+					});
+				} catch (error) {
+					transferReversalError = describeRefundError(error);
+				}
+			}
+			if (transferReversalError) {
+				trackEvent({
+					metadata: {
+						amountMinor: reversalAmountMinor,
+						error: transferReversalError,
+						orderId: order.id,
+						refundId: refund.id,
+					},
+					name: "order_refund_transfer_reversal_failed",
+					provider: "stripe",
+					severity: "error",
+					type: "integration",
+				});
+			}
+		}
+
 		const settledAt = this.#now();
 		const [record] = await this.#db
 			.update(orderRefundTable)
 			.set({
 				completedAt: settledAt,
-				stripeRefundId: refund.id,
+				lastErrorMessage: transferReversalError ?? null,
 				status: "succeeded",
+				stripeRefundId: refund.id,
+				stripeTransferReversalId: transferReversal?.id ?? null,
+				transferReversalAmountMinor: transferReversal?.amountMinor ?? null,
 				updatedAt: settledAt,
 			})
 			.where(eq(orderRefundTable.id, recordId))
@@ -325,6 +434,7 @@ export class OrderRefundService {
 			refund: record,
 			refundableMinor: order.amountPaidMinor - refundedTotalMinor,
 			refundedTotalMinor,
+			...(transferReversalError ? { transferReversalError } : {}),
 		};
 	}
 }

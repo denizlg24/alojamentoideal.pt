@@ -27,6 +27,11 @@ export {
 	type RefundResult,
 } from "./refunds";
 export {
+	reverseChargeTransfer,
+	type TransferReversalRequest,
+	type TransferReversalResult,
+} from "./transfers";
+export {
 	constructStripeEvent,
 	getStripeWebhookSecret,
 	interpretStripeEvent,

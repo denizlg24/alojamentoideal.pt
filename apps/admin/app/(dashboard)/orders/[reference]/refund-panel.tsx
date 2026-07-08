@@ -24,6 +24,10 @@ import { formatMoneyMinor } from "@/lib/format";
 interface RefundAttributionItem {
 	amountMinor: number | null;
 	id: string;
+	/** Cancellation-policy hint for this item; null when not evaluable. */
+	policyLabel: string | null;
+	/** Policy-derived refund suggestion in minor units; advisory only. */
+	policySuggestedAmountMinor: number | null;
 	title: string;
 }
 
@@ -96,6 +100,10 @@ export function RefundPanel({
 
 	const amountMinor = useMemo(() => eurosToMinor(amount), [amount]);
 	const overRefundable = amountMinor !== null && amountMinor > refundableMinor;
+	const attributedItem = useMemo(
+		() => items.find((item) => item.id === orderItemId) ?? null,
+		[items, orderItemId],
+	);
 
 	function reset() {
 		setAmount("");
@@ -140,9 +148,17 @@ export function RefundPanel({
 				setError(body?.error ?? "Could not issue the refund.");
 				return;
 			}
+			const body = (await response.json().catch(() => null)) as {
+				data?: { transferReversalError?: string };
+			} | null;
 			toast.success(
 				`Refunded ${formatMoneyMinor(amountMinor, currency)} to the guest.`,
 			);
+			if (body?.data?.transferReversalError) {
+				toast.warning(
+					`Detours transfer reversal failed: ${body.data.transferReversalError}. Reverse it manually in Stripe.`,
+				);
+			}
 			setOpen(false);
 			reset();
 			router.refresh();
@@ -240,6 +256,40 @@ export function RefundPanel({
 								</NativeSelectOption>
 							))}
 						</NativeSelect>
+						{attributedItem?.policyLabel ? (
+							<div className="flex flex-wrap items-center gap-2 pt-0.5">
+								<p className="text-muted-foreground text-xs">
+									{attributedItem.policyLabel}
+								</p>
+								{attributedItem.policySuggestedAmountMinor !== null &&
+								attributedItem.policySuggestedAmountMinor > 0 ? (
+									<Button
+										onClick={() =>
+											setAmount(
+												minorToEuros(
+													Math.min(
+														attributedItem.policySuggestedAmountMinor ?? 0,
+														refundableMinor,
+													),
+												),
+											)
+										}
+										size="sm"
+										type="button"
+										variant="secondary"
+									>
+										Use{" "}
+										{formatMoneyMinor(
+											Math.min(
+												attributedItem.policySuggestedAmountMinor,
+												refundableMinor,
+											),
+											currency,
+										)}
+									</Button>
+								) : null}
+							</div>
+						) : null}
 					</div>
 
 					<div className="space-y-1.5">

@@ -1,9 +1,79 @@
 import { describe, expect, it } from "bun:test";
 import {
+	activityReversalAmountMinor,
 	REFUND_PRESET_PERCENTS,
 	refundPresetAmountMinor,
 	stripeRefundReason,
 } from "./refunds";
+
+describe("activityReversalAmountMinor", () => {
+	it("reverses the whole refund on an activity-only order", () => {
+		expect(
+			activityReversalAmountMinor({
+				activityTotalMinor: 10_000,
+				attributedItemType: null,
+				orderTotalMinor: 10_000,
+				refundMinor: 4_000,
+			}),
+		).toBe(4_000);
+	});
+
+	it("reverses the whole refund when attributed to an activity item on a mixed order", () => {
+		expect(
+			activityReversalAmountMinor({
+				activityTotalMinor: 4_500,
+				attributedItemType: "activity",
+				orderTotalMinor: 30_000,
+				refundMinor: 3_000,
+			}),
+		).toBe(3_000);
+	});
+
+	it("reverses nothing when attributed to a stay item", () => {
+		expect(
+			activityReversalAmountMinor({
+				activityTotalMinor: 4_500,
+				attributedItemType: "accommodation",
+				orderTotalMinor: 30_000,
+				refundMinor: 3_000,
+			}),
+		).toBe(0);
+	});
+
+	it("prorates unattributed refunds on mixed orders by activity share", () => {
+		// 4500 of 30000 is 15%; 15% of 2000 = 300.
+		expect(
+			activityReversalAmountMinor({
+				activityTotalMinor: 4_500,
+				attributedItemType: null,
+				orderTotalMinor: 30_000,
+				refundMinor: 2_000,
+			}),
+		).toBe(300);
+	});
+
+	it("caps the reversal at the activity total", () => {
+		expect(
+			activityReversalAmountMinor({
+				activityTotalMinor: 1_000,
+				attributedItemType: "activity",
+				orderTotalMinor: 30_000,
+				refundMinor: 5_000,
+			}),
+		).toBe(1_000);
+	});
+
+	it("reverses nothing for accommodation-only orders", () => {
+		expect(
+			activityReversalAmountMinor({
+				activityTotalMinor: 0,
+				attributedItemType: null,
+				orderTotalMinor: 30_000,
+				refundMinor: 5_000,
+			}),
+		).toBe(0);
+	});
+});
 
 describe("refundPresetAmountMinor", () => {
 	it("returns the exact remainder for 100% (no rounding drift)", () => {
