@@ -9,6 +9,7 @@ import {
 	ActivityCacheRepository,
 	type ActivityCacheScope,
 	getActivityCacheConfig,
+	getActivityCacheConfigFromSettings,
 } from "@workspace/core/activities/cache";
 import {
 	type BokunClient,
@@ -125,7 +126,7 @@ export async function loadActivityAvailability(
 	id: string,
 	options: { start: string; end: string; currency?: string },
 ): Promise<ActivityAvailabilityCalendar> {
-	const config = getActivityCacheConfig();
+	const config = await getActivityCacheConfigFromSettings();
 	const currency = options.currency ?? config.currency ?? ACTIVITY_CURRENCY;
 	if (!config.activityIds.includes(id)) {
 		return { currency, departuresByDate: {} };

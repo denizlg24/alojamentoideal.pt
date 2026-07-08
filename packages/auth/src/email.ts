@@ -223,7 +223,16 @@ export interface OrderEmailStay {
 	title: string;
 }
 
+/** One booked activity/tour, pre-formatted for display in the order emails. */
+export interface OrderEmailActivity {
+	date: string;
+	image: string;
+	participants: string;
+	title: string;
+}
+
 export interface OrderConfirmationEmailInput {
+	activities: OrderEmailActivity[];
 	email: string;
 	orderNumber: string;
 	stays: OrderEmailStay[];
@@ -242,6 +251,8 @@ function safeSubjectPart(value: string): string {
 
 const STAYS_BLOCK_START = "__STAYS_START__";
 const STAYS_BLOCK_END = "__STAYS_END__";
+const ACTIVITIES_BLOCK_START = "__ACTIVITIES_START__";
+const ACTIVITIES_BLOCK_END = "__ACTIVITIES_END__";
 
 const FALLBACK_STAY: OrderEmailStay = {
 	checkIn: "To be confirmed",
@@ -254,6 +265,30 @@ const FALLBACK_STAY: OrderEmailStay = {
 
 function primaryStay(stays: OrderEmailStay[]): OrderEmailStay {
 	return stays[0] ?? FALLBACK_STAY;
+}
+
+/** Total booked items on the order across stays and activities. */
+function orderItemCount(input: OrderConfirmationEmailInput): number {
+	return input.stays.length + input.activities.length;
+}
+
+/** First item's display title, preferring stays; falls back when empty. */
+function firstItemTitle(input: OrderConfirmationEmailInput): string {
+	return (
+		input.stays[0]?.title ?? input.activities[0]?.title ?? FALLBACK_STAY.title
+	);
+}
+
+/**
+ * "stay"/"stays" for an accommodation-only order (preserving the original
+ * wording); "booking"/"bookings" once an activity is involved, since "stay"
+ * does not fit a tour.
+ */
+function itemNoun(input: OrderConfirmationEmailInput, plural: boolean): string {
+	if (input.activities.length > 0) {
+		return plural ? "bookings" : "booking";
+	}
+	return plural ? "stays" : "stay";
 }
 
 function stayPlaceholders(
@@ -288,9 +323,10 @@ function expandStaysBlock(
 	if (start === -1 || end === -1 || end < start) {
 		return template;
 	}
-	const renderStays = stays.length > 0 ? stays : [FALLBACK_STAY];
+	// Activity-only orders have no stays, so the block renders nothing rather
+	// than a phantom fallback stay; every real order still has at least one item.
 	const block = template.slice(start + STAYS_BLOCK_START.length, end);
-	const repeated = renderStays
+	const repeated = stays
 		.map((stay) => applyPlaceholders(block, stayPlaceholders(stay, transform)))
 		.join("");
 	return (
@@ -300,30 +336,79 @@ function expandStaysBlock(
 	);
 }
 
-/** "Casa Azul" for one stay, "Casa Azul and 2 more stays" for several. */
-function staysSubjectLabel(stays: OrderEmailStay[]): string {
-	const first = safeSubjectPart(primaryStay(stays).title);
-	if (stays.length <= 1) {
+function activityPlaceholders(
+	activity: OrderEmailActivity,
+	transform: (value: string) => string,
+): Record<string, string> {
+	return {
+		ACTIVITY_DATE: transform(activity.date),
+		ACTIVITY_IMAGE: transform(activity.image),
+		ACTIVITY_PARTICIPANTS: transform(activity.participants),
+		ACTIVITY_TITLE: transform(activity.title),
+	};
+}
+
+/**
+ * Mirrors {@link expandStaysBlock} for the repeatable activity block
+ * (`__ACTIVITIES_START__` / `__ACTIVITIES_END__`). Renders nothing when the
+ * order has no activities, so an accommodation-only email drops the block.
+ */
+function expandActivitiesBlock(
+	template: string,
+	activities: OrderEmailActivity[],
+	transform: (value: string) => string,
+): string {
+	const start = template.indexOf(ACTIVITIES_BLOCK_START);
+	const end = template.indexOf(ACTIVITIES_BLOCK_END);
+	if (start === -1 || end === -1 || end < start) {
+		return template;
+	}
+	const block = template.slice(start + ACTIVITIES_BLOCK_START.length, end);
+	const repeated = activities
+		.map((activity) =>
+			applyPlaceholders(block, activityPlaceholders(activity, transform)),
+		)
+		.join("");
+	return (
+		template.slice(0, start) +
+		repeated +
+		template.slice(end + ACTIVITIES_BLOCK_END.length)
+	);
+}
+
+/** "Casa Azul" for one item, "Casa Azul and 2 more bookings" for several. */
+function orderSubjectLabel(input: OrderConfirmationEmailInput): string {
+	const first = safeSubjectPart(firstItemTitle(input));
+	const count = orderItemCount(input);
+	if (count <= 1) {
 		return first;
 	}
-	const extra = stays.length - 1;
-	return `${first} and ${extra} more ${extra === 1 ? "stay" : "stays"}`;
+	const extra = count - 1;
+	return `${first} and ${extra} more ${itemNoun(input, extra !== 1)}`;
 }
 
-/** Intro sentence: single-stay keeps the title, multi-stay counts them. */
-function staysIntroLine(stays: OrderEmailStay[]): string {
-	if (stays.length > 1) {
-		return `Your ${stays.length} stays are confirmed.`;
+/** Intro sentence tuned to the order's item type and count. */
+function orderIntroLine(input: OrderConfirmationEmailInput): string {
+	const count = orderItemCount(input);
+	if (count > 1) {
+		return `Your ${count} ${itemNoun(input, true)} are confirmed.`;
 	}
-	return `Your stay at ${primaryStay(stays).title} is confirmed.`;
+	if (input.stays.length === 1) {
+		return `Your stay at ${firstItemTitle(input)} is confirmed.`;
+	}
+	if (input.activities.length === 1) {
+		return `Your booking for ${firstItemTitle(input)} is confirmed.`;
+	}
+	return `Your stay at ${FALLBACK_STAY.title} is confirmed.`;
 }
 
-/** "Casa Azul" or "your 3 stays"; used mid-sentence in the pending email. */
-function staysPaymentLabel(stays: OrderEmailStay[]): string {
-	if (stays.length > 1) {
-		return `your ${stays.length} stays`;
+/** "Casa Azul" or "your 3 bookings"; used mid-sentence in the pending email. */
+function orderPaymentLabel(input: OrderConfirmationEmailInput): string {
+	const count = orderItemCount(input);
+	if (count > 1) {
+		return `your ${count} ${itemNoun(input, true)}`;
 	}
-	return primaryStay(stays).title;
+	return firstItemTitle(input);
 }
 
 /**
@@ -337,9 +422,14 @@ function orderEmailPlaceholders(
 	transform: (value: string) => string,
 ): Record<string, string> {
 	const first = primaryStay(input.stays);
+	const firstActivity = input.activities[0];
 	return {
 		ACCOMMODATION_IMAGE: transform(first.image),
 		ACCOMMODATION_TITLE: transform(first.title),
+		ACTIVITY_DATE: transform(firstActivity?.date ?? ""),
+		ACTIVITY_IMAGE: transform(firstActivity?.image ?? ""),
+		ACTIVITY_PARTICIPANTS: transform(firstActivity?.participants ?? ""),
+		ACTIVITY_TITLE: transform(firstActivity?.title ?? ""),
 		APP_NAME,
 		BILLING_ADDRESS: transform(input.billingAddress),
 		CARD_LAST_FOUR: transform(cardInfo),
@@ -352,49 +442,83 @@ function orderEmailPlaceholders(
 		MANAGE_URL: transform(input.manageUrl),
 		ORDER_NUMBER: transform(input.orderNumber),
 		PAYMENT_METHOD: transform(input.paymentMethod),
-		STAYS_INTRO: transform(staysIntroLine(input.stays)),
-		STAYS_PAYMENT_LABEL: transform(staysPaymentLabel(input.stays)),
+		STAYS_INTRO: transform(orderIntroLine(input)),
+		STAYS_PAYMENT_LABEL: transform(orderPaymentLabel(input)),
 		TOTAL_PRICE: transform(input.totalPrice),
 	};
 }
 
-/** Per-stay plain-text lines shared by the fallback bodies. */
-function staysFallbackText(stays: OrderEmailStay[]): string {
-	const renderStays = stays.length > 0 ? stays : [FALLBACK_STAY];
-	return renderStays
-		.map((stay) =>
+/** Per-item plain-text lines shared by the fallback bodies. */
+function orderFallbackText(input: OrderConfirmationEmailInput): string {
+	const lines: string[] = [];
+	for (const stay of input.stays) {
+		lines.push(
 			[
 				stay.title,
 				`Check-in: ${stay.checkIn}`,
 				`Check-out: ${stay.checkOut}`,
 				`Guests: ${stay.guests}`,
 			].join("\n"),
-		)
-		.join("\n\n");
+		);
+	}
+	for (const activity of input.activities) {
+		lines.push(
+			[
+				activity.title,
+				`Date: ${activity.date}`,
+				`Participants: ${activity.participants}`,
+			].join("\n"),
+		);
+	}
+	if (lines.length === 0) {
+		lines.push(
+			[
+				FALLBACK_STAY.title,
+				`Check-in: ${FALLBACK_STAY.checkIn}`,
+				`Check-out: ${FALLBACK_STAY.checkOut}`,
+				`Guests: ${FALLBACK_STAY.guests}`,
+			].join("\n"),
+		);
+	}
+	return lines.join("\n\n");
 }
 
-function staysFallbackHtml(stays: OrderEmailStay[]): string {
-	const renderStays = stays.length > 0 ? stays : [FALLBACK_STAY];
-	return renderStays
-		.map(
-			(stay) =>
-				`<p><strong>${escapeHtml(stay.title)}</strong><br>Check-in: ${escapeHtml(stay.checkIn)}<br>Check-out: ${escapeHtml(stay.checkOut)}<br>Guests: ${escapeHtml(stay.guests)}</p>`,
-		)
-		.join("");
+function orderFallbackHtml(input: OrderConfirmationEmailInput): string {
+	const blocks: string[] = [];
+	for (const stay of input.stays) {
+		blocks.push(
+			`<p><strong>${escapeHtml(stay.title)}</strong><br>Check-in: ${escapeHtml(stay.checkIn)}<br>Check-out: ${escapeHtml(stay.checkOut)}<br>Guests: ${escapeHtml(stay.guests)}</p>`,
+		);
+	}
+	for (const activity of input.activities) {
+		blocks.push(
+			`<p><strong>${escapeHtml(activity.title)}</strong><br>Date: ${escapeHtml(activity.date)}<br>Participants: ${escapeHtml(activity.participants)}</p>`,
+		);
+	}
+	if (blocks.length === 0) {
+		blocks.push(
+			`<p><strong>${escapeHtml(FALLBACK_STAY.title)}</strong><br>Check-in: ${escapeHtml(FALLBACK_STAY.checkIn)}<br>Check-out: ${escapeHtml(FALLBACK_STAY.checkOut)}<br>Guests: ${escapeHtml(FALLBACK_STAY.guests)}</p>`,
+		);
+	}
+	return blocks.join("");
 }
 
 export function buildOrderConfirmationEmail(
 	input: OrderConfirmationEmailInput,
 ): EmailMessage {
-	const subject = `Booking confirmed at ${staysSubjectLabel(input.stays)}`;
+	const subject = `Booking confirmed at ${orderSubjectLabel(input)}`;
 	const safeUrl = escapeHtml(input.manageUrl);
 	const cardInfo = input.cardLastFour ? ` ending in ${input.cardLastFour}` : "";
 
 	if (TEMPLATES.orderConfirmationHtml) {
 		const html = applyPlaceholders(
-			expandStaysBlock(
-				TEMPLATES.orderConfirmationHtml,
-				input.stays,
+			expandActivitiesBlock(
+				expandStaysBlock(
+					TEMPLATES.orderConfirmationHtml,
+					input.stays,
+					escapeHtml,
+				),
+				input.activities,
 				escapeHtml,
 			),
 			orderEmailPlaceholders(input, cardInfo, escapeHtml),
@@ -402,22 +526,26 @@ export function buildOrderConfirmationEmail(
 		const identity = (value: string) => value;
 		const text = TEMPLATES.orderConfirmationText
 			? applyPlaceholders(
-					expandStaysBlock(
-						TEMPLATES.orderConfirmationText,
-						input.stays,
+					expandActivitiesBlock(
+						expandStaysBlock(
+							TEMPLATES.orderConfirmationText,
+							input.stays,
+							identity,
+						),
+						input.activities,
 						identity,
 					),
 					orderEmailPlaceholders(input, cardInfo, identity),
 				)
-			: `${staysIntroLine(input.stays)}\n\nReservation code: ${input.orderNumber}\n\n${staysFallbackText(input.stays)}\n\nTotal: ${input.totalPrice}\nPayment: ${input.paymentMethod}${cardInfo}\n\nManage: ${input.manageUrl}`;
+			: `${orderIntroLine(input)}\n\nReservation code: ${input.orderNumber}\n\n${orderFallbackText(input)}\n\nTotal: ${input.totalPrice}\nPayment: ${input.paymentMethod}${cardInfo}\n\nManage: ${input.manageUrl}`;
 
 		return { html, subject, text };
 	}
 
 	return {
-		html: `<p>${escapeHtml(staysIntroLine(input.stays))}</p><p>Reservation code: ${escapeHtml(input.orderNumber)}</p>${staysFallbackHtml(input.stays)}<p>Total: ${escapeHtml(input.totalPrice)}<br>Payment: ${escapeHtml(input.paymentMethod)}${escapeHtml(cardInfo)}</p><p><a href="${safeUrl}">Manage reservation</a></p>`,
+		html: `<p>${escapeHtml(orderIntroLine(input))}</p><p>Reservation code: ${escapeHtml(input.orderNumber)}</p>${orderFallbackHtml(input)}<p>Total: ${escapeHtml(input.totalPrice)}<br>Payment: ${escapeHtml(input.paymentMethod)}${escapeHtml(cardInfo)}</p><p><a href="${safeUrl}">Manage reservation</a></p>`,
 		subject,
-		text: `${staysIntroLine(input.stays)}\n\nReservation code: ${input.orderNumber}\n\n${staysFallbackText(input.stays)}\n\nTotal: ${input.totalPrice}\nPayment: ${input.paymentMethod}${cardInfo}\n\nManage: ${input.manageUrl}`,
+		text: `${orderIntroLine(input)}\n\nReservation code: ${input.orderNumber}\n\n${orderFallbackText(input)}\n\nTotal: ${input.totalPrice}\nPayment: ${input.paymentMethod}${cardInfo}\n\nManage: ${input.manageUrl}`,
 	};
 }
 
@@ -433,13 +561,17 @@ export function buildOrderPendingConfirmationEmail(
 	input: OrderConfirmationEmailInput,
 ): EmailMessage {
 	const cardInfo = input.cardLastFour ? ` ending in ${input.cardLastFour}` : "";
-	const subject = `Payment received for ${safeSubjectPart(staysPaymentLabel(input.stays))}: finalizing your booking`;
+	const subject = `Payment received for ${safeSubjectPart(orderPaymentLabel(input))}: finalizing your booking`;
 
 	if (TEMPLATES.orderPendingConfirmationHtml) {
 		const html = applyPlaceholders(
-			expandStaysBlock(
-				TEMPLATES.orderPendingConfirmationHtml,
-				input.stays,
+			expandActivitiesBlock(
+				expandStaysBlock(
+					TEMPLATES.orderPendingConfirmationHtml,
+					input.stays,
+					escapeHtml,
+				),
+				input.activities,
 				escapeHtml,
 			),
 			orderEmailPlaceholders(input, cardInfo, escapeHtml),
@@ -447,9 +579,13 @@ export function buildOrderPendingConfirmationEmail(
 		const identity = (value: string) => value;
 		const text = TEMPLATES.orderPendingConfirmationText
 			? applyPlaceholders(
-					expandStaysBlock(
-						TEMPLATES.orderPendingConfirmationText,
-						input.stays,
+					expandActivitiesBlock(
+						expandStaysBlock(
+							TEMPLATES.orderPendingConfirmationText,
+							input.stays,
+							identity,
+						),
+						input.activities,
 						identity,
 					),
 					orderEmailPlaceholders(input, cardInfo, identity),
@@ -466,16 +602,16 @@ function orderPendingConfirmationFallbackText(
 	input: OrderConfirmationEmailInput,
 	cardInfo: string,
 ): string {
-	const bookingWord = input.stays.length > 1 ? "bookings" : "booking";
+	const bookingWord = orderItemCount(input) > 1 ? "bookings" : "booking";
 	return [
-		`We've received your payment for ${staysPaymentLabel(input.stays)}.`,
+		`We've received your payment for ${orderPaymentLabel(input)}.`,
 		"",
 		`Reservation code: ${input.orderNumber}`,
 		"",
 		`We're finalizing your ${bookingWord} now and will email you a full confirmation as soon as everything is secured. You can track the status any time here:`,
 		input.manageUrl,
 		"",
-		staysFallbackText(input.stays),
+		orderFallbackText(input),
 		"",
 		`Total paid: ${input.totalPrice}`,
 		`Payment: ${input.paymentMethod}${cardInfo}`,

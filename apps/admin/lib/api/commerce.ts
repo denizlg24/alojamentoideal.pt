@@ -4,6 +4,11 @@ import {
 	getAccommodationsConfigFromSettings,
 } from "@workspace/core/accommodations";
 import {
+	ACTIVITY_PROVIDER,
+	getActivityCacheConfigFromSettings,
+} from "@workspace/core/activities/cache";
+import {
+	BokunReservationGateway,
 	CommerceError,
 	type CommerceIssue,
 	type CommerceParseResult,
@@ -18,6 +23,10 @@ import {
 	type ResolvedOrderAccess,
 	StubReservationGateway,
 } from "@workspace/core/commerce";
+import {
+	BokunConfigurationError,
+	createBokunClientFromEnv,
+} from "@workspace/core/integrations/bokun";
 import { createHostifyClientFromEnv } from "@workspace/core/integrations/hostify";
 import {
 	createRefund,
@@ -36,6 +45,7 @@ import { createPusherRealtimePublisher } from "./realtime";
 export const HOSTIFY_PROVIDER = "hostify";
 
 let warnedHostifyDisabled = false;
+let warnedBokunUnavailable = false;
 
 function resolveHostifyGateway(
 	hostifyClient: ReturnType<typeof createHostifyClientFromEnv>,
@@ -51,6 +61,28 @@ function resolveHostifyGateway(
 		);
 	}
 	return new StubReservationGateway();
+}
+
+function resolveBokunGateway(
+	lang: string,
+): ProviderReservationGateway | undefined {
+	try {
+		return new BokunReservationGateway({
+			client: createBokunClientFromEnv(),
+			lang,
+		});
+	} catch (error) {
+		if (error instanceof BokunConfigurationError) {
+			if (!warnedBokunUnavailable) {
+				warnedBokunUnavailable = true;
+				console.warn(
+					"Bokun reservation gateway is unavailable: missing Bokun configuration.",
+				);
+			}
+			return undefined;
+		}
+		throw error;
+	}
 }
 
 function optionalStripeClient(): ReturnType<
@@ -74,6 +106,7 @@ function optionalStripeClient(): ReturnType<
 export async function commerceService(): Promise<CommerceService> {
 	const settings = await getRuntimeSettings();
 	const config = await getAccommodationsConfigFromSettings(settings);
+	const activityConfig = await getActivityCacheConfigFromSettings();
 	const hostifyClient = createHostifyClientFromEnv();
 	const stripe = optionalStripeClient();
 	const hostifyBookingsEnabled =
@@ -120,7 +153,9 @@ export async function commerceService(): Promise<CommerceService> {
 		resolveReservationGateway: (provider) =>
 			provider === HOSTIFY_PROVIDER
 				? resolveHostifyGateway(hostifyClient, hostifyBookingsEnabled)
-				: undefined,
+				: provider === ACTIVITY_PROVIDER
+					? resolveBokunGateway(activityConfig.lang)
+					: undefined,
 		resolveConversationGateway: (provider) =>
 			provider === HOSTIFY_PROVIDER
 				? new HostifyConversationGateway({ client: hostifyClient })

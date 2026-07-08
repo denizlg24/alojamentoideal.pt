@@ -34,6 +34,13 @@ interface UseOptimisticStayEditsArgs {
 	 * owns them through this setter as the single source of pending edits.
 	 */
 	setRepricingItemIds: Dispatch<SetStateAction<Set<string>>>;
+	/**
+	 * Broadcasts an optimistic cart to the header badge before the server commit.
+	 * The view keeps its applied-fingerprint ref in sync here so its own
+	 * cart-changed listener does not treat the broadcast as an external change and
+	 * roll the optimistic edit back.
+	 */
+	onOptimisticCart?: (cart: CartDto) => void;
 }
 
 export interface OptimisticStayEdits {
@@ -85,6 +92,7 @@ export function useOptimisticStayEdits({
 	applyValidated,
 	onError,
 	setRepricingItemIds,
+	onOptimisticCart,
 }: UseOptimisticStayEditsArgs): OptimisticStayEdits {
 	// Latest cart, read inside async commits to avoid stale closures.
 	const cartRef = useRef(cart);
@@ -144,7 +152,9 @@ export function useOptimisticStayEdits({
 			return {
 				...current,
 				items: current.items.map((item) =>
-					item.id === itemId ? patch(item) : item,
+					item.id === itemId && item.type === "accommodation"
+						? patch(item)
+						: item,
 				),
 			};
 		});
@@ -188,15 +198,13 @@ export function useOptimisticStayEdits({
 		// Keep the item id in the repricing set so the totals skeleton while the
 		// server re-quotes the remaining stays, even though this card is gone.
 		withRepricing(setRepricingItemIds, itemId);
-		setCart((current) => {
-			if (!current) {
-				return current;
-			}
-			return {
-				...current,
-				items: current.items.filter((item) => item.id !== itemId),
-			};
-		});
+		const optimisticCart: CartDto = {
+			...rollbackCart,
+			items: rollbackCart.items.filter((item) => item.id !== itemId),
+		};
+		setCart(optimisticCart);
+		// Drop the header badge immediately rather than waiting on the server.
+		onOptimisticCart?.(optimisticCart);
 		void commit(itemId, rollbackCart, (cartId) =>
 			api.removeCartItem(cartId, itemId, randomIdempotencyKey("remove")),
 		);

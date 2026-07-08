@@ -6,9 +6,13 @@ import {
 	accommodationItemDetail as accommodationItemDetailTable,
 	accommodationListing as accommodationListingTable,
 	accommodationQuoteSnapshot as accommodationQuoteSnapshotTable,
+	activityExperience as activityExperienceTable,
+	activityItemDetail as activityItemDetailTable,
+	activityQuoteSnapshot as activityQuoteSnapshotTable,
 	apiIdempotencyKey as apiIdempotencyKeyTable,
 	type BookingGuestIdentityStatus,
 	bookingGuest as bookingGuestTable,
+	type CommerceCatalogSnapshot,
 	cartItem as cartItemTable,
 	cart as cartTable,
 	conversationMessage as conversationMessageTable,
@@ -62,7 +66,12 @@ import {
 } from "./conversations";
 import { CommerceError, invalidRequest } from "./errors";
 import { hashIdempotencyRequest, idempotencyExpiresAt } from "./idempotency";
-import { housingFeeMinor, normalizeAccommodationQuoteSnapshot } from "./money";
+import {
+	type ActivityQuoteResult,
+	housingFeeMinor,
+	normalizeAccommodationQuoteSnapshot,
+	normalizeActivityQuoteSnapshot,
+} from "./money";
 import {
 	generateMemberToken,
 	hashMemberToken,
@@ -97,6 +106,7 @@ import {
 } from "./order-guests";
 import {
 	allocateDiscountByHousingBase,
+	buildActivityDraftOrderRows,
 	buildDiscountChargeRow,
 	buildDraftOrderRows,
 	generatePublicOrderReference,
@@ -123,6 +133,7 @@ import {
 	toOrderProvisioningSubState,
 } from "./payments";
 import {
+	type BokunActivityHoldRequest,
 	buildHoldRequest,
 	type ProviderReservationGateway,
 	type ReservationChargeInput,
@@ -132,6 +143,7 @@ import type {
 	AddCartItemBody,
 	ApplyDiscountBody,
 	DeleteCartItemBody,
+	DraftOrderActivityDetailInput,
 	DraftOrderBody,
 	UpdateCartItemBody,
 } from "./schemas";
@@ -146,12 +158,14 @@ import type {
 	CartResponse,
 	CartValidationFailure,
 	CartValidationResponse,
+	CommerceActivityQuoteInput,
 	CommerceQuoteDto,
 	CommerceQuoteInput,
 	DraftOrderContactInput,
 	DraftOrderResponse,
 	ListingDisplaySnapshot,
 	NormalizedAccommodationQuoteSnapshot,
+	NormalizedActivityQuoteSnapshot,
 	QuoteValidationStatus,
 } from "./types";
 
@@ -269,12 +283,16 @@ function isFinalizationEmailKind(
 
 export interface CommerceServiceOptions {
 	accountId: string;
+	activityAccountId?: string;
 	currency: string;
 	db: Database;
 	provider: string;
 	quoteAccommodation: (
 		input: CommerceQuoteInput,
 	) => Promise<import("../accommodations").AccommodationQuoteResult>;
+	quoteActivity?: (
+		input: CommerceActivityQuoteInput,
+	) => Promise<ActivityQuoteResult>;
 	quoteTtlSeconds: number;
 	/**
 	 * Resolves a promotion code against the discount provider (Stripe). Returns
@@ -315,10 +333,23 @@ interface CreateCartInput {
 	idempotencyKey?: string;
 }
 
-interface ActiveItemInput {
+interface AccommodationActiveItemInput {
 	itemId: string;
+	type: "accommodation";
 	quoteInput: CommerceQuoteInput;
 }
+
+interface ActivityActiveItemInput {
+	itemId: string;
+	type: "activity";
+	quoteInput: CommerceActivityQuoteInput;
+}
+
+type ActiveItemInput = AccommodationActiveItemInput | ActivityActiveItemInput;
+
+type ActiveQuoteInput =
+	| Omit<AccommodationActiveItemInput, "itemId">
+	| Omit<ActivityActiveItemInput, "itemId">;
 
 interface IssueMemberTokenResult {
 	memberId: string;
@@ -514,9 +545,14 @@ function paymentMethodFromOrderRow(row: {
 	};
 }
 
+type NormalizedQuoteSnapshot =
+	| NormalizedAccommodationQuoteSnapshot
+	| NormalizedActivityQuoteSnapshot;
+
 interface RevalidatedSnapshot {
 	itemId: string;
-	snapshot: NormalizedAccommodationQuoteSnapshot;
+	snapshot: NormalizedQuoteSnapshot;
+	type: "accommodation" | "activity";
 }
 
 interface RevalidatedCartDiscount {
@@ -524,19 +560,14 @@ interface RevalidatedCartDiscount {
 	resolved: AppliedDiscountSnapshot | null;
 }
 
-/** One provider booking joined with its order item + accommodation detail. */
-interface SagaBooking {
+interface SagaBookingBase {
 	attemptCount: number;
 	charges: ReservationChargeInput[];
-	checkIn: string;
-	checkOut: string;
-	guests: number;
-	hostifyListingId: string;
+	externalAccountId: string;
 	imageUrlSnapshot: string | null;
 	itemTotalMinor: number;
 	normalizedStatus: string;
 	orderItemId: string;
-	pets: number;
 	provider: string;
 	providerBookingId: string;
 	providerReservationId: string | null;
@@ -544,12 +575,43 @@ interface SagaBooking {
 	titleSnapshot: string;
 }
 
+/** One accommodation provider booking joined with its order item + detail. */
+interface AccommodationSagaBooking extends SagaBookingBase {
+	checkIn: string;
+	checkOut: string;
+	guests: number;
+	hostifyListingId: string;
+	itemType: "accommodation";
+	pets: number;
+}
+
+/** One activity provider booking joined with its order item + detail. */
+interface ActivitySagaBooking extends SagaBookingBase {
+	activityAnswers: NormalizedActivityQuoteSnapshot["answers"];
+	activityDate: string;
+	bokunActivityId: string;
+	dropoffPlaceId: string | null;
+	itemType: "activity";
+	participants: NormalizedActivityQuoteSnapshot["participants"];
+	pickupPlaceId: string | null;
+	rateId: string | null;
+	roomNumber: string | null;
+	startTimeId: string | null;
+	totalParticipants: number;
+}
+
+type SagaBooking = AccommodationSagaBooking | ActivitySagaBooking;
+
 /** Everything the saga needs to drive one order's provider holds. */
 interface SagaContext {
 	bookings: SagaBooking[];
 	contact: {
 		billingAddress: OrderBillingAddressSnapshot;
+		dateOfBirth: string | null;
 		email: string;
+		firstName: string | null;
+		language: string | null;
+		lastName: string | null;
 		name: string;
 		phoneE164: string;
 	} | null;
@@ -580,7 +642,8 @@ type HoldItemResult =
 	| "held"
 	| "transient"
 	| "permanent"
-	| { unavailable: string };
+	| { unavailable: string }
+	| { invalid: string };
 type MutateItemResult = "ok" | "transient" | "permanent" | "not_settled";
 type PersistHoldPlacedResult = "already_linked" | "conflict" | "persisted";
 
@@ -591,8 +654,9 @@ interface ReconcileHandlers {
 	onPendingNotice?: (facts: OrderConfirmationFacts) => Promise<void>;
 }
 
-interface CartJoinedRow {
+interface AccommodationCartJoinedRow {
 	cartItemId: string;
+	itemType: "accommodation";
 	checkIn: string;
 	checkOut: string;
 	city: string | null;
@@ -605,7 +669,6 @@ interface CartJoinedRow {
 	housingFeeMinor: number | null;
 	imageFallbackName: string | null;
 	infants: number;
-	itemStatus: string;
 	listingExternalId: string;
 	nightlyAverageMinor: number | null;
 	nights: number;
@@ -628,12 +691,63 @@ interface CartJoinedRow {
 	updatedAt: Date;
 }
 
+interface ActivityCartJoinedRow {
+	activityAnswers: NormalizedActivityQuoteSnapshot["answers"];
+	activityDate: string;
+	activityId: string;
+	activitySummary: unknown | null;
+	activityTitle: string | null;
+	cartItemId: string;
+	city: string | null;
+	country: string | null;
+	currency: string;
+	externalAccountId: string;
+	fetchedAt: Date;
+	itemType: "activity";
+	participants: NormalizedActivityQuoteSnapshot["participants"];
+	position: number;
+	provider: string;
+	providerPayload: Record<string, unknown> | null;
+	quoteExpiresAt: Date;
+	quoteId: string;
+	quoteStatus: string;
+	rateId: string | null;
+	startTimeId: string | null;
+	subtotalMinor: number;
+	taxMinor: number;
+	totalMinor: number;
+	totalParticipants: number;
+	updatedAt: Date;
+}
+
+type CartJoinedRow = AccommodationCartJoinedRow | ActivityCartJoinedRow;
+
+interface AccommodationOrderSource {
+	cartItemId: string;
+	position: number;
+	quote: NormalizedAccommodationQuoteSnapshot;
+	snapshot: ListingDisplaySnapshot;
+	type: "accommodation";
+}
+
+interface ActivityOrderSource {
+	cartItemId: string;
+	position: number;
+	quote: NormalizedActivityQuoteSnapshot;
+	snapshot: CommerceCatalogSnapshot;
+	type: "activity";
+}
+
+type OrderSource = AccommodationOrderSource | ActivityOrderSource;
+
 export class CommerceService {
 	readonly #accountId: string;
+	readonly #activityAccountId: string;
 	readonly #currency: string;
 	readonly #db: Database;
 	readonly #provider: string;
 	readonly #quoteAccommodation: CommerceServiceOptions["quoteAccommodation"];
+	readonly #quoteActivity: CommerceServiceOptions["quoteActivity"];
 	readonly #quoteTtlSeconds: number;
 	readonly #resolveDiscount: CommerceServiceOptions["resolveDiscount"];
 	readonly #resolveConversationGateway: CommerceServiceOptions["resolveConversationGateway"];
@@ -647,10 +761,12 @@ export class CommerceService {
 
 	constructor(options: CommerceServiceOptions) {
 		this.#accountId = options.accountId;
+		this.#activityAccountId = options.activityAccountId ?? options.accountId;
 		this.#currency = options.currency;
 		this.#db = options.db;
 		this.#provider = options.provider;
 		this.#quoteAccommodation = options.quoteAccommodation;
+		this.#quoteActivity = options.quoteActivity;
 		this.#quoteTtlSeconds = options.quoteTtlSeconds;
 		this.#resolveDiscount = options.resolveDiscount;
 		this.#resolveConversationGateway = options.resolveConversationGateway;
@@ -760,7 +876,17 @@ export class CommerceService {
 			);
 		}
 
+		const itemTypes = await this.#db
+			.select({ type: orderItemTable.type })
+			.from(orderItemTable)
+			.where(eq(orderItemTable.orderId, row.id));
+
 		return {
+			accommodationItemCount: itemTypes.filter(
+				(item) => item.type === "accommodation",
+			).length,
+			activityItemCount: itemTypes.filter((item) => item.type === "activity")
+				.length,
 			cartId: row.cartId,
 			checkoutExpiresAt: row.checkoutExpiresAt
 				? row.checkoutExpiresAt.toISOString()
@@ -817,8 +943,12 @@ export class CommerceService {
 				billingAddress: orderContactTable.billingAddress,
 				cartToken: cartTable.cartToken,
 				companyName: orderContactTable.companyName,
+				dateOfBirth: orderContactTable.dateOfBirth,
 				email: orderContactTable.email,
+				firstName: orderContactTable.firstName,
 				isCompany: orderContactTable.isCompany,
+				language: orderContactTable.language,
+				lastName: orderContactTable.lastName,
 				name: orderContactTable.name,
 				notes: orderContactTable.notes,
 				phoneE164: orderContactTable.phoneE164,
@@ -847,8 +977,12 @@ export class CommerceService {
 		return {
 			billingAddress: row.billingAddress ?? {},
 			companyName: row.companyName,
+			dateOfBirth: row.dateOfBirth,
 			email: row.email,
+			firstName: row.firstName,
 			isCompany: row.isCompany ?? false,
+			language: row.language,
+			lastName: row.lastName,
 			name: row.name,
 			notes: row.notes,
 			phoneE164: row.phoneE164,
@@ -900,14 +1034,131 @@ export class CommerceService {
 				.set({
 					billingAddress: contact.billingAddress,
 					companyName: contact.companyName,
+					dateOfBirth: contact.dateOfBirth,
 					email: contact.email,
+					firstName: contact.firstName,
 					isCompany: contact.isCompany,
+					language: contact.language,
+					lastName: contact.lastName,
 					name: contact.name,
 					notes: contact.notes,
 					phoneE164: contact.phoneE164,
 					taxNumber: contact.taxNumber,
 				})
 				.where(eq(orderContactTable.orderId, row.id));
+		});
+	}
+
+	/**
+	 * Updates draft activity answers and pickup/dropoff choices in place before
+	 * the provider hold is placed. The activity selection and total are unchanged,
+	 * so the existing PaymentIntent remains valid.
+	 */
+	async updateDraftOrderActivityDetails(
+		publicReference: string,
+		owner: CartOwner,
+		activityDetails: DraftOrderActivityDetailInput[],
+	): Promise<void> {
+		return this.#db.transaction(async (tx) => {
+			const [row] = await tx
+				.select({
+					cartToken: cartTable.cartToken,
+					id: orderTable.id,
+					status: orderTable.status,
+					userId: orderTable.userId,
+				})
+				.from(orderTable)
+				.leftJoin(cartTable, eq(cartTable.id, orderTable.cartId))
+				.where(eq(orderTable.publicReference, publicReference))
+				.limit(1)
+				.for("update", { of: orderTable });
+			if (
+				!row ||
+				!isOrderAccessGranted(
+					{ cartToken: row.cartToken, userId: row.userId },
+					owner,
+				)
+			) {
+				throw new CommerceError("order_not_found", "Order not found.", 404);
+			}
+			if (row.status !== "draft") {
+				throw new CommerceError(
+					"order_not_payable",
+					"This order can no longer be changed.",
+					409,
+				);
+			}
+
+			const activityRows = await tx
+				.select({
+					orderItemId: orderItemTable.id,
+					sourceCartItemId: orderItemTable.sourceCartItemId,
+				})
+				.from(orderItemTable)
+				.innerJoin(
+					activityItemDetailTable,
+					eq(activityItemDetailTable.orderItemId, orderItemTable.id),
+				)
+				.where(
+					and(
+						eq(orderItemTable.orderId, row.id),
+						eq(orderItemTable.type, "activity"),
+					),
+				);
+			const orderItemByCartItemId = new Map(
+				activityRows.flatMap((activityRow) =>
+					activityRow.sourceCartItemId
+						? [[activityRow.sourceCartItemId, activityRow.orderItemId] as const]
+						: [],
+				),
+			);
+			const seen = new Set<string>();
+			const issues = activityDetails.flatMap((detail, index) => {
+				const path = `activityDetails.${index}.cartItemId`;
+				if (seen.has(detail.cartItemId)) {
+					return [{ message: "Duplicate activity item.", path }];
+				}
+				seen.add(detail.cartItemId);
+				if (!orderItemByCartItemId.has(detail.cartItemId)) {
+					return [
+						{ message: "Activity item does not belong to this order.", path },
+					];
+				}
+				return [];
+			});
+			if (issues.length > 0) {
+				throw invalidRequest(
+					"Invalid activity details for this order.",
+					issues,
+				);
+			}
+
+			const now = new Date();
+			for (const detail of activityDetails) {
+				const orderItemId = orderItemByCartItemId.get(detail.cartItemId);
+				if (!orderItemId) {
+					continue;
+				}
+				await tx
+					.update(activityItemDetailTable)
+					.set({
+						answers: detail.answers,
+						dropoffPlaceId: detail.dropoffPlaceId,
+						pickupPlaceId: detail.pickupPlaceId,
+						roomNumber: detail.roomNumber,
+					})
+					.where(eq(activityItemDetailTable.orderItemId, orderItemId));
+				await tx
+					.update(orderItemTable)
+					.set({ updatedAt: now })
+					.where(eq(orderItemTable.id, orderItemId));
+			}
+			if (activityDetails.length > 0) {
+				await tx
+					.update(orderTable)
+					.set({ updatedAt: now })
+					.where(eq(orderTable.id, row.id));
+			}
 		});
 	}
 
@@ -3070,6 +3321,8 @@ export class CommerceService {
 
 		const itemRows = await this.#db
 			.select({
+				activityDate: activityItemDetailTable.activityDate,
+				activityTotalParticipants: activityItemDetailTable.totalParticipants,
 				adults: accommodationItemDetailTable.adults,
 				bookingId: providerBookingTable.id,
 				bookingNeedsRecovery: providerBookingTable.needsRecovery,
@@ -3097,6 +3350,10 @@ export class CommerceService {
 			.leftJoin(
 				accommodationItemDetailTable,
 				eq(accommodationItemDetailTable.orderItemId, orderItemTable.id),
+			)
+			.leftJoin(
+				activityItemDetailTable,
+				eq(activityItemDetailTable.orderItemId, orderItemTable.id),
 			)
 			.leftJoin(
 				providerBookingTable,
@@ -3183,6 +3440,7 @@ export class CommerceService {
 		}
 
 		const items: OrderDetailItem[] = visibleItemRows.map((row) => ({
+			activityDate: row.activityDate,
 			adults: row.adults,
 			charges: isOwner ? (chargesByItem.get(row.id) ?? []) : null,
 			checkIn: row.checkIn,
@@ -3217,6 +3475,7 @@ export class CommerceService {
 						}
 					: null,
 			title: row.title,
+			totalParticipants: row.activityTotalParticipants,
 			type: row.type,
 		}));
 
@@ -3941,7 +4200,16 @@ export class CommerceService {
 			return replay;
 		}
 
-		const snapshot = await this.#fetchQuoteSnapshot(input, true);
+		const snapshot =
+			input.type === "activity"
+				? await this.#fetchQuoteSnapshot(
+						{ quoteInput: input, type: "activity" },
+						true,
+					)
+				: await this.#fetchQuoteSnapshot(
+						{ quoteInput: input, type: "accommodation" },
+						true,
+					);
 		return this.#runIdempotent(scope, input.idempotencyKey, payload, (tx) =>
 			this.#addItemWithSnapshot(tx, cartId, input, snapshot),
 		);
@@ -3966,8 +4234,22 @@ export class CommerceService {
 		}
 
 		const current = await this.#readActiveItemInput(cartId, itemId);
+		if (current.type !== "accommodation") {
+			throw new CommerceError(
+				"item_not_editable",
+				"Activity cart items cannot be edited in place.",
+				422,
+			);
+		}
 		const quoteInput = mergeQuoteInput(current.quoteInput, input);
-		const snapshot = await this.#fetchQuoteSnapshot(quoteInput, true);
+		const snapshot = await this.#fetchAccommodationQuoteSnapshot(quoteInput);
+		if (snapshot.validationStatus !== "valid") {
+			throw new CommerceError(
+				"dates_unavailable",
+				"These dates are no longer available.",
+				409,
+			);
+		}
 
 		return this.#runIdempotent(scope, input.idempotencyKey, payload, (tx) =>
 			this.#updateItemWithSnapshot(tx, cartId, itemId, snapshot),
@@ -4017,10 +4299,17 @@ export class CommerceService {
 				await this.#insertQuoteSnapshot(tx, snapshot.snapshot);
 				await tx
 					.update(cartItemTable)
-					.set({
-						quoteSnapshotId: snapshot.snapshot.id,
-						updatedAt: new Date(),
-					})
+					.set(
+						snapshot.type === "activity"
+							? {
+									activityQuoteSnapshotId: snapshot.snapshot.id,
+									updatedAt: new Date(),
+								}
+							: {
+									quoteSnapshotId: snapshot.snapshot.id,
+									updatedAt: new Date(),
+								},
+					)
 					.where(eq(cartItemTable.id, snapshot.itemId));
 			}
 			await this.#recalculateCartTotals(tx, cartId, new Date());
@@ -4039,6 +4328,7 @@ export class CommerceService {
 	): Promise<DraftOrderResponse> {
 		await this.#assertCartAccess(this.#db, input.cartId, owner);
 		const payload = {
+			activityDetails: input.activityDetails ?? [],
 			cartId: input.cartId,
 			contact: input.contact,
 		};
@@ -4134,7 +4424,7 @@ export class CommerceService {
 		tx: Transaction,
 		cartId: string,
 		input: AddCartItemBody,
-		snapshot: NormalizedAccommodationQuoteSnapshot,
+		snapshot: NormalizedQuoteSnapshot,
 	): Promise<CartMutationResponse> {
 		const now = new Date();
 		await this.#ensureMutableCart(tx, cartId, now, { forUpdate: true });
@@ -4149,30 +4439,53 @@ export class CommerceService {
 			: null;
 		const itemId = existing?.id ?? crypto.randomUUID();
 
-		await this.#assertNoOverlappingCartStay(tx, cartId, snapshot, {
-			excludeItemId: itemId,
-		});
+		if (input.type === "accommodation") {
+			if (isActivityQuoteSnapshot(snapshot)) {
+				throw new CommerceError(
+					"quote_snapshot_invalid",
+					"Invalid quote snapshot.",
+					500,
+				);
+			}
+			await this.#assertNoOverlappingCartStay(tx, cartId, snapshot, {
+				excludeItemId: itemId,
+			});
+		}
 
 		if (existing) {
 			await tx
 				.update(cartItemTable)
-				.set({
-					quoteSnapshotId: snapshot.id,
-					removedAt: null,
-					status: "active",
-					updatedAt: now,
-				})
+				.set(
+					input.type === "activity"
+						? {
+								activityQuoteSnapshotId: snapshot.id,
+								quoteSnapshotId: null,
+								removedAt: null,
+								status: "active",
+								type: "activity",
+								updatedAt: now,
+							}
+						: {
+								activityQuoteSnapshotId: null,
+								quoteSnapshotId: snapshot.id,
+								removedAt: null,
+								status: "active",
+								type: "accommodation",
+								updatedAt: now,
+							},
+				)
 				.where(eq(cartItemTable.id, itemId));
 		} else {
 			await tx.insert(cartItemTable).values({
+				activityQuoteSnapshotId: input.type === "activity" ? snapshot.id : null,
 				cartId,
 				clientMutationId: input.clientMutationId,
 				createdAt: now,
 				id: itemId,
 				position: await this.#nextCartPosition(tx, cartId),
-				quoteSnapshotId: snapshot.id,
+				quoteSnapshotId: input.type === "accommodation" ? snapshot.id : null,
 				status: "active",
-				type: "accommodation",
+				type: input.type,
 				updatedAt: now,
 			});
 		}
@@ -4342,10 +4655,17 @@ export class CommerceService {
 			await this.#insertQuoteSnapshot(tx, snapshot.snapshot);
 			await tx
 				.update(cartItemTable)
-				.set({
-					quoteSnapshotId: snapshot.snapshot.id,
-					updatedAt: now,
-				})
+				.set(
+					snapshot.type === "activity"
+						? {
+								activityQuoteSnapshotId: snapshot.snapshot.id,
+								updatedAt: now,
+							}
+						: {
+								quoteSnapshotId: snapshot.snapshot.id,
+								updatedAt: now,
+							},
+				)
 				.where(eq(cartItemTable.id, snapshot.itemId));
 		}
 
@@ -4370,8 +4690,8 @@ export class CommerceService {
 			);
 		}
 
-		const housingBases = orderSources.map(
-			(source) => source.quote.housingFeeMinor,
+		const housingBases = orderSources.map((source) =>
+			source.type === "accommodation" ? source.quote.housingFeeMinor : 0,
 		);
 		const discount = revalidatedDiscount.resolved;
 		const housingBaseTotal = housingBases.reduce((sum, base) => sum + base, 0);
@@ -4410,9 +4730,13 @@ export class CommerceService {
 			billingAddress: input.contact.billingAddress,
 			companyName: input.contact.companyName,
 			createdAt: now,
+			dateOfBirth: input.contact.dateOfBirth,
 			email: input.contact.email,
+			firstName: input.contact.firstName,
 			id: crypto.randomUUID(),
 			isCompany: input.contact.isCompany,
+			language: input.contact.language,
+			lastName: input.contact.lastName,
 			name: input.contact.name,
 			notes: input.contact.notes,
 			orderId,
@@ -4420,7 +4744,98 @@ export class CommerceService {
 			taxNumber: input.contact.taxNumber,
 		});
 
+		const activityDetailByCartItem = new Map(
+			(input.activityDetails ?? []).map((detail) => [
+				detail.cartItemId,
+				detail,
+			]),
+		);
+
 		for (const [index, source] of orderSources.entries()) {
+			if (source.type === "activity") {
+				const rows = buildActivityDraftOrderRows(source, input.contact);
+				const orderItemId = crypto.randomUUID();
+
+				await tx.insert(orderItemTable).values({
+					catalogSnapshot: rows.item.catalogSnapshot,
+					createdAt: now,
+					currency: rows.item.currency,
+					discountMinor: 0,
+					id: orderItemId,
+					imageUrlSnapshot: rows.item.imageUrlSnapshot,
+					orderId,
+					position: rows.item.position,
+					quantity: rows.item.quantity,
+					sourceCartItemId: rows.item.sourceCartItemId,
+					status: rows.item.status,
+					subtotalMinor: rows.item.subtotalMinor,
+					taxMinor: rows.item.taxMinor,
+					titleSnapshot: rows.item.titleSnapshot,
+					totalMinor: rows.item.totalMinor,
+					type: rows.item.type,
+					updatedAt: now,
+				});
+
+				const guestDetails = activityDetailByCartItem.get(
+					rows.item.sourceCartItemId,
+				);
+				await tx.insert(activityItemDetailTable).values({
+					activityDate: rows.detail.activityDate,
+					// Guest answers/pickup are collected at checkout, not add-to-cart, so
+					// they arrive on the draft-order body and override the empty quote
+					// snapshot defaults when present.
+					answers: guestDetails?.answers ?? rows.detail.answers,
+					bokunActivityId: rows.detail.bokunActivityId,
+					dropoffPlaceId: guestDetails?.dropoffPlaceId ?? null,
+					externalAccountId: rows.detail.externalAccountId,
+					orderItemId,
+					participants: rows.detail.participants,
+					pickupPlaceId: guestDetails?.pickupPlaceId ?? null,
+					provider: rows.detail.provider,
+					rateId: rows.detail.rateId,
+					roomNumber: guestDetails?.roomNumber ?? null,
+					startTimeId: rows.detail.startTimeId,
+					totalParticipants: rows.detail.totalParticipants,
+				});
+
+				const providerBookingId = crypto.randomUUID();
+				const activityStartsAt = stayDateToTimestamp(rows.detail.activityDate);
+				await tx.insert(providerBookingTable).values({
+					createdAt: now,
+					externalAccountId: rows.detail.externalAccountId,
+					id: providerBookingId,
+					normalizedStatus: "pending",
+					orderId,
+					orderItemId,
+					provider: rows.detail.provider,
+					stayEndsAt: activityStartsAt,
+					stayStartsAt: activityStartsAt,
+					updatedAt: now,
+				});
+
+				if (rows.charges.length > 0) {
+					await tx.insert(orderItemChargeTable).values(
+						rows.charges.map((charge) => ({
+							createdAt: now,
+							grossMinor: charge.grossMinor,
+							id: crypto.randomUUID(),
+							kind: charge.kind,
+							name: charge.name,
+							netMinor: charge.netMinor,
+							orderItemId,
+							position: charge.position,
+							providerChargeId: charge.providerChargeId,
+							quantity: charge.quantity,
+							rawPayload: charge.rawPayload,
+							taxMinor: charge.taxMinor,
+							taxRateBasisPoints: charge.taxRateBasisPoints,
+							unitNetMinor: charge.unitNetMinor,
+						})),
+					);
+				}
+				continue;
+			}
+
 			const rows = buildDraftOrderRows(source, input.contact);
 			const orderItemId = crypto.randomUUID();
 			const itemDiscountMinor = discountAllocations[index] ?? 0;
@@ -4543,26 +4958,59 @@ export class CommerceService {
 	}
 
 	async #fetchQuoteSnapshot(
-		input: CommerceQuoteInput,
+		input: ActiveQuoteInput,
 		requireAvailable: boolean,
-	): Promise<NormalizedAccommodationQuoteSnapshot> {
-		const quote = await this.#quoteAccommodation(input);
-		const snapshot = normalizeAccommodationQuoteSnapshot({
-			accountId: this.#accountId,
-			provider: this.#provider,
-			quote,
-			ttlSeconds: this.#quoteTtlSeconds,
-		});
+	): Promise<NormalizedQuoteSnapshot> {
+		const snapshot =
+			input.type === "activity"
+				? await this.#fetchActivityQuoteSnapshot(input.quoteInput)
+				: await this.#fetchAccommodationQuoteSnapshot(input.quoteInput);
 
 		if (requireAvailable && snapshot.validationStatus !== "valid") {
 			throw new CommerceError(
-				"dates_unavailable",
-				"These dates are no longer available.",
+				input.type === "activity"
+					? "activity_unavailable"
+					: "dates_unavailable",
+				input.type === "activity"
+					? "This activity is no longer available."
+					: "These dates are no longer available.",
 				409,
 			);
 		}
 
 		return snapshot;
+	}
+
+	async #fetchAccommodationQuoteSnapshot(
+		input: CommerceQuoteInput,
+	): Promise<NormalizedAccommodationQuoteSnapshot> {
+		const quote = await this.#quoteAccommodation(input);
+		return normalizeAccommodationQuoteSnapshot({
+			accountId: this.#accountId,
+			provider: this.#provider,
+			quote,
+			ttlSeconds: this.#quoteTtlSeconds,
+		});
+	}
+
+	async #fetchActivityQuoteSnapshot(
+		input: CommerceActivityQuoteInput,
+	): Promise<NormalizedActivityQuoteSnapshot> {
+		if (!this.#quoteActivity) {
+			throw new CommerceError(
+				"activity_booking_unavailable",
+				"Activity booking is not available right now.",
+				503,
+			);
+		}
+
+		const quote = await this.#quoteActivity(input);
+		return normalizeActivityQuoteSnapshot({
+			accountId: this.#activityAccountId,
+			provider: "bokun",
+			quote,
+			ttlSeconds: this.#quoteTtlSeconds,
+		});
 	}
 
 	async #revalidateItems(inputs: ActiveItemInput[]): Promise<{
@@ -4574,7 +5022,7 @@ export class CommerceService {
 		type RevalidationAttempt =
 			| {
 					input: ActiveItemInput;
-					snapshot: NormalizedAccommodationQuoteSnapshot;
+					snapshot: NormalizedQuoteSnapshot;
 					type: "snapshot";
 			  }
 			| { error: CommerceError; input: ActiveItemInput; type: "failure" };
@@ -4584,7 +5032,22 @@ export class CommerceService {
 				try {
 					return {
 						input,
-						snapshot: await this.#fetchQuoteSnapshot(input.quoteInput, false),
+						snapshot:
+							input.type === "activity"
+								? await this.#fetchQuoteSnapshot(
+										{
+											quoteInput: input.quoteInput,
+											type: "activity",
+										},
+										false,
+									)
+								: await this.#fetchQuoteSnapshot(
+										{
+											quoteInput: input.quoteInput,
+											type: "accommodation",
+										},
+										false,
+									),
 						type: "snapshot",
 					};
 				} catch (error) {
@@ -4611,12 +5074,18 @@ export class CommerceService {
 			}
 
 			const { input, snapshot } = result.value;
-			snapshots.push({ itemId: input.itemId, snapshot });
+			snapshots.push({ itemId: input.itemId, snapshot, type: input.type });
 			if (snapshot.validationStatus !== "valid") {
 				failures.push({
-					code: "dates_unavailable",
+					code:
+						input.type === "activity"
+							? "activity_unavailable"
+							: "dates_unavailable",
 					itemId: input.itemId,
-					message: "These dates are no longer available.",
+					message:
+						input.type === "activity"
+							? "This activity is no longer available."
+							: "These dates are no longer available.",
 				});
 			}
 		}
@@ -4626,8 +5095,33 @@ export class CommerceService {
 
 	async #insertQuoteSnapshot(
 		tx: Transaction,
-		snapshot: NormalizedAccommodationQuoteSnapshot,
+		snapshot: NormalizedQuoteSnapshot,
 	): Promise<void> {
+		if (isActivityQuoteSnapshot(snapshot)) {
+			await tx.insert(activityQuoteSnapshotTable).values({
+				activityDate: snapshot.activityDate,
+				answers: snapshot.answers,
+				bokunActivityId: snapshot.bokunActivityId,
+				createdAt: new Date(),
+				currency: snapshot.currency,
+				expiresAt: snapshot.expiresAt,
+				externalAccountId: snapshot.externalAccountId,
+				fetchedAt: snapshot.fetchedAt,
+				id: snapshot.id,
+				participants: snapshot.participants,
+				provider: snapshot.provider,
+				providerPayload: snapshot.providerPayload,
+				rateId: snapshot.rateId,
+				startTimeId: snapshot.startTimeId,
+				subtotalMinor: snapshot.subtotalMinor,
+				taxMinor: snapshot.taxMinor,
+				totalMinor: snapshot.totalMinor,
+				totalParticipants: snapshot.totalParticipants,
+				validationStatus: snapshot.validationStatus,
+			});
+			return;
+		}
+
 		await tx.insert(accommodationQuoteSnapshotTable).values({
 			adults: snapshot.adults,
 			checkIn: snapshot.checkIn,
@@ -4765,22 +5259,37 @@ export class CommerceService {
 		await this.#ensureMutableCart(this.#db, cartId, now);
 		const [row] = await this.#db
 			.select({
-				adults: accommodationQuoteSnapshotTable.adults,
-				checkIn: accommodationQuoteSnapshotTable.checkIn,
-				checkOut: accommodationQuoteSnapshotTable.checkOut,
-				children: accommodationQuoteSnapshotTable.children,
-				guests: accommodationQuoteSnapshotTable.guests,
-				infants: accommodationQuoteSnapshotTable.infants,
+				activityAnswers: activityQuoteSnapshotTable.answers,
+				activityDate: activityQuoteSnapshotTable.activityDate,
+				activityId: activityQuoteSnapshotTable.bokunActivityId,
+				activityParticipants: activityQuoteSnapshotTable.participants,
+				activityRateId: activityQuoteSnapshotTable.rateId,
+				activityStartTimeId: activityQuoteSnapshotTable.startTimeId,
+				accommodationAdults: accommodationQuoteSnapshotTable.adults,
+				accommodationCheckIn: accommodationQuoteSnapshotTable.checkIn,
+				accommodationCheckOut: accommodationQuoteSnapshotTable.checkOut,
+				accommodationChildren: accommodationQuoteSnapshotTable.children,
+				accommodationGuests: accommodationQuoteSnapshotTable.guests,
+				accommodationInfants: accommodationQuoteSnapshotTable.infants,
+				accommodationListingId:
+					accommodationQuoteSnapshotTable.listingExternalId,
+				accommodationNights: accommodationQuoteSnapshotTable.nights,
+				accommodationPets: accommodationQuoteSnapshotTable.pets,
 				itemId: cartItemTable.id,
-				listingId: accommodationQuoteSnapshotTable.listingExternalId,
-				nights: accommodationQuoteSnapshotTable.nights,
-				pets: accommodationQuoteSnapshotTable.pets,
+				itemType: cartItemTable.type,
 				status: cartItemTable.status,
 			})
 			.from(cartItemTable)
-			.innerJoin(
+			.leftJoin(
 				accommodationQuoteSnapshotTable,
 				eq(cartItemTable.quoteSnapshotId, accommodationQuoteSnapshotTable.id),
+			)
+			.leftJoin(
+				activityQuoteSnapshotTable,
+				eq(
+					cartItemTable.activityQuoteSnapshotId,
+					activityQuoteSnapshotTable.id,
+				),
 			)
 			.where(
 				and(eq(cartItemTable.id, itemId), eq(cartItemTable.cartId, cartId)),
@@ -4791,22 +5300,7 @@ export class CommerceService {
 			throw new CommerceError("item_not_found", "Cart item not found.", 404);
 		}
 
-		return {
-			itemId: row.itemId,
-			quoteInput: {
-				adults: row.adults,
-				children: row.children,
-				dates: {
-					checkIn: row.checkIn,
-					checkOut: row.checkOut,
-					nights: row.nights,
-				},
-				guests: row.guests,
-				infants: row.infants,
-				listingId: row.listingId,
-				pets: row.pets,
-			},
-		};
+		return activeItemInputFromRow(row);
 	}
 
 	async #readActiveItemInputs(cartId: string): Promise<ActiveItemInput[]> {
@@ -4814,21 +5308,37 @@ export class CommerceService {
 		await this.#ensureMutableCart(this.#db, cartId, now);
 		const rows = await this.#db
 			.select({
-				adults: accommodationQuoteSnapshotTable.adults,
-				checkIn: accommodationQuoteSnapshotTable.checkIn,
-				checkOut: accommodationQuoteSnapshotTable.checkOut,
-				children: accommodationQuoteSnapshotTable.children,
-				guests: accommodationQuoteSnapshotTable.guests,
-				infants: accommodationQuoteSnapshotTable.infants,
+				activityAnswers: activityQuoteSnapshotTable.answers,
+				activityDate: activityQuoteSnapshotTable.activityDate,
+				activityId: activityQuoteSnapshotTable.bokunActivityId,
+				activityParticipants: activityQuoteSnapshotTable.participants,
+				activityRateId: activityQuoteSnapshotTable.rateId,
+				activityStartTimeId: activityQuoteSnapshotTable.startTimeId,
+				accommodationAdults: accommodationQuoteSnapshotTable.adults,
+				accommodationCheckIn: accommodationQuoteSnapshotTable.checkIn,
+				accommodationCheckOut: accommodationQuoteSnapshotTable.checkOut,
+				accommodationChildren: accommodationQuoteSnapshotTable.children,
+				accommodationGuests: accommodationQuoteSnapshotTable.guests,
+				accommodationInfants: accommodationQuoteSnapshotTable.infants,
+				accommodationListingId:
+					accommodationQuoteSnapshotTable.listingExternalId,
+				accommodationNights: accommodationQuoteSnapshotTable.nights,
+				accommodationPets: accommodationQuoteSnapshotTable.pets,
 				itemId: cartItemTable.id,
-				listingId: accommodationQuoteSnapshotTable.listingExternalId,
-				nights: accommodationQuoteSnapshotTable.nights,
-				pets: accommodationQuoteSnapshotTable.pets,
+				itemType: cartItemTable.type,
+				status: cartItemTable.status,
 			})
 			.from(cartItemTable)
-			.innerJoin(
+			.leftJoin(
 				accommodationQuoteSnapshotTable,
 				eq(cartItemTable.quoteSnapshotId, accommodationQuoteSnapshotTable.id),
+			)
+			.leftJoin(
+				activityQuoteSnapshotTable,
+				eq(
+					cartItemTable.activityQuoteSnapshotId,
+					activityQuoteSnapshotTable.id,
+				),
 			)
 			.where(
 				and(
@@ -4838,22 +5348,7 @@ export class CommerceService {
 			)
 			.orderBy(asc(cartItemTable.position));
 
-		return rows.map((row) => ({
-			itemId: row.itemId,
-			quoteInput: {
-				adults: row.adults,
-				children: row.children,
-				dates: {
-					checkIn: row.checkIn,
-					checkOut: row.checkOut,
-					nights: row.nights,
-				},
-				guests: row.guests,
-				infants: row.infants,
-				listingId: row.listingId,
-				pets: row.pets,
-			},
-		}));
+		return rows.map(activeItemInputFromRow);
 	}
 
 	async #findItemByClientMutationId(
@@ -4940,17 +5435,33 @@ export class CommerceService {
 	): Promise<ReturnType<typeof sumCartTotals>> {
 		const rows = await tx
 			.select({
-				currency: accommodationQuoteSnapshotTable.currency,
-				housingFeeMinor: accommodationQuoteSnapshotTable.housingFeeMinor,
-				subtotalMinor: accommodationQuoteSnapshotTable.subtotalMinor,
-				taxMinor: accommodationQuoteSnapshotTable.taxMinor,
-				totalMinor: accommodationQuoteSnapshotTable.totalMinor,
-				validationStatus: accommodationQuoteSnapshotTable.validationStatus,
+				accommodationCurrency: accommodationQuoteSnapshotTable.currency,
+				accommodationHousingFeeMinor:
+					accommodationQuoteSnapshotTable.housingFeeMinor,
+				accommodationSubtotalMinor:
+					accommodationQuoteSnapshotTable.subtotalMinor,
+				accommodationTaxMinor: accommodationQuoteSnapshotTable.taxMinor,
+				accommodationTotalMinor: accommodationQuoteSnapshotTable.totalMinor,
+				accommodationValidationStatus:
+					accommodationQuoteSnapshotTable.validationStatus,
+				activityCurrency: activityQuoteSnapshotTable.currency,
+				activitySubtotalMinor: activityQuoteSnapshotTable.subtotalMinor,
+				activityTaxMinor: activityQuoteSnapshotTable.taxMinor,
+				activityTotalMinor: activityQuoteSnapshotTable.totalMinor,
+				activityValidationStatus: activityQuoteSnapshotTable.validationStatus,
+				itemType: cartItemTable.type,
 			})
 			.from(cartItemTable)
-			.innerJoin(
+			.leftJoin(
 				accommodationQuoteSnapshotTable,
 				eq(cartItemTable.quoteSnapshotId, accommodationQuoteSnapshotTable.id),
+			)
+			.leftJoin(
+				activityQuoteSnapshotTable,
+				eq(
+					cartItemTable.activityQuoteSnapshotId,
+					activityQuoteSnapshotTable.id,
+				),
 			)
 			.where(
 				and(
@@ -4959,7 +5470,43 @@ export class CommerceService {
 				),
 			);
 
-		const totals = sumCartTotals(rows, this.#currency);
+		const totals = sumCartTotals(
+			rows.map((row) =>
+				row.itemType === "activity"
+					? {
+							currency: requiredRowValue(row.activityCurrency, "currency"),
+							housingFeeMinor: 0,
+							subtotalMinor: requiredRowValue(
+								row.activitySubtotalMinor,
+								"subtotal",
+							),
+							taxMinor: requiredRowValue(row.activityTaxMinor, "tax"),
+							totalMinor: requiredRowValue(row.activityTotalMinor, "total"),
+							validationStatus: requiredRowValue(
+								row.activityValidationStatus,
+								"validation status",
+							),
+						}
+					: {
+							currency: requiredRowValue(row.accommodationCurrency, "currency"),
+							housingFeeMinor: row.accommodationHousingFeeMinor,
+							subtotalMinor: requiredRowValue(
+								row.accommodationSubtotalMinor,
+								"subtotal",
+							),
+							taxMinor: requiredRowValue(row.accommodationTaxMinor, "tax"),
+							totalMinor: requiredRowValue(
+								row.accommodationTotalMinor,
+								"total",
+							),
+							validationStatus: requiredRowValue(
+								row.accommodationValidationStatus,
+								"validation status",
+							),
+						},
+			),
+			this.#currency,
+		);
 		const [cartRow] = await tx
 			.select({ appliedDiscount: cartTable.appliedDiscount })
 			.from(cartTable)
@@ -5041,8 +5588,30 @@ export class CommerceService {
 	}
 
 	async #cartRows(db: DbExecutor, cartId: string): Promise<CartJoinedRow[]> {
-		return db
+		const rows = await db
 			.select({
+				activityAnswers: activityQuoteSnapshotTable.answers,
+				activityCity: activityExperienceTable.city,
+				activityCountry: activityExperienceTable.country,
+				activityDate: activityQuoteSnapshotTable.activityDate,
+				activityExternalAccountId: activityQuoteSnapshotTable.externalAccountId,
+				activityFetchedAt: activityQuoteSnapshotTable.fetchedAt,
+				activityId: activityQuoteSnapshotTable.bokunActivityId,
+				activityParticipants: activityQuoteSnapshotTable.participants,
+				activityProvider: activityQuoteSnapshotTable.provider,
+				activityProviderPayload: activityQuoteSnapshotTable.providerPayload,
+				activityQuoteCurrency: activityQuoteSnapshotTable.currency,
+				activityQuoteExpiresAt: activityQuoteSnapshotTable.expiresAt,
+				activityQuoteId: activityQuoteSnapshotTable.id,
+				activityQuoteStatus: activityQuoteSnapshotTable.validationStatus,
+				activityRateId: activityQuoteSnapshotTable.rateId,
+				activityStartTimeId: activityQuoteSnapshotTable.startTimeId,
+				activitySubtotalMinor: activityQuoteSnapshotTable.subtotalMinor,
+				activitySummary: activityExperienceTable.summary,
+				activityTaxMinor: activityQuoteSnapshotTable.taxMinor,
+				activityTitle: activityExperienceTable.title,
+				activityTotalMinor: activityQuoteSnapshotTable.totalMinor,
+				activityTotalParticipants: activityQuoteSnapshotTable.totalParticipants,
 				cartItemId: cartItemTable.id,
 				checkIn: accommodationQuoteSnapshotTable.checkIn,
 				checkOut: accommodationQuoteSnapshotTable.checkOut,
@@ -5056,6 +5625,7 @@ export class CommerceService {
 				housingFeeMinor: accommodationQuoteSnapshotTable.housingFeeMinor,
 				imageFallbackName: accommodationListingTable.name,
 				infants: accommodationQuoteSnapshotTable.infants,
+				itemType: cartItemTable.type,
 				itemStatus: cartItemTable.status,
 				listingExternalId: accommodationQuoteSnapshotTable.listingExternalId,
 				nightlyAverageMinor:
@@ -5080,9 +5650,16 @@ export class CommerceService {
 				updatedAt: cartItemTable.updatedAt,
 			})
 			.from(cartItemTable)
-			.innerJoin(
+			.leftJoin(
 				accommodationQuoteSnapshotTable,
 				eq(cartItemTable.quoteSnapshotId, accommodationQuoteSnapshotTable.id),
+			)
+			.leftJoin(
+				activityQuoteSnapshotTable,
+				eq(
+					cartItemTable.activityQuoteSnapshotId,
+					activityQuoteSnapshotTable.id,
+				),
 			)
 			.leftJoin(
 				accommodationListingTable,
@@ -5101,6 +5678,23 @@ export class CommerceService {
 					),
 				),
 			)
+			.leftJoin(
+				activityExperienceTable,
+				and(
+					eq(
+						activityExperienceTable.provider,
+						activityQuoteSnapshotTable.provider,
+					),
+					eq(
+						activityExperienceTable.externalAccountId,
+						activityQuoteSnapshotTable.externalAccountId,
+					),
+					eq(
+						activityExperienceTable.externalId,
+						activityQuoteSnapshotTable.bokunActivityId,
+					),
+				),
+			)
 			.where(
 				and(
 					eq(cartItemTable.cartId, cartId),
@@ -5108,25 +5702,23 @@ export class CommerceService {
 				),
 			)
 			.orderBy(asc(cartItemTable.position));
+
+		return rows.map(cartJoinedRowFromDb);
 	}
 
 	async #orderSources(
 		tx: Transaction,
 		cartId: string,
 		now: Date,
-	): Promise<
-		{
-			cartItemId: string;
-			position: number;
-			quote: NormalizedAccommodationQuoteSnapshot;
-			snapshot: ListingDisplaySnapshot;
-		}[]
-	> {
+	): Promise<OrderSource[]> {
 		const rows = await this.#cartRows(tx, cartId);
-		const sources = [];
+		const sources: OrderSource[] = [];
 
 		for (const row of rows) {
-			const quote = quoteSnapshotFromRow(row);
+			const quote =
+				row.itemType === "activity"
+					? activityQuoteSnapshotFromRow(row)
+					: quoteSnapshotFromRow(row);
 			if (
 				quote.validationStatus !== "valid" ||
 				quote.expiresAt.getTime() <= now.getTime()
@@ -5142,8 +5734,12 @@ export class CommerceService {
 				cartItemId: row.cartItemId,
 				position: row.position,
 				quote,
-				snapshot: listingSnapshot(row),
-			});
+				snapshot:
+					row.itemType === "activity"
+						? activityCatalogSnapshot(row)
+						: listingSnapshot(row),
+				type: row.itemType,
+			} as OrderSource);
 		}
 
 		return sources;
@@ -5335,6 +5931,11 @@ export class CommerceService {
 		for (const booking of context.bookings) {
 			const result = await this.#createHold(context, booking);
 			if (typeof result === "object") {
+				// Recoverable bad input: leave the order draft and any sibling holds in
+				// place so the guest can fix the details and retry without re-holding.
+				if ("invalid" in result) {
+					return { message: result.invalid, outcome: "invalid" };
+				}
 				await this.#releaseHeldSiblings(context, booking.providerBookingId);
 				await this.#failOrder(orderId, "reservation_unavailable");
 				return { message: result.unavailable, outcome: "unavailable" };
@@ -5343,7 +5944,7 @@ export class CommerceService {
 				await this.#releaseHeldSiblings(context, booking.providerBookingId);
 				await this.#failOrder(orderId, "reservation_create_failed");
 				return {
-					message: "This stay can no longer be booked.",
+					message: "This booking can no longer be completed.",
 					outcome: "unavailable",
 				};
 			}
@@ -5402,10 +6003,7 @@ export class CommerceService {
 		let sawPermanent = false;
 		let sawNotSettled = false;
 		for (const booking of context.bookings) {
-			const result = await this.#confirmHold(
-				booking,
-				order.stripePaymentIntentId,
-			);
+			const result = await this.#confirmHold(booking, order);
 			if (result === "transient") {
 				sawTransient = true;
 			} else if (result === "permanent") {
@@ -6444,7 +7042,11 @@ export class CommerceService {
 		const [contact] = await db
 			.select({
 				billingAddress: orderContactTable.billingAddress,
+				dateOfBirth: orderContactTable.dateOfBirth,
 				email: orderContactTable.email,
+				firstName: orderContactTable.firstName,
+				language: orderContactTable.language,
+				lastName: orderContactTable.lastName,
 				name: orderContactTable.name,
 				phoneE164: orderContactTable.phoneE164,
 			})
@@ -6454,6 +7056,15 @@ export class CommerceService {
 
 		const bookingRows = await db
 			.select({
+				accommodationExternalAccountId:
+					accommodationItemDetailTable.externalAccountId,
+				activityAnswers: activityItemDetailTable.answers,
+				activityDate: activityItemDetailTable.activityDate,
+				activityExternalAccountId: activityItemDetailTable.externalAccountId,
+				bokunActivityId: activityItemDetailTable.bokunActivityId,
+				dropoffPlaceId: activityItemDetailTable.dropoffPlaceId,
+				pickupPlaceId: activityItemDetailTable.pickupPlaceId,
+				roomNumber: activityItemDetailTable.roomNumber,
 				attemptCount: providerBookingTable.attemptCount,
 				checkIn: accommodationItemDetailTable.checkIn,
 				checkOut: accommodationItemDetailTable.checkOut,
@@ -6461,23 +7072,33 @@ export class CommerceService {
 				hostifyListingId: accommodationItemDetailTable.hostifyListingId,
 				imageUrlSnapshot: orderItemTable.imageUrlSnapshot,
 				itemTotalMinor: orderItemTable.totalMinor,
+				itemType: orderItemTable.type,
 				normalizedStatus: providerBookingTable.normalizedStatus,
 				orderItemId: orderItemTable.id,
+				participants: activityItemDetailTable.participants,
 				pets: accommodationItemDetailTable.pets,
 				provider: providerBookingTable.provider,
 				providerBookingId: providerBookingTable.id,
+				providerExternalAccountId: providerBookingTable.externalAccountId,
 				providerReservationId: providerBookingTable.providerReservationId,
 				providerTransactionId: providerBookingTable.providerTransactionId,
+				rateId: activityItemDetailTable.rateId,
+				startTimeId: activityItemDetailTable.startTimeId,
 				titleSnapshot: orderItemTable.titleSnapshot,
+				totalParticipants: activityItemDetailTable.totalParticipants,
 			})
 			.from(providerBookingTable)
 			.innerJoin(
 				orderItemTable,
 				eq(orderItemTable.id, providerBookingTable.orderItemId),
 			)
-			.innerJoin(
+			.leftJoin(
 				accommodationItemDetailTable,
 				eq(accommodationItemDetailTable.orderItemId, orderItemTable.id),
+			)
+			.leftJoin(
+				activityItemDetailTable,
+				eq(activityItemDetailTable.orderItemId, orderItemTable.id),
 			)
 			.where(eq(orderItemTable.orderId, orderId))
 			.orderBy(asc(orderItemTable.position));
@@ -6505,11 +7126,71 @@ export class CommerceService {
 			chargesByItem.set(charge.orderItemId, list);
 		}
 
-		return {
-			bookings: bookingRows.map((row) => ({
-				...row,
+		const bookings: SagaBooking[] = bookingRows.map((row) => {
+			const base = {
+				attemptCount: row.attemptCount,
 				charges: chargesByItem.get(row.orderItemId) ?? [],
-			})),
+				externalAccountId:
+					row.providerExternalAccountId ??
+					(row.itemType === "activity"
+						? requiredRowValue(
+								row.activityExternalAccountId,
+								"activity external account id",
+							)
+						: requiredRowValue(
+								row.accommodationExternalAccountId,
+								"accommodation external account id",
+							)),
+				imageUrlSnapshot: row.imageUrlSnapshot,
+				itemTotalMinor: row.itemTotalMinor,
+				normalizedStatus: row.normalizedStatus,
+				orderItemId: row.orderItemId,
+				provider: row.provider,
+				providerBookingId: row.providerBookingId,
+				providerReservationId: row.providerReservationId,
+				providerTransactionId: row.providerTransactionId,
+				titleSnapshot: row.titleSnapshot,
+			};
+
+			if (row.itemType === "activity") {
+				return {
+					...base,
+					activityAnswers: row.activityAnswers ?? [],
+					activityDate: requiredRowValue(row.activityDate, "activity date"),
+					bokunActivityId: requiredRowValue(
+						row.bokunActivityId,
+						"bokun activity id",
+					),
+					dropoffPlaceId: row.dropoffPlaceId,
+					itemType: "activity",
+					participants: row.participants ?? [],
+					pickupPlaceId: row.pickupPlaceId,
+					rateId: row.rateId,
+					roomNumber: row.roomNumber,
+					startTimeId: row.startTimeId,
+					totalParticipants: requiredRowValue(
+						row.totalParticipants,
+						"activity total participants",
+					),
+				};
+			}
+
+			return {
+				...base,
+				checkIn: requiredRowValue(row.checkIn, "check in"),
+				checkOut: requiredRowValue(row.checkOut, "check out"),
+				guests: requiredRowValue(row.guests, "guests"),
+				hostifyListingId: requiredRowValue(
+					row.hostifyListingId,
+					"hostify listing id",
+				),
+				itemType: "accommodation",
+				pets: requiredRowValue(row.pets, "pets"),
+			};
+		});
+
+		return {
+			bookings,
 			contact: contact ?? null,
 			order,
 		};
@@ -6565,53 +7246,84 @@ export class CommerceService {
 				currentBooking.orderItemId,
 			);
 
-			const existing = await gateway.findExistingHold({
-				checkIn: currentBooking.checkIn,
-				checkOut: currentBooking.checkOut,
-				listingId: currentBooking.hostifyListingId,
-				tag,
-			});
-			if (existing) {
-				if (
-					(await this.#persistHoldPlaced(
+			if (currentBooking.itemType === "accommodation") {
+				const existing = await gateway.findExistingHold({
+					checkIn: currentBooking.checkIn,
+					checkOut: currentBooking.checkOut,
+					listingId: currentBooking.hostifyListingId,
+					tag,
+				});
+				if (existing) {
+					if (
+						(await this.#persistHoldPlaced(
+							currentBooking.providerBookingId,
+							existing,
+							tx,
+						)) !== "conflict"
+					) {
+						return "held";
+					}
+					await this.#markBookingFailed(
 						currentBooking.providerBookingId,
-						existing,
+						"hold_persist_conflict",
+						`Provider reservation ${existing.reservationId} is already linked to another booking.`,
 						tx,
-					)) !== "conflict"
-				) {
-					return "held";
+					);
+					return "permanent";
 				}
-				await this.#markBookingFailed(
-					currentBooking.providerBookingId,
-					"hold_persist_conflict",
-					`Provider reservation ${existing.reservationId} is already linked to another booking.`,
-					tx,
-				);
-				return "permanent";
 			}
 
-			const result = await gateway.placeHold(
-				buildHoldRequest({
-					charges: currentBooking.charges,
-					contact: {
-						email: context.contact.email,
-						name: context.contact.name,
-						phone: context.contact.phoneE164,
-					},
-					currency: context.order.currency,
-					detail: {
-						checkIn: currentBooking.checkIn,
-						checkOut: currentBooking.checkOut,
-						guests: currentBooking.guests,
-						hostifyListingId: currentBooking.hostifyListingId,
-						pets: currentBooking.pets,
-					},
-					itemTotalMinor: currentBooking.itemTotalMinor,
-					orderItemId: currentBooking.orderItemId,
-					publicReference: context.order.publicReference,
-					source: this.#reservationSource,
-				}),
-			);
+			const holdRequest =
+				currentBooking.itemType === "activity"
+					? ({
+							activity: {
+								activityDate: currentBooking.activityDate,
+								answers: currentBooking.activityAnswers,
+								bokunActivityId: currentBooking.bokunActivityId,
+								dropoffPlaceId: currentBooking.dropoffPlaceId,
+								participants: currentBooking.participants,
+								pickupPlaceId: currentBooking.pickupPlaceId,
+								rateId: currentBooking.rateId,
+								roomNumber: currentBooking.roomNumber,
+								startTimeId: currentBooking.startTimeId,
+							},
+							amountMinor: currentBooking.itemTotalMinor,
+							contact: {
+								dateOfBirth: context.contact.dateOfBirth,
+								email: context.contact.email,
+								firstName: context.contact.firstName,
+								language: context.contact.language,
+								lastName: context.contact.lastName,
+								name: context.contact.name,
+								phone: context.contact.phoneE164,
+							},
+							currency: context.order.currency,
+							kind: "bokun_activity",
+							orderItemId: currentBooking.orderItemId,
+							publicReference: context.order.publicReference,
+							source: this.#reservationSource,
+						} satisfies BokunActivityHoldRequest)
+					: buildHoldRequest({
+							charges: currentBooking.charges,
+							contact: {
+								email: context.contact.email,
+								name: context.contact.name,
+								phone: context.contact.phoneE164,
+							},
+							currency: context.order.currency,
+							detail: {
+								checkIn: currentBooking.checkIn,
+								checkOut: currentBooking.checkOut,
+								guests: currentBooking.guests,
+								hostifyListingId: currentBooking.hostifyListingId,
+								pets: currentBooking.pets,
+							},
+							itemTotalMinor: currentBooking.itemTotalMinor,
+							orderItemId: currentBooking.orderItemId,
+							publicReference: context.order.publicReference,
+							source: this.#reservationSource,
+						});
+			const result = await gateway.placeHold(holdRequest);
 
 			switch (result.kind) {
 				case "created": {
@@ -6674,6 +7386,10 @@ export class CommerceService {
 						tx,
 					);
 					return { unavailable: result.message };
+				case "invalid":
+					// Do not mark the booking: the guest fixes the details and retries,
+					// which re-submits this same booking.
+					return { invalid: result.message };
 				case "transient":
 					return (await this.#recordBookingAttempt(
 						currentBooking,
@@ -6697,7 +7413,7 @@ export class CommerceService {
 
 	async #confirmHold(
 		booking: SagaBooking,
-		paymentReference: string | null,
+		order: SagaContext["order"],
 	): Promise<MutateItemResult> {
 		if (booking.normalizedStatus === "confirmed") {
 			return "ok";
@@ -6755,7 +7471,10 @@ export class CommerceService {
 		}
 
 		const result = await gateway.confirmHold({
-			paymentReference,
+			amountMinor: prepared.booking.itemTotalMinor,
+			currency: order.currency,
+			paymentReference: order.stripePaymentIntentId,
+			publicReference: order.publicReference,
 			reservationId: prepared.providerReservationId,
 			transactionId: prepared.providerTransactionId,
 		});
@@ -7114,7 +7833,7 @@ export class CommerceService {
 				attemptCount,
 				lastAttemptAt: now,
 				lastErrorCode: "confirm_not_settled",
-				lastErrorMessage: `Hostify accept has not taken; reservation still ${providerStatus ?? "unconfirmed"}.`,
+				lastErrorMessage: `Provider confirmation has not settled; reservation still ${providerStatus ?? "unconfirmed"}.`,
 				needsRecovery: gracePassed,
 				nextAttemptAt: gracePassed
 					? new Date(now.getTime() + RESERVATION_SETTLE_RETRY_MS)
@@ -7294,6 +8013,17 @@ export class CommerceService {
 
 	#buildConfirmationFacts(context: SagaContext): OrderConfirmationFacts {
 		return {
+			activities: context.bookings
+				.filter(
+					(booking): booking is ActivitySagaBooking =>
+						booking.itemType === "activity",
+				)
+				.map((booking) => ({
+					activityDate: booking.activityDate,
+					imageUrl: booking.imageUrlSnapshot,
+					title: booking.titleSnapshot ?? "Your Alojamento Ideal activity",
+					totalParticipants: booking.totalParticipants,
+				})),
 			amountPaidMinor: context.order.amountPaidMinor,
 			billingAddress: context.contact?.billingAddress ?? {},
 			contactPhone: context.contact?.phoneE164 ?? "",
@@ -7303,14 +8033,19 @@ export class CommerceService {
 			orderId: context.order.id,
 			paymentMethod: paymentMethodFromOrderRow(context.order),
 			publicReference: context.order.publicReference,
-			stays: context.bookings.map((booking) => ({
-				checkIn: booking.checkIn,
-				checkOut: booking.checkOut,
-				guests: booking.guests,
-				imageUrl: booking.imageUrlSnapshot,
-				nights: nightsBetweenStayDates(booking.checkIn, booking.checkOut),
-				title: booking.titleSnapshot ?? "Your Alojamento Ideal stay",
-			})),
+			stays: context.bookings
+				.filter(
+					(booking): booking is AccommodationSagaBooking =>
+						booking.itemType === "accommodation",
+				)
+				.map((booking) => ({
+					checkIn: booking.checkIn,
+					checkOut: booking.checkOut,
+					guests: booking.guests,
+					imageUrl: booking.imageUrlSnapshot,
+					nights: nightsBetweenStayDates(booking.checkIn, booking.checkOut),
+					title: booking.titleSnapshot ?? "Your Alojamento Ideal stay",
+				})),
 		};
 	}
 }
@@ -7486,9 +8221,268 @@ function mergeQuoteInput(
 	return parsed.data;
 }
 
+interface ActiveItemInputDbRow {
+	activityAnswers: NormalizedActivityQuoteSnapshot["answers"] | null;
+	activityDate: string | null;
+	activityId: string | null;
+	activityParticipants: NormalizedActivityQuoteSnapshot["participants"] | null;
+	activityRateId: string | null;
+	activityStartTimeId: string | null;
+	accommodationAdults: number | null;
+	accommodationCheckIn: string | null;
+	accommodationCheckOut: string | null;
+	accommodationChildren: number | null;
+	accommodationGuests: number | null;
+	accommodationInfants: number | null;
+	accommodationListingId: string | null;
+	accommodationNights: number | null;
+	accommodationPets: number | null;
+	itemId: string;
+	itemType: string;
+}
+
+interface CartJoinedDbRow {
+	activityAnswers: NormalizedActivityQuoteSnapshot["answers"] | null;
+	activityCity: string | null;
+	activityCountry: string | null;
+	activityDate: string | null;
+	activityExternalAccountId: string | null;
+	activityFetchedAt: Date | null;
+	activityId: string | null;
+	activityParticipants: NormalizedActivityQuoteSnapshot["participants"] | null;
+	activityProvider: string | null;
+	activityProviderPayload: Record<string, unknown> | null;
+	activityQuoteCurrency: string | null;
+	activityQuoteExpiresAt: Date | null;
+	activityQuoteId: string | null;
+	activityQuoteStatus: string | null;
+	activityRateId: string | null;
+	activityStartTimeId: string | null;
+	activitySubtotalMinor: number | null;
+	activitySummary: unknown | null;
+	activityTaxMinor: number | null;
+	activityTitle: string | null;
+	activityTotalMinor: number | null;
+	activityTotalParticipants: number | null;
+	cartItemId: string;
+	checkIn: string | null;
+	checkOut: string | null;
+	city: string | null;
+	country: string | null;
+	currency: string | null;
+	externalAccountId: string | null;
+	feeLines: NormalizedAccommodationQuoteSnapshot["feeLines"] | null;
+	fetchedAt: Date | null;
+	guests: number | null;
+	housingFeeMinor: number | null;
+	imageFallbackName: string | null;
+	infants: number | null;
+	itemType: string;
+	listingExternalId: string | null;
+	nightlyAverageMinor: number | null;
+	nights: number | null;
+	pets: number | null;
+	position: number;
+	processed: AccommodationListingProcessedContent | null;
+	provider: string | null;
+	providerPayload: Record<string, unknown> | null;
+	quoteAdults: number | null;
+	quoteChildren: number | null;
+	quoteCleaningFeeMinor: number | null;
+	quoteExpiresAt: Date | null;
+	quoteId: string | null;
+	quoteStatus: string | null;
+	raw: AccommodationListingRawContent | null;
+	subtotalMinor: number | null;
+	taxMinor: number | null;
+	timezone: string | null;
+	totalMinor: number | null;
+	updatedAt: Date;
+}
+
+function requiredRowValue<T>(value: T | null | undefined, field: string): T {
+	if (value === null || value === undefined) {
+		throw new CommerceError(
+			"quote_snapshot_invalid",
+			`Cart item is missing ${field}.`,
+			500,
+		);
+	}
+	return value;
+}
+
+function isActivityQuoteSnapshot(
+	snapshot: NormalizedQuoteSnapshot,
+): snapshot is NormalizedActivityQuoteSnapshot {
+	return "bokunActivityId" in snapshot;
+}
+
+function activeItemInputFromRow(row: ActiveItemInputDbRow): ActiveItemInput {
+	if (row.itemType === "activity") {
+		return {
+			itemId: row.itemId,
+			quoteInput: {
+				activityDate: requiredRowValue(row.activityDate, "activity date"),
+				activityId: requiredRowValue(row.activityId, "activity id"),
+				answers: row.activityAnswers ?? [],
+				participants: requiredRowValue(
+					row.activityParticipants,
+					"activity participants",
+				).map((participant) => ({
+					count: participant.count,
+					pricingCategoryId: participant.pricingCategoryId,
+				})),
+				rateId: row.activityRateId,
+				startTimeId: row.activityStartTimeId,
+			},
+			type: "activity",
+		};
+	}
+
+	if (row.itemType !== "accommodation") {
+		throw new CommerceError(
+			"quote_snapshot_invalid",
+			"Cart item has an unsupported type.",
+			500,
+		);
+	}
+
+	return {
+		itemId: row.itemId,
+		quoteInput: {
+			adults: requiredRowValue(row.accommodationAdults, "adults"),
+			children: requiredRowValue(row.accommodationChildren, "children"),
+			dates: {
+				checkIn: requiredRowValue(row.accommodationCheckIn, "check-in"),
+				checkOut: requiredRowValue(row.accommodationCheckOut, "check-out"),
+				nights: requiredRowValue(row.accommodationNights, "nights"),
+			},
+			guests: requiredRowValue(row.accommodationGuests, "guests"),
+			infants: requiredRowValue(row.accommodationInfants, "infants"),
+			listingId: requiredRowValue(row.accommodationListingId, "listing id"),
+			pets: requiredRowValue(row.accommodationPets, "pets"),
+		},
+		type: "accommodation",
+	};
+}
+
+function cartJoinedRowFromDb(row: CartJoinedDbRow): CartJoinedRow {
+	if (row.itemType === "activity") {
+		return {
+			activityAnswers: row.activityAnswers ?? [],
+			activityDate: requiredRowValue(row.activityDate, "activity date"),
+			activityId: requiredRowValue(row.activityId, "activity id"),
+			activitySummary: row.activitySummary,
+			activityTitle: row.activityTitle,
+			cartItemId: row.cartItemId,
+			city: row.activityCity,
+			country: row.activityCountry,
+			currency: requiredRowValue(row.activityQuoteCurrency, "currency"),
+			externalAccountId: requiredRowValue(
+				row.activityExternalAccountId,
+				"external account id",
+			),
+			fetchedAt: requiredRowValue(row.activityFetchedAt, "fetched at"),
+			itemType: "activity",
+			participants: row.activityParticipants ?? [],
+			position: row.position,
+			provider: requiredRowValue(row.activityProvider, "provider"),
+			providerPayload: row.activityProviderPayload,
+			quoteExpiresAt: requiredRowValue(
+				row.activityQuoteExpiresAt,
+				"quote expiry",
+			),
+			quoteId: requiredRowValue(row.activityQuoteId, "quote id"),
+			quoteStatus: requiredRowValue(row.activityQuoteStatus, "quote status"),
+			rateId: row.activityRateId,
+			startTimeId: row.activityStartTimeId,
+			subtotalMinor: requiredRowValue(row.activitySubtotalMinor, "subtotal"),
+			taxMinor: requiredRowValue(row.activityTaxMinor, "tax"),
+			totalMinor: requiredRowValue(row.activityTotalMinor, "total"),
+			totalParticipants: requiredRowValue(
+				row.activityTotalParticipants,
+				"total participants",
+			),
+			updatedAt: row.updatedAt,
+		};
+	}
+
+	if (row.itemType !== "accommodation") {
+		throw new CommerceError(
+			"quote_snapshot_invalid",
+			"Cart item has an unsupported type.",
+			500,
+		);
+	}
+
+	return {
+		cartItemId: row.cartItemId,
+		checkIn: requiredRowValue(row.checkIn, "check-in"),
+		checkOut: requiredRowValue(row.checkOut, "check-out"),
+		city: row.city,
+		country: row.country,
+		currency: requiredRowValue(row.currency, "currency"),
+		externalAccountId: requiredRowValue(
+			row.externalAccountId,
+			"external account id",
+		),
+		feeLines: requiredRowValue(row.feeLines, "fee lines"),
+		fetchedAt: requiredRowValue(row.fetchedAt, "fetched at"),
+		guests: requiredRowValue(row.guests, "guests"),
+		housingFeeMinor: row.housingFeeMinor,
+		imageFallbackName: row.imageFallbackName,
+		infants: requiredRowValue(row.infants, "infants"),
+		itemType: "accommodation",
+		listingExternalId: requiredRowValue(row.listingExternalId, "listing id"),
+		nightlyAverageMinor: row.nightlyAverageMinor,
+		nights: requiredRowValue(row.nights, "nights"),
+		pets: requiredRowValue(row.pets, "pets"),
+		position: row.position,
+		processed: row.processed,
+		provider: requiredRowValue(row.provider, "provider"),
+		providerPayload: row.providerPayload,
+		quoteAdults: requiredRowValue(row.quoteAdults, "adults"),
+		quoteChildren: requiredRowValue(row.quoteChildren, "children"),
+		quoteCleaningFeeMinor: row.quoteCleaningFeeMinor,
+		quoteExpiresAt: requiredRowValue(row.quoteExpiresAt, "quote expiry"),
+		quoteId: requiredRowValue(row.quoteId, "quote id"),
+		quoteStatus: requiredRowValue(row.quoteStatus, "quote status"),
+		raw: row.raw,
+		subtotalMinor: requiredRowValue(row.subtotalMinor, "subtotal"),
+		taxMinor: requiredRowValue(row.taxMinor, "tax"),
+		timezone: row.timezone,
+		totalMinor: requiredRowValue(row.totalMinor, "total"),
+		updatedAt: row.updatedAt,
+	};
+}
+
 function toCartItemDto(row: CartJoinedRow, now: Date): CartItemDto {
-	const snapshot = listingSnapshot(row);
 	const quote = quoteDto(row, now);
+	if (row.itemType === "activity") {
+		const snapshot = activityCatalogSnapshot(row);
+		return {
+			activityDate: row.activityDate,
+			activityId: row.activityId,
+			currency: row.currency,
+			id: row.cartItemId,
+			imageUrl: snapshot.imageUrl,
+			participants: row.participants,
+			position: row.position,
+			quote,
+			rateId: row.rateId,
+			startTimeId: row.startTimeId,
+			status: "active",
+			subtotalMinor: row.subtotalMinor,
+			taxMinor: row.taxMinor,
+			title: snapshot.title,
+			totalMinor: row.totalMinor,
+			totalParticipants: row.totalParticipants,
+			type: "activity",
+			updatedAt: row.updatedAt.toISOString(),
+		};
+	}
+
+	const snapshot = listingSnapshot(row);
 
 	return {
 		adults: row.quoteAdults,
@@ -7520,7 +8514,7 @@ function quoteDto(row: CartJoinedRow, now: Date): CommerceQuoteDto {
 	return {
 		currency: row.currency,
 		expiresAt: row.quoteExpiresAt.toISOString(),
-		feeLines: row.feeLines,
+		feeLines: row.itemType === "activity" ? [] : row.feeLines,
 		fetchedAt: row.fetchedAt.toISOString(),
 		id: row.quoteId,
 		status,
@@ -7531,7 +8525,7 @@ function quoteDto(row: CartJoinedRow, now: Date): CommerceQuoteDto {
 }
 
 function quoteSnapshotFromRow(
-	row: CartJoinedRow,
+	row: AccommodationCartJoinedRow,
 ): NormalizedAccommodationQuoteSnapshot {
 	return {
 		adults: row.quoteAdults,
@@ -7561,6 +8555,31 @@ function quoteSnapshotFromRow(
 	};
 }
 
+function activityQuoteSnapshotFromRow(
+	row: ActivityCartJoinedRow,
+): NormalizedActivityQuoteSnapshot {
+	return {
+		activityDate: row.activityDate,
+		answers: row.activityAnswers,
+		bokunActivityId: row.activityId,
+		currency: row.currency,
+		expiresAt: row.quoteExpiresAt,
+		externalAccountId: row.externalAccountId,
+		fetchedAt: row.fetchedAt,
+		id: row.quoteId,
+		participants: row.participants,
+		provider: row.provider,
+		providerPayload: row.providerPayload ?? {},
+		rateId: row.rateId,
+		startTimeId: row.startTimeId,
+		subtotalMinor: row.subtotalMinor,
+		taxMinor: row.taxMinor,
+		totalMinor: row.totalMinor,
+		totalParticipants: row.totalParticipants,
+		validationStatus: row.quoteStatus as QuoteValidationStatus,
+	};
+}
+
 function quoteStatus(row: CartJoinedRow, now: Date): QuoteValidationStatus {
 	if (
 		row.quoteStatus === "valid" &&
@@ -7578,7 +8597,9 @@ function quoteStatus(row: CartJoinedRow, now: Date): QuoteValidationStatus {
 	return "valid";
 }
 
-function listingSnapshot(row: CartJoinedRow): ListingDisplaySnapshot {
+function listingSnapshot(
+	row: AccommodationCartJoinedRow,
+): ListingDisplaySnapshot {
 	const title = pickTitle(
 		row.processed,
 		row.imageFallbackName,
@@ -7595,6 +8616,49 @@ function listingSnapshot(row: CartJoinedRow): ListingDisplaySnapshot {
 		provider: row.provider,
 		title,
 	};
+}
+
+function activityCatalogSnapshot(
+	row: ActivityCartJoinedRow,
+): CommerceCatalogSnapshot {
+	const summary = activitySummaryRecord(row.activitySummary);
+	const coverPhoto = recordValue(summary, "coverPhoto");
+	const location = recordValue(summary, "location");
+	const city = stringValue(recordValue(location, "city")) ?? row.city;
+	const country = stringValue(recordValue(location, "country")) ?? row.country;
+	const imageUrl =
+		stringValue(recordValue(coverPhoto, "url")) ??
+		stringValue(recordValue(coverPhoto, "thumbnailUrl"));
+	const title =
+		stringValue(recordValue(summary, "title")) ??
+		row.activityTitle?.trim() ??
+		row.activityId;
+
+	return {
+		city,
+		country,
+		imageUrl,
+		listingId: row.activityId,
+		locationLabel: [city, country].filter(Boolean).join(", ") || null,
+		provider: row.provider,
+		title,
+	};
+}
+
+function activitySummaryRecord(value: unknown): Record<string, unknown> {
+	return value && typeof value === "object"
+		? (value as Record<string, unknown>)
+		: {};
+}
+
+function recordValue(value: unknown, key: string): unknown {
+	return value && typeof value === "object"
+		? (value as Record<string, unknown>)[key]
+		: null;
+}
+
+function stringValue(value: unknown): string | null {
+	return typeof value === "string" && value.trim() ? value.trim() : null;
 }
 
 function pickTitle(

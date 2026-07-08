@@ -448,8 +448,12 @@ function contact(): DraftOrderContactInput {
 	return {
 		billingAddress: {},
 		companyName: null,
+		dateOfBirth: null,
 		email: "guest@example.com",
+		firstName: null,
 		isCompany: false,
+		language: null,
+		lastName: null,
 		name: "Guest Name",
 		notes: null,
 		phoneE164: "+351910000000",

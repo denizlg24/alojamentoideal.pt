@@ -66,6 +66,11 @@ export function formatStayRangeLong(checkIn: string, checkOut: string): string {
 	return `${format(from, "MMM d")} to ${format(to, "MMM d, yyyy")}`;
 }
 
+/** Full single activity date with weekday, e.g. "Wed, Jun 24, 2026". */
+export function formatActivityDateLong(date: string): string {
+	return format(parseIsoDate(date), "EEE, MMM d, yyyy");
+}
+
 export interface GuestCounts {
 	adults: number;
 	children: number;

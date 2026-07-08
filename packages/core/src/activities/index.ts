@@ -1,3 +1,14 @@
+export type {
+	ActivityBookingSchema,
+	ActivityPassengerQuestions,
+	ActivityPickupSchema,
+	ActivityPlaceOption,
+	ActivityPlaceSelectionType,
+	ActivityQuestionField,
+	ActivityQuestionOption,
+	NormalizeActivityBookingSchemaInput,
+} from "./booking-schema";
+export { normalizeActivityBookingSchema } from "./booking-schema";
 export {
 	DIFFICULTY_LABELS,
 	DIFFICULTY_ORDER,

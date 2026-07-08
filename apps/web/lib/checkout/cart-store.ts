@@ -3,6 +3,9 @@ import * as api from "./api-client";
 import { CHECKOUT_CART_STORAGE_KEY } from "./api-client";
 import { toCheckoutError } from "./errors";
 import {
+	type ActivityKeyInput,
+	activityCartItemClientMutationId,
+	activityCartItemIdempotencyKey,
 	cartItemClientMutationId,
 	cartItemIdempotencyKey,
 	type StayKeyInput,
@@ -62,10 +65,10 @@ export function activeItemCount(cart: CartDto | null): number {
 }
 
 /**
- * Stable, order-insensitive fingerprint of the cart's active stays. Changes
- * whenever a stay is added, removed or edited (dates or guests); deliberately
- * ignores price-only quote refreshes so background revalidation does not churn
- * the route key and force pointless remounts.
+ * Stable, order-insensitive fingerprint of the cart's active contents. Changes
+ * whenever a stay or activity is added, removed or edited; deliberately ignores
+ * price-only quote refreshes so background revalidation does not churn the
+ * route key and force pointless remounts.
  */
 export function cartContentFingerprint(cart: CartDto | null): string {
 	if (cart?.status !== "draft") {
@@ -73,9 +76,27 @@ export function cartContentFingerprint(cart: CartDto | null): string {
 	}
 	const parts = cart.items
 		.filter((item) => item.status === "active")
-		.map((item) =>
-			[
+		.map((item) => {
+			if (item.type === "activity") {
+				const participants = [...item.participants]
+					.sort((a, b) => a.pricingCategoryId - b.pricingCategoryId)
+					.map(
+						(participant) =>
+							`${participant.pricingCategoryId}:${participant.count}`,
+					)
+					.join(",");
+				return [
+					item.id,
+					item.type,
+					item.activityId,
+					item.activityDate,
+					participants,
+				].join("|");
+			}
+
+			return [
 				item.id,
+				item.type,
 				item.listingId,
 				item.checkIn,
 				item.checkOut,
@@ -83,8 +104,8 @@ export function cartContentFingerprint(cart: CartDto | null): string {
 				item.children,
 				item.infants,
 				item.guests,
-			].join("|"),
-		)
+			].join("|");
+		})
 		.sort();
 	return parts.length === 0 ? EMPTY_CART_FINGERPRINT : parts.join(";");
 }
@@ -254,6 +275,25 @@ export async function addStayToCart(stay: StayKeyInput): Promise<CartDto> {
 		idempotencyKey: cartItemIdempotencyKey(stay),
 		infants: stay.infants,
 		listingId: stay.listingId,
+	});
+	notifyCartChanged(mutation.cart);
+	return mutation.cart;
+}
+
+export async function addActivityToCart(
+	activity: ActivityKeyInput,
+): Promise<CartDto> {
+	const cart = await ensureCart();
+	const mutation = await api.addCartItem(cart.id, {
+		activityDate: activity.activityDate,
+		activityId: activity.activityId,
+		answers: activity.answers ?? [],
+		clientMutationId: activityCartItemClientMutationId(activity),
+		idempotencyKey: activityCartItemIdempotencyKey(activity),
+		participants: activity.participants,
+		rateId: activity.rateId ?? null,
+		startTimeId: activity.startTimeId ?? null,
+		type: "activity",
 	});
 	notifyCartChanged(mutation.cart);
 	return mutation.cart;

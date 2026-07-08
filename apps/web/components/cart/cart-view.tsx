@@ -1,6 +1,7 @@
 "use client";
 
 import type {
+	AccommodationCartItemDto,
 	CartDto,
 	CartItemDto,
 	CartValidationResponse,
@@ -45,6 +46,10 @@ function activeItems(cart: CartDto | null): CartItemDto[] {
 	return cart?.items.filter((item) => item.status === "active") ?? [];
 }
 
+function isStayItem(item: CartItemDto): item is AccommodationCartItemDto {
+	return item.type === "accommodation";
+}
+
 function EmptyCart() {
 	return (
 		<div className="flex flex-col items-center gap-4 rounded-2xl border bg-card px-6 py-16 text-center shadow-sm">
@@ -79,7 +84,7 @@ export function CartLoading() {
 interface CartItemCardProps {
 	failure: string | null;
 	item: CartItemDto;
-	onEdit: () => void;
+	onEdit?: () => void;
 	onRemove: () => void;
 	repricing: boolean;
 }
@@ -91,13 +96,26 @@ function CartItemCard({
 	onRemove,
 	repricing,
 }: CartItemCardProps) {
+	const href =
+		item.type === "activity"
+			? `/activities/${item.activityId}`
+			: `/homes/${item.listingId}`;
+	const meta =
+		item.type === "activity"
+			? `${item.activityDate} · ${item.totalParticipants} ${
+					item.totalParticipants === 1 ? "participant" : "participants"
+				}`
+			: `${formatStayRangeLong(item.checkIn, item.checkOut)} · ${nightsLabel(
+					item.nights,
+				)}`;
+
 	return (
 		<div className="flex flex-col gap-3 rounded-2xl border bg-card p-4 shadow-sm">
 			<div className="flex gap-4">
 				<Link
 					aria-label={item.title}
 					className="block size-24 shrink-0 overflow-hidden rounded-xl bg-muted sm:size-28"
-					href={`/homes/${item.listingId}`}
+					href={href}
 				>
 					{item.imageUrl && (
 						<Image
@@ -112,21 +130,20 @@ function CartItemCard({
 				<div className="flex min-w-0 flex-1 flex-col gap-1">
 					<Link
 						className="line-clamp-2 font-medium text-sm hover:underline"
-						href={`/homes/${item.listingId}`}
+						href={href}
 					>
 						{item.title}
 					</Link>
-					<p className="text-muted-foreground text-sm">
-						{formatStayRangeLong(item.checkIn, item.checkOut)} ·{" "}
-						{nightsLabel(item.nights)}
-					</p>
-					<p className="text-muted-foreground text-sm">
-						{guestSummaryLabel({
-							adults: item.adults,
-							children: item.children,
-							infants: item.infants,
-						})}
-					</p>
+					<p className="text-muted-foreground text-sm">{meta}</p>
+					{item.type === "accommodation" && (
+						<p className="text-muted-foreground text-sm">
+							{guestSummaryLabel({
+								adults: item.adults,
+								children: item.children,
+								infants: item.infants,
+							})}
+						</p>
+					)}
 					{repricing ? (
 						<Skeleton className="mt-auto h-5 w-24" />
 					) : (
@@ -144,13 +161,15 @@ function CartItemCard({
 			)}
 
 			<div className="flex flex-wrap items-center gap-4 border-t pt-3">
-				<Button
-					className="h-auto p-0 text-sm underline"
-					onClick={onEdit}
-					variant="link"
-				>
-					Edit stay
-				</Button>
+				{onEdit && (
+					<Button
+						className="h-auto p-0 text-sm underline"
+						onClick={onEdit}
+						variant="link"
+					>
+						Edit stay
+					</Button>
+				)}
 				<Button
 					className="ml-auto h-auto p-0 text-destructive text-sm underline"
 					onClick={onRemove}
@@ -190,8 +209,9 @@ export function CartView() {
 	repricingRef.current = repricingItemIds;
 
 	const items = activeItems(cart);
+	const stayItems = items.filter(isStayItem);
 	const constraints = useListingConstraints(
-		items.map((item) => item.listingId),
+		stayItems.map((item) => item.listingId),
 	);
 
 	const applyValidation = useCallback((validated: CartValidationResponse) => {
@@ -227,10 +247,20 @@ export function CartView() {
 		})();
 	}, [applyValidation]);
 
+	// Broadcasts an optimistic cart to the header badge and advances the applied
+	// fingerprint so the cart-changed listener below recognizes the broadcast as
+	// our own edit (matching fingerprint) instead of re-reading the server cart
+	// and rolling the optimistic removal back.
+	const notifyOptimisticCart = useCallback((next: CartDto) => {
+		lastAppliedFingerprintRef.current = cartContentFingerprint(next);
+		notifyCartChanged(next);
+	}, []);
+
 	const edits = useOptimisticStayEdits({
 		applyValidated: applyValidation,
 		cart,
 		onError: setNotice,
+		onOptimisticCart: notifyOptimisticCart,
 		setCart,
 		setRepricingItemIds,
 	});
@@ -307,9 +337,9 @@ export function CartView() {
 	const dialogItem = useMemo(
 		() =>
 			dialogItemId
-				? (items.find((item) => item.id === dialogItemId) ?? null)
+				? (stayItems.find((item) => item.id === dialogItemId) ?? null)
 				: null,
-		[dialogItemId, items],
+		[dialogItemId, stayItems],
 	);
 	const dialogConstraints = dialogItem
 		? (constraints.get(dialogItem.listingId) ?? DEFAULT_LISTING_CONSTRAINTS)
@@ -355,7 +385,11 @@ export function CartView() {
 						failure={failures.get(item.id) ?? null}
 						item={item}
 						key={item.id}
-						onEdit={() => setDialogItemId(item.id)}
+						onEdit={
+							item.type === "accommodation"
+								? () => setDialogItemId(item.id)
+								: undefined
+						}
 						onRemove={() => edits.removeStay(item.id)}
 						repricing={repricingItemIds.has(item.id)}
 					/>

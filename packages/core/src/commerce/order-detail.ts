@@ -46,6 +46,8 @@ export interface OrderItemPricing {
 }
 
 export interface OrderDetailItem {
+	/** Local activity date, `YYYY-MM-DD`. Null for non-activity items. */
+	activityDate: string | null;
 	adults: number | null;
 	charges: OrderDetailCharge[] | null;
 	checkIn: string | null;
@@ -68,6 +70,8 @@ export interface OrderDetailItem {
 		status: ProviderBookingStatus;
 	} | null;
 	title: string;
+	/** Booked participant count for an activity. Null for non-activity items. */
+	totalParticipants: number | null;
 	type: string;
 }
 

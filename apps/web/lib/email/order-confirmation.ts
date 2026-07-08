@@ -109,11 +109,32 @@ function formatNights(nights: number): string {
 	return `${nights} ${nights === 1 ? "night" : "nights"}`;
 }
 
+function formatParticipants(participants: number): string {
+	if (participants <= 0) {
+		return "To be confirmed";
+	}
+	return `${participants} ${participants === 1 ? "participant" : "participants"}`;
+}
+
+function formatActivityDate(value: string): string {
+	const date = new Date(`${value}T00:00:00.000Z`);
+	if (Number.isNaN(date.getTime())) {
+		return value;
+	}
+	return new Intl.DateTimeFormat("en-GB", {
+		day: "numeric",
+		month: "short",
+		timeZone: "UTC",
+		weekday: "short",
+		year: "numeric",
+	}).format(date);
+}
+
 /**
  * Maps the durable order facts to the transport-layer email input, formatting
  * money, dates and the payment method for display. Shared by the confirmation
  * and pending-notice emails so both render identical booking details. Every
- * booking on the order becomes one stay block in the email.
+ * accommodation becomes a stay block and every activity an activity block.
  */
 export function toOrderEmailInput(
 	facts: OrderConfirmationFacts,
@@ -122,6 +143,12 @@ export function toOrderEmailInput(
 	const paymentMethod = formatPaymentMethod(facts.paymentMethod);
 
 	return {
+		activities: facts.activities.map((activity) => ({
+			date: formatActivityDate(activity.activityDate),
+			image: activity.imageUrl ?? FALLBACK_IMAGE_URL,
+			participants: formatParticipants(activity.totalParticipants),
+			title: activity.title,
+		})),
 		billingAddress: formatBillingAddress(facts.billingAddress),
 		cardLastFour: paymentMethod.cardLastFour,
 		contactEmail: facts.email,

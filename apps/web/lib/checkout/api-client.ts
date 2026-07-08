@@ -1,7 +1,10 @@
+import type { ActivityBookingSchema } from "@workspace/core/activities";
 import type {
 	CartMutationResponse,
 	CartResponse,
 	CartValidationResponse,
+	CommerceActivityQuoteInput,
+	DraftOrderActivityDetailInput,
 	DraftOrderContactInput,
 	DraftOrderResponse,
 	HoldReservationResponse,
@@ -72,7 +75,7 @@ export function getCart(cartId: string): Promise<CartResponse> {
 	return request<CartResponse>(`/api/cart/${segment(cartId)}`);
 }
 
-export interface AddCartItemInput {
+export interface AddAccommodationCartItemInput {
 	adults?: number;
 	checkIn: string;
 	checkOut: string;
@@ -83,7 +86,19 @@ export interface AddCartItemInput {
 	infants?: number;
 	listingId: string;
 	pets?: number;
+	type?: "accommodation";
 }
+
+export interface AddActivityCartItemInput
+	extends Omit<CommerceActivityQuoteInput, "forceFresh"> {
+	clientMutationId?: string;
+	idempotencyKey: string;
+	type: "activity";
+}
+
+export type AddCartItemInput =
+	| AddAccommodationCartItemInput
+	| AddActivityCartItemInput;
 
 export function addCartItem(
 	cartId: string,
@@ -178,8 +193,14 @@ export interface CheckoutBillingAddress {
 export interface CheckoutContactInput {
 	billingAddress?: CheckoutBillingAddress;
 	companyName?: string;
+	/** ISO YYYY-MM-DD; required by Bokun for activity main contacts. */
+	dateOfBirth?: string;
 	email: string;
+	firstName?: string;
 	isCompany?: boolean;
+	/** Bokun language code, e.g. "en"; required for activity main contacts. */
+	language?: string;
+	lastName?: string;
 	name: string;
 	notes?: string;
 	phone: string;
@@ -187,6 +208,7 @@ export interface CheckoutContactInput {
 }
 
 export interface CreateDraftOrderInput {
+	activityDetails?: DraftOrderActivityDetailInput[];
 	cartId: string;
 	contact: CheckoutContactInput;
 	idempotencyKey?: string;
@@ -197,6 +219,29 @@ export function createDraftOrder(
 ): Promise<DraftOrderResponse> {
 	return request<DraftOrderResponse>(
 		"/api/checkout/draft-order",
+		jsonBody(body),
+	);
+}
+
+export interface ActivityBookingSchemaInput {
+	activityDate: string;
+	activityId: string;
+	participants: { count: number; pricingCategoryId: number }[];
+	rateId: string | null;
+	startTimeId: string | null;
+}
+
+/**
+ * Fetches the Bokun booking-question schema for one activity selection so
+ * checkout can collect the required questions and pickup/dropoff places before
+ * the reservation hold. Read-only; the collected answers ride on the
+ * draft-order body.
+ */
+export function fetchActivityBookingSchema(
+	body: ActivityBookingSchemaInput,
+): Promise<ActivityBookingSchema> {
+	return request<ActivityBookingSchema>(
+		"/api/checkout/activity-booking-schema",
 		jsonBody(body),
 	);
 }
@@ -274,5 +319,19 @@ export function updateOrderContact(
 	return request<OrderContactResponse>(
 		`/api/checkout/order/${encodeURIComponent(publicReference)}/contact`,
 		{ body: JSON.stringify(body), method: "PUT" },
+	);
+}
+
+/** Updates draft order activity answers in place before payment confirmation. */
+export function updateOrderActivityDetails(
+	publicReference: string,
+	activityDetails: DraftOrderActivityDetailInput[],
+): Promise<void> {
+	return request<void>(
+		`/api/checkout/order/${encodeURIComponent(publicReference)}/activity-details`,
+		{
+			body: JSON.stringify({ activityDetails }),
+			method: "PUT",
+		},
 	);
 }

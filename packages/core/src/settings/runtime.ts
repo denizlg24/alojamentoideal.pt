@@ -110,11 +110,14 @@ export function validateRuntimeSettingValue(
 			return trimmed.toUpperCase();
 		}
 		if (key === "bokun.activityIds") {
+			if (!trimmed) {
+				return "";
+			}
 			const ids = trimmed
 				.split(",")
 				.map((value) => value.trim())
 				.filter(Boolean);
-			if (ids.length === 0 || ids.some((value) => !/^\d+$/.test(value))) {
+			if (ids.some((value) => !/^\d+$/.test(value))) {
 				throw new Error(
 					`${definition.label} must be a comma-separated list of Bokun ids`,
 				);

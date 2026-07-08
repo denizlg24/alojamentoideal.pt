@@ -137,6 +137,49 @@
       </Section>
       <Raw>__STAYS_END__</Raw>
 
+      <Raw>__ACTIVITIES_START__</Raw>
+      <Section class="bg-[#fffdf9]">
+        <Img
+          src="__ACTIVITY_IMAGE__"
+          alt="Activity photo"
+          width="600"
+          class="block w-full max-w-full"
+        />
+      </Section>
+
+      <Section class="bg-[#fffdf9] px-9 pt-9 pb-8 sm:px-6">
+        <Heading
+          level="2"
+          class="m-0 font-bricolage-grotesque text-[24px] font-semibold leading-8 text-[#2b211b]"
+        >
+          <Raw>__ACTIVITY_TITLE__</Raw>
+        </Heading>
+
+        <Spacer class="h-6" />
+
+        <table cellpadding="0" cellspacing="0" class="w-full" role="presentation">
+          <tr>
+            <td class="w-1/2 border-t border-[#ece1cf] py-4 pr-4 align-top">
+              <Text class="m-0 text-[13px] leading-5 text-[#94826f]">
+                Date
+              </Text>
+              <Text class="m-0 mt-1 text-[16px] font-medium leading-6 text-[#2b211b]">
+                <Raw>__ACTIVITY_DATE__</Raw>
+              </Text>
+            </td>
+            <td class="w-1/2 border-t border-[#ece1cf] py-4 pl-4 align-top">
+              <Text class="m-0 text-[13px] leading-5 text-[#94826f]">
+                Participants
+              </Text>
+              <Text class="m-0 mt-1 text-[16px] font-medium leading-6 text-[#2b211b]">
+                <Raw>__ACTIVITY_PARTICIPANTS__</Raw>
+              </Text>
+            </td>
+          </tr>
+        </table>
+      </Section>
+      <Raw>__ACTIVITIES_END__</Raw>
+
       <Section class="bg-[#fffdf9] px-9 pt-1 pb-8 sm:px-6">
         <Button
           href="__MANAGE_URL__"

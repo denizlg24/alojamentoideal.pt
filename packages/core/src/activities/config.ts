@@ -59,7 +59,8 @@ export function getActivityCacheConfig(
 		CRON_SECRET: process.env.CRON_SECRET,
 	},
 ): ActivityCacheConfig {
-	const configuredIds = environment.BOKUN_ACTIVITY_IDS?.trim();
+	const hasConfiguredActivityIds = environment.BOKUN_ACTIVITY_IDS !== undefined;
+	const configuredIds = environment.BOKUN_ACTIVITY_IDS?.trim() ?? "";
 	const parsedActivityIds = configuredIds
 		? parseActivityIdList(configuredIds)
 		: [];
@@ -70,9 +71,11 @@ export function getActivityCacheConfig(
 		);
 	}
 	const activityIds =
-		parsedActivityIds.length > 0
-			? parsedActivityIds
-			: [...DEFAULT_ACTIVITY_IDS];
+		hasConfiguredActivityIds && configuredIds === ""
+			? []
+			: parsedActivityIds.length > 0
+				? parsedActivityIds
+				: [...DEFAULT_ACTIVITY_IDS];
 
 	return {
 		accountId: environment.BOKUN_ACCOUNT_ID?.trim() || "default",

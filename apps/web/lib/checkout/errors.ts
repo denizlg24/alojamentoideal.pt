@@ -39,6 +39,8 @@ const NETWORK_ERROR_MESSAGE =
 	"We could not reach the server. Please check your connection and try again.";
 
 const FRIENDLY_MESSAGES: Record<string, string> = {
+	activity_details_invalid:
+		"Some activity details need your attention. Please review the guest information and try again.",
 	cart_changed: "Your stay was updated. Please review the new details.",
 	cart_converted:
 		"We are preparing your payment step. Please review your details to finish.",

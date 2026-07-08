@@ -9,6 +9,7 @@ import {
 	parseOrderContactBody,
 	parseUpdateBookingGuestsBody,
 	parseUpdateCartItemBody,
+	parseUpdateDraftOrderActivityDetailsBody,
 } from "./schemas";
 
 describe("commerce request parsers", () => {
@@ -251,6 +252,36 @@ describe("commerce request parsers", () => {
 		});
 
 		expect(parsed.success).toBe(false);
+	});
+
+	test("parses standalone draft order activity detail updates", () => {
+		const parsed = parseUpdateDraftOrderActivityDetailsBody({
+			activityDetails: [
+				{
+					answers: [
+						{
+							answer: "English",
+							group: "passengerDetails",
+							participantIndex: 0,
+							questionId: "language",
+						},
+					],
+					cartItemId: "cart_item_1",
+					dropoffPlaceId: null,
+					pickupPlaceId: "14875488",
+					roomNumber: "12",
+				},
+			],
+		});
+
+		expect(parsed.success).toBe(true);
+		if (!parsed.success) {
+			throw parsed.error;
+		}
+		expect(parsed.data.activityDetails[0]).toMatchObject({
+			cartItemId: "cart_item_1",
+			pickupPlaceId: "14875488",
+		});
 	});
 
 	test("accepts draft orders reconstructed from flat contact fields", () => {

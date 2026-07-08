@@ -14,8 +14,21 @@ export interface PaymentIntentParams {
 	environment: string;
 	existingPaymentIntentId?: string | null;
 	idempotencyKey: string;
+	/**
+	 * Stripe Connect connected account (Detours) that acts as the settlement
+	 * merchant of record for the charge. Set together with `transferDestination`
+	 * for activity charges.
+	 */
+	onBehalfOf?: string | null;
 	orderId: string;
 	publicReference: string;
+	/**
+	 * Stripe Connect destination for a destination charge. When set, the whole
+	 * charge is transferred to this connected account (no `transfer_data.amount`),
+	 * matching the activity-only money split (data-architecture 2.4). Left unset
+	 * for accommodation-only orders, which settle on the platform balance.
+	 */
+	transferDestination?: string | null;
 }
 
 /** Normalized PaymentIntent fields the checkout boundary needs. */
@@ -125,20 +138,30 @@ export async function createOrUpdatePaymentIntent(
 		return toSnapshot(existing);
 	}
 
-	const created = await stripe.paymentIntents.create(
-		{
-			amount: params.amountMinor,
-			automatic_payment_methods: { enabled: true },
-			currency,
-			metadata: {
-				cartId: params.cartId,
-				environment: params.environment,
-				orderId: params.orderId,
-				publicReference: params.publicReference,
-			},
+	const createParams: Stripe.PaymentIntentCreateParams = {
+		amount: params.amountMinor,
+		automatic_payment_methods: { enabled: true },
+		currency,
+		metadata: {
+			cartId: params.cartId,
+			environment: params.environment,
+			orderId: params.orderId,
+			publicReference: params.publicReference,
 		},
-		{ idempotencyKey: params.idempotencyKey },
-	);
+	};
+
+	if (params.transferDestination) {
+		// Destination charge with no `amount`: the full charge routes to the
+		// connected account, so an activity-only order settles to Detours.
+		createParams.transfer_data = { destination: params.transferDestination };
+		if (params.onBehalfOf) {
+			createParams.on_behalf_of = params.onBehalfOf;
+		}
+	}
+
+	const created = await stripe.paymentIntents.create(createParams, {
+		idempotencyKey: params.idempotencyKey,
+	});
 
 	return toSnapshot(created);
 }

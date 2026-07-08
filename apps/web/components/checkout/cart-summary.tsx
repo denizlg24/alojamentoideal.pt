@@ -39,6 +39,15 @@ function SummaryItemRow({
 	onEdit?: () => void;
 	repricing: boolean;
 }) {
+	const meta =
+		item.type === "activity"
+			? `${item.activityDate} · ${item.totalParticipants} ${
+					item.totalParticipants === 1 ? "participant" : "participants"
+				}`
+			: `${formatStayRange(item.checkIn, item.checkOut)} · ${nightsLabel(
+					item.nights,
+				)}`;
+
 	return (
 		<div className="flex flex-col gap-2">
 			<div className="flex gap-3">
@@ -55,17 +64,16 @@ function SummaryItemRow({
 				</div>
 				<div className="flex min-w-0 flex-1 flex-col">
 					<span className="line-clamp-1 font-medium text-sm">{item.title}</span>
-					<span className="text-muted-foreground text-xs">
-						{formatStayRange(item.checkIn, item.checkOut)} ·{" "}
-						{nightsLabel(item.nights)}
-					</span>
-					<span className="text-muted-foreground text-xs">
-						{guestSummaryLabel({
-							adults: item.adults,
-							children: item.children,
-							infants: item.infants,
-						})}
-					</span>
+					<span className="text-muted-foreground text-xs">{meta}</span>
+					{item.type === "accommodation" && (
+						<span className="text-muted-foreground text-xs">
+							{guestSummaryLabel({
+								adults: item.adults,
+								children: item.children,
+								infants: item.infants,
+							})}
+						</span>
+					)}
 				</div>
 				{repricing ? (
 					<Skeleton className="h-4 w-16 shrink-0" />
@@ -75,7 +83,7 @@ function SummaryItemRow({
 					</span>
 				)}
 			</div>
-			{onEdit && (
+			{item.type === "accommodation" && onEdit && (
 				<div className="pl-[68px]">
 					<button
 						className="text-muted-foreground text-xs underline underline-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
@@ -116,8 +124,8 @@ export function CartSummary({
 			<div className="flex items-center justify-between gap-2">
 				<span className="font-medium text-sm">
 					{loading
-						? "Your stays"
-						: `${items.length} ${items.length === 1 ? "stay" : "stays"}`}
+						? "Your items"
+						: `${items.length} ${items.length === 1 ? "item" : "items"}`}
 				</span>
 				{canEditCart && (
 					<Button

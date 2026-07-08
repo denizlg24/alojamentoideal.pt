@@ -1,11 +1,15 @@
 import { describe, expect, test } from "bun:test";
+import { BokunApiError, type BokunClient } from "../integrations/bokun";
 import {
 	HostifyApiError,
 	type HostifyClient,
 	HostifyResponseValidationError,
 } from "../integrations/hostify";
 import {
+	type BokunActivityHoldRequest,
+	BokunReservationGateway,
 	type BuildReservationInput,
+	buildBokunActivityCheckoutRequest,
 	buildCreateReservationInput,
 	buildTransactionInput,
 	type HostifyHoldRequest,
@@ -65,6 +69,214 @@ describe("buildTransactionInput", () => {
 		expect(result.details).toContain(
 			reservationTag("AI-2026-ABCD1234", "item-1"),
 		);
+	});
+});
+
+describe("buildBokunActivityCheckoutRequest", () => {
+	test("maps an activity hold to Bokun direct external-payment checkout", () => {
+		const result = buildBokunActivityCheckoutRequest(activityHoldRequest);
+		expect(result.amount).toBe(50);
+		expect(result.paymentMethod).toBe("RESERVE_FOR_EXTERNAL_PAYMENT");
+		expect(result.source).toBe("DIRECT_REQUEST");
+
+		const directBooking = result.directBooking as Record<string, unknown>;
+		expect(directBooking.externalBookingReference).toBe(
+			reservationTag("AI-2026-ACT1234", "item-activity"),
+		);
+
+		const [activity] = directBooking.activityBookings as Record<
+			string,
+			unknown
+		>[];
+		expect(activity?.activityId).toBe(12345);
+		expect(activity?.rateId).toBe(7);
+		expect(activity?.startTimeId).toBe(9);
+		expect(activity?.answers).toEqual([
+			{ questionId: "allergies", values: ["No allergies"] },
+		]);
+		expect(activity?.passengers).toEqual([
+			{
+				answers: [],
+				extras: [],
+				groupSize: 1,
+				passengerDetails: [
+					{ questionId: "fullName", values: ["Ada Lovelace"] },
+				],
+				pricingCategoryId: 10,
+			},
+			{
+				answers: [],
+				extras: [],
+				groupSize: 1,
+				passengerDetails: [],
+				pricingCategoryId: 10,
+			},
+		]);
+	});
+
+	test("emits pickup/dropoff places, passenger details and full main contact", () => {
+		const result = buildBokunActivityCheckoutRequest({
+			activity: {
+				activityDate: "2026-07-13",
+				answers: [
+					{
+						answer: "None",
+						group: "activity",
+						participantIndex: null,
+						questionId: "1614075",
+					},
+					{
+						answer: "Ana",
+						group: "passengerDetails",
+						participantIndex: 0,
+						questionId: "firstName",
+					},
+					{
+						answer: "Silva",
+						group: "passengerDetails",
+						participantIndex: 0,
+						questionId: "lastName",
+					},
+					{
+						answer: "m",
+						group: "passengerDetails",
+						participantIndex: 0,
+						questionId: "gender",
+					},
+				],
+				bokunActivityId: "1248387",
+				dropoffPlaceId: "14875488",
+				participants: [
+					{
+						count: 1,
+						label: "Adult",
+						pricingCategoryId: 1216378,
+						subtotalMinor: 11500,
+						unitPriceMinor: 11500,
+					},
+				],
+				pickupPlaceId: "14875488",
+				rateId: "2480652",
+				roomNumber: "12",
+				startTimeId: "5455452",
+			},
+			amountMinor: 11500,
+			contact: {
+				dateOfBirth: "1990-05-15",
+				email: "ana@example.com",
+				firstName: "Ana",
+				language: "en",
+				lastName: "Silva",
+				name: "Ana Silva",
+				phone: "+351910000000",
+			},
+			currency: "EUR",
+			kind: "bokun_activity",
+			orderItemId: "item-activity",
+			publicReference: "AI-2026-ACT1234",
+			source: "alojamentoideal",
+		});
+
+		const directBooking = result.directBooking as Record<string, unknown>;
+		const [activity] = directBooking.activityBookings as Record<
+			string,
+			unknown
+		>[];
+		expect(activity?.pickup).toBe(true);
+		expect(activity?.pickupPlaceId).toBe(14875488);
+		expect(activity?.dropoff).toBe(true);
+		expect(activity?.dropoffPlaceId).toBe(14875488);
+		expect(activity?.pickupAnswers).toEqual([
+			{ questionId: "roomNumber", values: ["12"] },
+		]);
+		expect(activity?.passengers).toEqual([
+			{
+				answers: [],
+				extras: [],
+				groupSize: 1,
+				passengerDetails: [
+					{ questionId: "firstName", values: ["Ana"] },
+					{ questionId: "lastName", values: ["Silva"] },
+					{ questionId: "gender", values: ["m"] },
+				],
+				pricingCategoryId: 1216378,
+			},
+		]);
+		expect(directBooking.mainContactDetails).toEqual([
+			{ questionId: "firstName", values: ["Ana"] },
+			{ questionId: "lastName", values: ["Silva"] },
+			{ questionId: "email", values: ["ana@example.com"] },
+			{ questionId: "phoneNumber", values: ["+351910000000"] },
+			{ questionId: "language", values: ["en"] },
+			{ questionId: "dateOfBirth", values: ["1990-05-15"] },
+		]);
+	});
+
+	test("falls back to first passenger language and date of birth for main contact", () => {
+		const result = buildBokunActivityCheckoutRequest({
+			activity: {
+				activityDate: "2026-07-13",
+				answers: [
+					{
+						answer: "Ana",
+						group: "passengerDetails",
+						participantIndex: 0,
+						questionId: "firstName",
+					},
+					{
+						answer: "Silva",
+						group: "passengerDetails",
+						participantIndex: 0,
+						questionId: "lastName",
+					},
+					{
+						answer: "pt",
+						group: "passengerDetails",
+						participantIndex: 0,
+						questionId: "language",
+					},
+					{
+						answer: "1990-05-15",
+						group: "passengerDetails",
+						participantIndex: 0,
+						questionId: "dateOfBirth",
+					},
+				],
+				bokunActivityId: "1248387",
+				participants: [
+					{
+						count: 1,
+						label: "Adult",
+						pricingCategoryId: 1216378,
+						subtotalMinor: 11500,
+						unitPriceMinor: 11500,
+					},
+				],
+				rateId: "2480652",
+				startTimeId: "5455452",
+			},
+			amountMinor: 11500,
+			contact: {
+				email: "booker@example.com",
+				name: "Ana",
+				phone: "+351910000000",
+			},
+			currency: "EUR",
+			kind: "bokun_activity",
+			orderItemId: "item-activity",
+			publicReference: "AI-2026-ACT1234",
+			source: "alojamentoideal",
+		});
+
+		const directBooking = result.directBooking as Record<string, unknown>;
+		expect(directBooking.mainContactDetails).toEqual([
+			{ questionId: "firstName", values: ["Ana"] },
+			{ questionId: "lastName", values: ["Silva"] },
+			{ questionId: "email", values: ["booker@example.com"] },
+			{ questionId: "phoneNumber", values: ["+351910000000"] },
+			{ questionId: "language", values: ["pt"] },
+			{ questionId: "dateOfBirth", values: ["1990-05-15"] },
+		]);
 	});
 });
 
@@ -157,6 +369,49 @@ const holdRequest: HostifyHoldRequest = {
 	reservation: buildCreateReservationInput(baseInput),
 	transaction: buildTransactionInput(baseInput),
 };
+
+const activityHoldRequest = {
+	activity: {
+		activityDate: "2026-08-01",
+		answers: [
+			{
+				answer: "No allergies",
+				group: "activity",
+				participantIndex: null,
+				questionId: "allergies",
+			},
+			{
+				answer: "Ada Lovelace",
+				group: "passengerDetails",
+				participantIndex: 0,
+				questionId: "fullName",
+			},
+		],
+		bokunActivityId: "12345",
+		participants: [
+			{
+				count: 2,
+				label: "Adult",
+				pricingCategoryId: 10,
+				subtotalMinor: 5000,
+				unitPriceMinor: 2500,
+			},
+		],
+		rateId: "7",
+		startTimeId: "9",
+	},
+	amountMinor: 5000,
+	contact: {
+		email: "guest@example.com",
+		name: "Ada Lovelace",
+		phone: "+351910000000",
+	},
+	currency: "EUR",
+	kind: "bokun_activity",
+	orderItemId: "item-activity",
+	publicReference: "AI-2026-ACT1234",
+	source: "alojamentoideal",
+} satisfies BokunActivityHoldRequest;
 
 describe("HostifyReservationGateway.placeHold", () => {
 	test("creates the reservation then the linked transaction", async () => {
@@ -574,5 +829,185 @@ describe("HostifyReservationGateway.findExistingHold", () => {
 				tag,
 			}),
 		).rejects.toThrow(HostifyResponseValidationError);
+	});
+});
+
+interface BokunCalls {
+	abortReserved: { code: string }[];
+	confirmReserved: { body: unknown; code: string }[];
+	getByConfirmationCode: { code: string }[];
+	submit: { body: unknown; query: unknown }[];
+}
+
+function fakeBokunClient(overrides: {
+	abortReserved?: () => unknown;
+	confirmReserved?: () => unknown;
+	getByConfirmationCode?: () => unknown;
+	submit?: () => unknown;
+}): { calls: BokunCalls; client: BokunClient } {
+	const calls: BokunCalls = {
+		abortReserved: [],
+		confirmReserved: [],
+		getByConfirmationCode: [],
+		submit: [],
+	};
+	const client = {
+		v1: {
+			booking: {
+				abortReserved: async (code: string) => {
+					calls.abortReserved.push({ code });
+					return overrides.abortReserved?.() ?? { message: "aborted" };
+				},
+				getByConfirmationCode: async (code: string) => {
+					calls.getByConfirmationCode.push({ code });
+					return overrides.getByConfirmationCode?.() ?? { status: "RESERVED" };
+				},
+			},
+			checkout: {
+				confirmReserved: async (code: string, body: unknown) => {
+					calls.confirmReserved.push({ body, code });
+					return (
+						overrides.confirmReserved?.() ?? {
+							booking: { confirmationCode: code, status: "CONFIRMED" },
+							success: true,
+						}
+					);
+				},
+				submit: async (body: unknown, query: unknown) => {
+					calls.submit.push({ body, query });
+					return (
+						overrides.submit?.() ?? {
+							booking: {
+								activityBookings: [{ productConfirmationCode: "ACT-1" }],
+								confirmationCode: "BOOK-1",
+								status: "RESERVED",
+							},
+							confirmationCode: "BOOK-1",
+							success: true,
+						}
+					);
+				},
+			},
+		},
+	} as unknown as BokunClient;
+	return { calls, client };
+}
+
+describe("BokunReservationGateway.placeHold", () => {
+	test("submits an external-payment activity checkout and stores returned codes", async () => {
+		const { calls, client } = fakeBokunClient({});
+		const gateway = new BokunReservationGateway({ client, lang: "en" });
+
+		const result = await gateway.placeHold(activityHoldRequest);
+
+		expect(result.kind).toBe("created");
+		if (result.kind !== "created") return;
+		expect(result.reservationId).toBe("BOOK-1");
+		expect(result.transactionId).toBe("ACT-1");
+		expect(result.providerStatus).toBe("RESERVED");
+		expect(calls.submit[0]?.query).toEqual({ lang: "en" });
+		expect(calls.submit[0]?.body).toMatchObject({
+			paymentMethod: "RESERVE_FOR_EXTERNAL_PAYMENT",
+			source: "DIRECT_REQUEST",
+		});
+	});
+
+	test("maps a 422 submit failure to unavailable", async () => {
+		const { client } = fakeBokunClient({
+			submit: () => {
+				throw new BokunApiError("not available", 422, {
+					providerMessage: "Sold out",
+				});
+			},
+		});
+		const gateway = new BokunReservationGateway({ client });
+
+		const result = await gateway.placeHold(activityHoldRequest);
+
+		expect(result.kind).toBe("unavailable");
+	});
+});
+
+describe("BokunReservationGateway.confirmHold", () => {
+	test("confirms a reserved booking with Stripe transaction details", async () => {
+		const { calls, client } = fakeBokunClient({});
+		const gateway = new BokunReservationGateway({ client });
+
+		const result = await gateway.confirmHold({
+			amountMinor: 5000,
+			currency: "EUR",
+			paymentReference: "pi_123",
+			publicReference: "AI-2026-ACT1234",
+			reservationId: "BOOK-1",
+			transactionId: "ACT-1",
+		});
+
+		expect(result.kind).toBe("ok");
+		expect(calls.confirmReserved[0]?.code).toBe("BOOK-1");
+		expect(calls.confirmReserved[0]?.body).toMatchObject({
+			amount: 50,
+			currency: "EUR",
+			transactionDetails: { transactionId: "pi_123" },
+		});
+	});
+
+	test("keeps a live reserved booking pending when confirm fails", async () => {
+		const { client } = fakeBokunClient({
+			confirmReserved: () => {
+				throw new BokunApiError("conflict", 409);
+			},
+			getByConfirmationCode: () => ({
+				confirmationCode: "BOOK-1",
+				status: "RESERVED",
+			}),
+		});
+		const gateway = new BokunReservationGateway({ client });
+
+		const result = await gateway.confirmHold({
+			paymentReference: "pi_123",
+			reservationId: "BOOK-1",
+			transactionId: "ACT-1",
+		});
+
+		expect(result.kind).toBe("not_settled");
+	});
+});
+
+describe("BokunReservationGateway.cancelHold", () => {
+	test("aborts a reserved booking", async () => {
+		const { calls, client } = fakeBokunClient({});
+		const gateway = new BokunReservationGateway({ client });
+
+		const result = await gateway.cancelHold({
+			reason: "checkout_expired",
+			reservationId: "BOOK-1",
+			transactionId: "ACT-1",
+		});
+
+		expect(result.kind).toBe("ok");
+		expect(calls.abortReserved[0]?.code).toBe("BOOK-1");
+	});
+
+	test("keeps retrying when abort fails and the booking is still reserved", async () => {
+		const { client } = fakeBokunClient({
+			abortReserved: () => {
+				throw new BokunApiError("conflict", 409);
+			},
+			getByConfirmationCode: () => ({
+				confirmationCode: "BOOK-1",
+				status: "RESERVED",
+			}),
+		});
+		const gateway = new BokunReservationGateway({ client });
+
+		const result = await gateway.cancelHold({
+			reason: "checkout_expired",
+			reservationId: "BOOK-1",
+			transactionId: "ACT-1",
+		});
+
+		expect(result.kind).toBe("transient");
+		if (result.kind !== "transient") return;
+		expect(result.code).toBe("cancel_not_settled");
 	});
 });

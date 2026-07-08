@@ -5,7 +5,7 @@ import { Checkbox } from "@workspace/ui/components/checkbox";
 import { Input } from "@workspace/ui/components/input";
 import { Label } from "@workspace/ui/components/label";
 import { Textarea } from "@workspace/ui/components/textarea";
-import { useEffect, useState } from "react";
+import { type ReactNode, useEffect, useState } from "react";
 import { CountrySelect } from "@/components/form/country-select";
 import { PhoneInput } from "@/components/form/phone-input";
 import { CheckoutAlert } from "./checkout-alert";
@@ -19,6 +19,7 @@ interface ContactBillingFormProps {
 	/** When true, offer to save the entered contact/billing to the account. */
 	canSaveToAccount: boolean;
 	error: string | null;
+	extraFields?: ReactNode;
 	/** Optional secondary action; shown when editing already-saved contact. */
 	onCancel?: () => void;
 	onChange: (next: ContactDraft) => void;
@@ -74,6 +75,7 @@ function Field({
 export function ContactBillingForm({
 	canSaveToAccount,
 	error,
+	extraFields,
 	onCancel,
 	onChange,
 	onSaveToAccountChange,
@@ -142,6 +144,8 @@ export function ContactBillingForm({
 					value={value.phone}
 				/>
 			</div>
+
+			{extraFields}
 
 			<div className="flex items-center gap-2">
 				<Checkbox

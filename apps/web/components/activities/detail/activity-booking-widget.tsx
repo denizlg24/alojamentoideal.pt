@@ -34,13 +34,15 @@ import {
 import { Separator } from "@workspace/ui/components/separator";
 import { cn } from "@workspace/ui/lib/utils";
 import { addDays, format, startOfDay } from "date-fns";
-import { CalendarDays, Minus, Plus, Users } from "lucide-react";
-import { useCallback, useMemo, useState } from "react";
+import { CalendarDays, Loader2, Minus, Plus, Users } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { useCallback, useMemo, useState, useTransition } from "react";
 import type { DayButton as DayButtonProps } from "react-day-picker";
 import { AVAILABILITY_WINDOW_DAYS } from "@/lib/activities/constants";
 import { formatActivityMoney, formatLanguage } from "@/lib/activities/format";
 import { parseIsoDate } from "@/lib/catalog/dates";
 import { formatListingMoney } from "@/lib/catalog/pricing-display";
+import { addActivityToCart } from "@/lib/checkout/cart-store";
 
 const MAX_PER_CATEGORY = 30;
 
@@ -126,6 +128,7 @@ export function ActivityBookingWidget({
 	calendar: ActivityAvailabilityCalendar;
 	currency: string;
 }) {
+	const router = useRouter();
 	const days = useMemo(() => buildDays(calendar), [calendar]);
 
 	const [selection, setSelection] = useState<ActivityParticipantSelection>(() =>
@@ -136,7 +139,14 @@ export function ActivityBookingWidget({
 	const [language, setLanguage] = useState<string | null>(
 		activity.languages[0] ?? null,
 	);
-	const [comingSoon, setComingSoon] = useState(false);
+	// `adding` covers the async cart write; `isNavigating` covers the transition
+	// to /checkout. Keeping the loading state on the transition (not a manual flag)
+	// means it clears when the checkout page commits and never sticks in the
+	// router-cached widget when the guest navigates back.
+	const [adding, setAdding] = useState(false);
+	const [isNavigating, startTransition] = useTransition();
+	const busy = adding || isNavigating;
+	const [error, setError] = useState<string | null>(null);
 
 	const selectedDay = selectedDate ? (days.get(selectedDate) ?? null) : null;
 	const departure =
@@ -177,11 +187,41 @@ export function ActivityBookingWidget({
 	};
 
 	const setCount = (categoryId: string, next: number) => {
-		setComingSoon(false);
+		setError(null);
 		setSelection((current) => ({
 			...current,
 			[categoryId]: Math.max(0, next),
 		}));
+	};
+
+	const handleBook = async () => {
+		if (!canBook || !departure || !selectedDate || busy) return;
+		const participantsInput = activity.pricingCategories
+			.map((category) => ({
+				count: selection[category.id] ?? 0,
+				pricingCategoryId: Number(category.id),
+			}))
+			.filter((entry) => entry.count > 0);
+		if (participantsInput.length === 0) return;
+		const rate = defaultRate(departure);
+		setAdding(true);
+		setError(null);
+		try {
+			await addActivityToCart({
+				activityDate: selectedDate,
+				activityId: activity.id,
+				participants: participantsInput,
+				rateId: rate?.id ?? null,
+				startTimeId: departure.startTimeId,
+			});
+			startTransition(() => {
+				router.push("/checkout");
+			});
+		} catch {
+			setError("We couldn't start your booking. Please try again.");
+		} finally {
+			setAdding(false);
+		}
 	};
 
 	const priceHeader = canBook
@@ -336,7 +376,7 @@ export function ActivityBookingWidget({
 					endMonth={addDays(today, AVAILABILITY_WINDOW_DAYS)}
 					selected={selectedDate ? parseIsoDate(selectedDate) : undefined}
 					onSelect={(date) => {
-						setComingSoon(false);
+						setError(null);
 						setDepartureId(null);
 						setSelectedDate(date ? format(date, "yyyy-MM-dd") : null);
 					}}
@@ -377,7 +417,7 @@ export function ActivityBookingWidget({
 							type="button"
 							aria-pressed={entry.id === departure?.id}
 							onClick={() => {
-								setComingSoon(false);
+								setError(null);
 								setDepartureId(entry.id);
 							}}
 							disabled={entry.soldOut}
@@ -425,22 +465,30 @@ export function ActivityBookingWidget({
 			<Button
 				size="lg"
 				className="w-full"
-				disabled={!canBook}
+				disabled={!canBook || busy}
 				type="button"
-				onClick={() => setComingSoon(true)}
+				onClick={handleBook}
 			>
-				<CalendarDays className="size-4" />
-				{canBook
-					? `Book · ${formatListingMoney(total ?? 0, currency)}`
-					: selectedDate
-						? "Book"
-						: "Choose a date"}
+				{busy ? (
+					<Loader2 className="size-4 animate-spin" />
+				) : (
+					<CalendarDays className="size-4" />
+				)}
+				{busy
+					? "Adding to cart…"
+					: canBook
+						? `Book · ${formatListingMoney(total ?? 0, currency)}`
+						: selectedDate
+							? "Book"
+							: "Choose a date"}
 			</Button>
-			<p className="text-center text-muted-foreground text-xs">
-				{comingSoon
-					? "Online booking for activities is coming soon. Contact us to reserve."
-					: "You won't be charged yet"}
-			</p>
+			{error ? (
+				<p className="text-center text-destructive text-xs">{error}</p>
+			) : (
+				<p className="text-center text-muted-foreground text-xs">
+					You won't be charged yet
+				</p>
+			)}
 		</div>
 	);
 

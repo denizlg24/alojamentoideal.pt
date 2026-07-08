@@ -1,5 +1,7 @@
 import type {
 	AccommodationQuoteFeeSnapshot,
+	ActivityBookingAnswerSnapshot,
+	ActivityParticipantSnapshot,
 	AppliedDiscountSnapshot,
 	CommerceCatalogSnapshot,
 	OrderBillingAddressSnapshot,
@@ -39,6 +41,47 @@ export interface CommerceQuoteInput {
 	infants: number;
 	listingId: string;
 	pets: number;
+}
+
+/** One requested pricing category (adults/children/…) with its headcount. */
+export interface ActivityParticipantSelection {
+	count: number;
+	pricingCategoryId: number;
+}
+
+export interface CommerceActivityQuoteInput {
+	activityId: string;
+	/** Local activity date, `YYYY-MM-DD`. Activities are single-day. */
+	activityDate: string;
+	answers: ActivityBookingAnswerSnapshot[];
+	/** See {@link CommerceQuoteInput.forceFresh}. */
+	forceFresh?: boolean;
+	participants: ActivityParticipantSelection[];
+	/** Bokun departure/start-time id when the date has multiple slots. */
+	startTimeId?: string | null;
+	/** Bokun rate id when the activity exposes multiple rates. */
+	rateId?: string | null;
+}
+
+export interface NormalizedActivityQuoteSnapshot {
+	activityDate: string;
+	answers: ActivityBookingAnswerSnapshot[];
+	bokunActivityId: string;
+	currency: string;
+	expiresAt: Date;
+	externalAccountId: string;
+	fetchedAt: Date;
+	id: string;
+	participants: ActivityParticipantSnapshot[];
+	provider: string;
+	providerPayload: Record<string, unknown>;
+	rateId: string | null;
+	startTimeId: string | null;
+	subtotalMinor: number;
+	taxMinor: number;
+	totalMinor: number;
+	totalParticipants: number;
+	validationStatus: QuoteValidationStatus;
 }
 
 export interface NormalizedAccommodationQuoteSnapshot {
@@ -81,19 +124,10 @@ export interface CommerceQuoteDto {
 	totalMinor: number;
 }
 
-export interface CartItemDto {
-	adults: number;
-	checkIn: string;
-	checkOut: string;
-	children: number;
+interface CartItemBaseDto {
 	currency: string;
-	guests: number;
 	id: string;
 	imageUrl: string | null;
-	infants: number;
-	listingId: string;
-	nights: number;
-	pets: number;
 	position: number;
 	quote: CommerceQuoteDto;
 	status: CartItemStatus;
@@ -101,9 +135,35 @@ export interface CartItemDto {
 	taxMinor: number;
 	title: string;
 	totalMinor: number;
-	type: "accommodation";
 	updatedAt: string;
 }
+
+export interface AccommodationCartItemDto extends CartItemBaseDto {
+	adults: number;
+	checkIn: string;
+	checkOut: string;
+	children: number;
+	guests: number;
+	infants: number;
+	listingId: string;
+	nights: number;
+	pets: number;
+	type: "accommodation";
+}
+
+export interface ActivityCartItemDto extends CartItemBaseDto {
+	activityDate: string;
+	activityId: string;
+	participants: ActivityParticipantSnapshot[];
+	/** Bokun rate the departure was priced against; drives the booking schema. */
+	rateId: string | null;
+	/** Bokun start-time id for the chosen departure; drives the booking schema. */
+	startTimeId: string | null;
+	totalParticipants: number;
+	type: "activity";
+}
+
+export type CartItemDto = AccommodationCartItemDto | ActivityCartItemDto;
 
 export interface CartDto {
 	appliedDiscount: AppliedDiscountSnapshot | null;
@@ -147,8 +207,12 @@ export interface CartValidationResponse {
 export interface DraftOrderContactInput {
 	billingAddress: OrderBillingAddressSnapshot;
 	companyName: string | null;
+	dateOfBirth: string | null;
 	email: string;
+	firstName: string | null;
 	isCompany: boolean;
+	language: string | null;
+	lastName: string | null;
 	name: string;
 	notes: string | null;
 	phoneE164: string;

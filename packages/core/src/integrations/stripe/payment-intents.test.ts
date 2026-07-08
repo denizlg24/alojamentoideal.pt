@@ -213,4 +213,33 @@ describe("createOrUpdatePaymentIntent", () => {
 			type: "card",
 		});
 	});
+
+	test("routes the full charge to Detours via a destination transfer for activities", async () => {
+		const { calls, stripe } = fakeStripe({});
+
+		await createOrUpdatePaymentIntent(stripe, {
+			...baseParams,
+			idempotencyKey: "pi:order_1",
+			onBehalfOf: "acct_detours",
+			transferDestination: "acct_detours",
+		});
+
+		const call = calls.create[0];
+		expect(call?.params.transfer_data).toEqual({ destination: "acct_detours" });
+		// No `amount`: the entire charge transfers to the connected account.
+		expect(call?.params.transfer_data?.amount).toBeUndefined();
+		expect(call?.params.on_behalf_of).toBe("acct_detours");
+	});
+
+	test("omits transfer_data for accommodation-only orders", async () => {
+		const { calls, stripe } = fakeStripe({});
+
+		await createOrUpdatePaymentIntent(stripe, {
+			...baseParams,
+			idempotencyKey: "pi:order_1",
+		});
+
+		expect(calls.create[0]?.params.transfer_data).toBeUndefined();
+		expect(calls.create[0]?.params.on_behalf_of).toBeUndefined();
+	});
 });
