@@ -15,7 +15,9 @@ export {
 export {
 	createOrUpdatePaymentIntent,
 	type PaymentIntentParams,
+	type PaymentIntentSettlementSnapshot,
 	type PaymentIntentSnapshot,
+	retrievePaymentIntentSettlementSnapshot,
 	retrievePaymentIntentSnapshot,
 	type StripePaymentMethodSummary,
 } from "./payment-intents";

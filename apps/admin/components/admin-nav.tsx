@@ -8,12 +8,13 @@ import {
 	SidebarMenuItem,
 } from "@workspace/ui/components/sidebar";
 import { cn } from "@workspace/ui/lib/utils";
-import { Activity, ReceiptText, Settings, Users } from "lucide-react";
+import { Activity, Landmark, ReceiptText, Settings, Users } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
 const links = [
 	{ href: "/orders", icon: ReceiptText, label: "Orders" },
+	{ href: "/settlements/detours", icon: Landmark, label: "Settlements" },
 	{ href: "/observability", icon: Activity, label: "Observability" },
 	{ href: "/users", icon: Users, label: "Users" },
 	{ href: "/settings", icon: Settings, label: "Settings" },

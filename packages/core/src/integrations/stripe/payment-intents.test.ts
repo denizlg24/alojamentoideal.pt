@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import type Stripe from "stripe";
 import {
 	createOrUpdatePaymentIntent,
+	retrievePaymentIntentSettlementSnapshot,
 	retrievePaymentIntentSnapshot,
 } from "./payment-intents";
 
@@ -16,16 +17,28 @@ function fakeStripe(overrides: {
 		opts: { idempotencyKey?: string },
 	) => Partial<Stripe.PaymentIntent>;
 	retrieve?: (id: string) => Partial<Stripe.PaymentIntent>;
+	retrieveCharge?: (
+		id: string,
+		params: Stripe.ChargeRetrieveParams,
+	) => Partial<Stripe.Charge>;
 	update?: (
 		id: string,
 		params: Stripe.PaymentIntentUpdateParams,
 	) => Partial<Stripe.PaymentIntent>;
 }): {
-	calls: { create: CreateCall[]; update: { id: string; amount?: number }[] };
+	calls: {
+		create: CreateCall[];
+		retrieveCharge: { id: string; params: Stripe.ChargeRetrieveParams }[];
+		update: { id: string; amount?: number }[];
+	};
 	stripe: Stripe;
 } {
 	const calls = {
 		create: [] as CreateCall[],
+		retrieveCharge: [] as {
+			id: string;
+			params: Stripe.ChargeRetrieveParams;
+		}[],
 		update: [] as { amount?: number; id: string }[],
 	};
 	const stripe = {
@@ -62,6 +75,15 @@ function fakeStripe(overrides: {
 						status: "requires_payment_method",
 					}
 				);
+			},
+		},
+		charges: {
+			retrieve: async (id: string, params: Stripe.ChargeRetrieveParams) => {
+				calls.retrieveCharge.push({ id, params });
+				if (!overrides.retrieveCharge) {
+					throw new Error("charge retrieve not expected");
+				}
+				return overrides.retrieveCharge(id, params);
 			},
 		},
 	} as unknown as Stripe;
@@ -241,5 +263,45 @@ describe("createOrUpdatePaymentIntent", () => {
 
 		expect(calls.create[0]?.params.transfer_data).toBeUndefined();
 		expect(calls.create[0]?.params.on_behalf_of).toBeUndefined();
+	});
+
+	test("reads Stripe fee from the latest charge balance transaction", async () => {
+		const { calls, stripe } = fakeStripe({
+			retrieve: (id) => ({
+				amount: 12_345,
+				client_secret: "pi_secret_done",
+				currency: "eur",
+				id,
+				latest_charge: "ch_1",
+				status: "succeeded",
+			}),
+			retrieveCharge: (id) => ({
+				balance_transaction: {
+					currency: "eur",
+					fee: 421,
+					id: "txn_1",
+				} as Stripe.BalanceTransaction,
+				currency: "eur",
+				id,
+			}),
+		});
+
+		const snapshot = await retrievePaymentIntentSettlementSnapshot(
+			stripe,
+			"pi_done",
+		);
+
+		expect(calls.retrieveCharge).toEqual([
+			{ id: "ch_1", params: { expand: ["balance_transaction"] } },
+		]);
+		expect(snapshot).toMatchObject({
+			amountMinor: 12_345,
+			balanceTransactionId: "txn_1",
+			chargeCurrency: "EUR",
+			chargeId: "ch_1",
+			paymentIntentId: "pi_done",
+			stripeFeeCurrency: "EUR",
+			stripeFeeMinor: 421,
+		});
 	});
 });

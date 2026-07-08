@@ -41,6 +41,17 @@ export interface PaymentIntentSnapshot {
 	status: Stripe.PaymentIntent.Status;
 }
 
+/** Charge and balance-transaction facts needed for settlement reporting. */
+export interface PaymentIntentSettlementSnapshot {
+	amountMinor: number;
+	balanceTransactionId: string | null;
+	chargeCurrency: string | null;
+	chargeId: string | null;
+	paymentIntentId: string;
+	stripeFeeCurrency: string | null;
+	stripeFeeMinor: number | null;
+}
+
 /** Non-sensitive payment method display data from Stripe charge details. */
 export interface StripePaymentMethodSummary {
 	brand: string | null;
@@ -79,6 +90,12 @@ function expandedCharge(
 	charge: Stripe.PaymentIntent["latest_charge"],
 ): Stripe.Charge | null {
 	return charge && typeof charge !== "string" ? charge : null;
+}
+
+function expandedBalanceTransaction(
+	transaction: Stripe.Charge["balance_transaction"],
+): Stripe.BalanceTransaction | null {
+	return transaction && typeof transaction !== "string" ? transaction : null;
 }
 
 function paymentMethodSummaryFromIntent(
@@ -177,4 +194,49 @@ export async function retrievePaymentIntentSnapshot(
 		options.includePaymentMethod ? { expand: ["latest_charge"] } : undefined,
 	);
 	return toSnapshot(intent);
+}
+
+/**
+ * Reads the captured charge and Stripe fee for a PaymentIntent. Destination
+ * charges charge the platform account for fees, so the charge balance
+ * transaction is the authoritative source for Detours settlement reporting.
+ */
+export async function retrievePaymentIntentSettlementSnapshot(
+	stripe: Stripe,
+	paymentIntentId: string,
+): Promise<PaymentIntentSettlementSnapshot> {
+	const intent = await stripe.paymentIntents.retrieve(paymentIntentId, {
+		expand: ["latest_charge.balance_transaction"],
+	});
+
+	const charge =
+		expandedCharge(intent.latest_charge) ??
+		(typeof intent.latest_charge === "string"
+			? await stripe.charges.retrieve(intent.latest_charge, {
+					expand: ["balance_transaction"],
+				})
+			: null);
+	const balanceTransaction = charge
+		? expandedBalanceTransaction(charge.balance_transaction)
+		: null;
+	const balanceTransactionId =
+		typeof charge?.balance_transaction === "string"
+			? charge.balance_transaction
+			: (charge?.balance_transaction?.id ?? null);
+
+	return {
+		amountMinor: intent.amount,
+		balanceTransactionId,
+		chargeCurrency: charge?.currency.toUpperCase() ?? null,
+		chargeId:
+			typeof intent.latest_charge === "string"
+				? intent.latest_charge
+				: (charge?.id ?? null),
+		paymentIntentId: intent.id,
+		stripeFeeCurrency:
+			balanceTransaction?.currency.toUpperCase() ??
+			charge?.currency.toUpperCase() ??
+			null,
+		stripeFeeMinor: balanceTransaction?.fee ?? null,
+	};
 }
