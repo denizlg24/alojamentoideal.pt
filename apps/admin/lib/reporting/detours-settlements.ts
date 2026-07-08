@@ -39,7 +39,11 @@ function createStripeSettlementRetriever(): PaymentSettlementRetriever | null {
 async function listDetoursActivityRows(
 	period: DetoursSettlementPeriod,
 ): Promise<DetoursSettlementSourceRow[]> {
-	const settlementRecordedAt = sql<Date>`coalesce(${order.confirmedAt}, ${order.createdAt})`;
+	const settlementRecordedAt =
+		sql`coalesce(${order.confirmedAt}, ${order.createdAt})`.mapWith(
+			(value: string | Date) =>
+				value instanceof Date ? value : new Date(value),
+		);
 	const rows = await getDb()
 		.select({
 			activityDate: activityItemDetail.activityDate,
