@@ -5,7 +5,7 @@ import type {
 	OrderMemberStatus,
 	ProviderBookingStatus,
 } from "@workspace/db";
-import { INTERNAL_CONVERSATION_PROVIDER } from "./conversations";
+import { isChatReadyConversation } from "./conversations";
 import { type OrderRole, orderRoleCan } from "./order-access";
 import type {
 	OrderBookingStatus,
@@ -238,16 +238,7 @@ export function summarizeConversationAvailability(
 		status: ConversationStatus;
 	}>,
 ): OrderConversationAvailability {
-	// An internal conversation never links an external thread: it is chat-ready
-	// the moment it is active. Provider-backed ones need the linked thread.
-	if (
-		conversations.some(
-			(conversation) =>
-				conversation.status === "active" &&
-				(conversation.externalThreadId !== null ||
-					conversation.provider === INTERNAL_CONVERSATION_PROVIDER),
-		)
-	) {
+	if (conversations.some(isChatReadyConversation)) {
 		return "available";
 	}
 	if (conversations.length > 0) {

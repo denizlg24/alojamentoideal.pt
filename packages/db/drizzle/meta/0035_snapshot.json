@@ -1710,13 +1710,17 @@
           "name": "activity_quote_snapshots_total_minor_nonneg",
           "value": "\"activity_quote_snapshots\".\"total_minor\" >= 0"
         },
+        "activity_quote_snapshots_total_ge_tax": {
+          "name": "activity_quote_snapshots_total_ge_tax",
+          "value": "\"activity_quote_snapshots\".\"total_minor\" >= \"activity_quote_snapshots\".\"tax_minor\""
+        },
         "activity_quote_snapshots_total_participants_positive": {
           "name": "activity_quote_snapshots_total_participants_positive",
           "value": "\"activity_quote_snapshots\".\"total_participants\" > 0"
         },
         "activity_quote_snapshots_validation_status_check": {
           "name": "activity_quote_snapshots_validation_status_check",
-          "value": "\"activity_quote_snapshots\".\"validation_status\" in ('valid', 'unavailable', 'provider_error')"
+          "value": "\"activity_quote_snapshots\".\"validation_status\" in ('valid', 'unavailable', 'expired', 'provider_error')"
         }
       },
       "isRLSEnabled": false

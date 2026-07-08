@@ -949,12 +949,16 @@ export const activityQuoteSnapshot = pgTable(
 			sql`${table.totalMinor} >= 0`,
 		),
 		check(
+			"activity_quote_snapshots_total_ge_tax",
+			sql`${table.totalMinor} >= ${table.taxMinor}`,
+		),
+		check(
 			"activity_quote_snapshots_total_participants_positive",
 			sql`${table.totalParticipants} > 0`,
 		),
 		check(
 			"activity_quote_snapshots_validation_status_check",
-			sql`${table.validationStatus} in ('valid', 'unavailable', 'provider_error')`,
+			sql`${table.validationStatus} in ('valid', 'unavailable', 'expired', 'provider_error')`,
 		),
 	],
 );

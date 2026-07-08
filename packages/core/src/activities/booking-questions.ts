@@ -10,10 +10,13 @@
  * live fetch lives in the web app.
  */
 
-import type {
-	ActivityQuestionField,
-	ActivityQuestionOption,
-} from "./booking-schema";
+import type { ActivityQuestionField } from "./booking-schema";
+import {
+	asArray,
+	asRecord,
+	asString,
+	parseQuestion as parseQuestionField,
+} from "./parsing";
 
 /** A question as it exists on a placed booking: the field plus its answers. */
 export interface ActivityAnsweredQuestion extends ActivityQuestionField {
@@ -65,46 +68,6 @@ export interface BookingQuestionsCompleteness {
 	missingRequired: number;
 }
 
-function asRecord(value: unknown): Record<string, unknown> | null {
-	return typeof value === "object" && value !== null && !Array.isArray(value)
-		? (value as Record<string, unknown>)
-		: null;
-}
-
-function asArray(value: unknown): unknown[] {
-	return Array.isArray(value) ? value : [];
-}
-
-function asString(value: unknown): string | null {
-	if (typeof value === "string" && value.trim()) {
-		return value.trim();
-	}
-	if (typeof value === "number") {
-		return String(value);
-	}
-	return null;
-}
-
-function asBoolean(value: unknown): boolean {
-	return value === true;
-}
-
-function parseOptions(raw: unknown): ActivityQuestionOption[] {
-	const options: ActivityQuestionOption[] = [];
-	for (const entry of asArray(raw)) {
-		const record = asRecord(entry);
-		if (!record) {
-			continue;
-		}
-		const value = asString(record.value);
-		if (value === null) {
-			continue;
-		}
-		options.push({ label: asString(record.label) ?? value, value });
-	}
-	return options;
-}
-
 function parseAnswers(raw: unknown): string[] {
 	const answers: string[] = [];
 	for (const entry of asArray(raw)) {
@@ -117,32 +80,22 @@ function parseAnswers(raw: unknown): string[] {
 	return answers;
 }
 
-function parseQuestion(raw: unknown): ActivityAnsweredQuestion | null {
+function parseAnsweredQuestion(raw: unknown): ActivityAnsweredQuestion | null {
+	const field = parseQuestionField(raw);
+	if (!field) {
+		return null;
+	}
 	const record = asRecord(raw);
-	if (!record) {
-		return null;
-	}
-	const questionId = asString(record.questionId);
-	if (questionId === null) {
-		return null;
-	}
 	return {
-		answers: parseAnswers(record.answers),
-		dataFormat: asString(record.dataFormat),
-		dataType: asString(record.dataType) ?? "SHORT_TEXT",
-		label: asString(record.label) ?? questionId,
-		options: parseOptions(record.answerOptions),
-		questionId,
-		required: asBoolean(record.required),
-		selectFromOptions: asBoolean(record.selectFromOptions),
-		selectMultiple: asBoolean(record.selectMultiple),
+		...field,
+		answers: parseAnswers(record?.answers),
 	};
 }
 
 function parseQuestions(raw: unknown): ActivityAnsweredQuestion[] {
 	const fields: ActivityAnsweredQuestion[] = [];
 	for (const entry of asArray(raw)) {
-		const field = parseQuestion(entry);
+		const field = parseAnsweredQuestion(entry);
 		if (field) {
 			fields.push(field);
 		}

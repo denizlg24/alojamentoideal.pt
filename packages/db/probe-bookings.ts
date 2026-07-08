@@ -1,4 +1,4 @@
-import { getRuntimeSettings } from "../core/src/settings/index";
+import { getRuntimeSettings } from "@workspace/core/settings";
 
 const settings = await getRuntimeSettings();
 console.log(

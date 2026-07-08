@@ -1,7 +1,7 @@
 import {
 	type ConversationMessageDto,
 	conversationChannelName,
-	INTERNAL_CONVERSATION_PROVIDER,
+	isChatReadyConversation,
 	type OrderConversationSummary,
 } from "@workspace/core/commerce";
 import type { Metadata } from "next";
@@ -26,12 +26,7 @@ interface OrderMessagesPageProps {
 function primaryConversation(
 	conversations: OrderConversationSummary[],
 ): OrderConversationSummary | null {
-	const live = conversations.find(
-		(conversation) =>
-			conversation.status === "active" &&
-			(conversation.externalThreadId !== null ||
-				conversation.provider === INTERNAL_CONVERSATION_PROVIDER),
-	);
+	const live = conversations.find(isChatReadyConversation);
 	return live ?? conversations[0] ?? null;
 }
 

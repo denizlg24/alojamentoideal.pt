@@ -34,8 +34,9 @@ CREATE TABLE "activity_quote_snapshots" (
 	CONSTRAINT "activity_quote_snapshots_subtotal_minor_nonneg" CHECK ("activity_quote_snapshots"."subtotal_minor" >= 0),
 	CONSTRAINT "activity_quote_snapshots_tax_minor_nonneg" CHECK ("activity_quote_snapshots"."tax_minor" >= 0),
 	CONSTRAINT "activity_quote_snapshots_total_minor_nonneg" CHECK ("activity_quote_snapshots"."total_minor" >= 0),
+	CONSTRAINT "activity_quote_snapshots_total_ge_tax" CHECK ("activity_quote_snapshots"."total_minor" >= "activity_quote_snapshots"."tax_minor"),
 	CONSTRAINT "activity_quote_snapshots_total_participants_positive" CHECK ("activity_quote_snapshots"."total_participants" > 0),
-	CONSTRAINT "activity_quote_snapshots_validation_status_check" CHECK ("activity_quote_snapshots"."validation_status" in ('valid', 'unavailable', 'provider_error'))
+	CONSTRAINT "activity_quote_snapshots_validation_status_check" CHECK ("activity_quote_snapshots"."validation_status" in ('valid', 'unavailable', 'expired', 'provider_error'))
 );
 --> statement-breakpoint
 ALTER TABLE "cart_items" ALTER COLUMN "quote_snapshot_id" DROP NOT NULL;--> statement-breakpoint

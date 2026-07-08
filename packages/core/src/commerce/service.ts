@@ -50,6 +50,7 @@ import {
 	decryptIdentityField,
 	encryptIdentityField,
 } from "../account/identity-encryption";
+import { ACTIVITY_PROVIDER } from "../activities/config";
 import { nextGuestInfoReminderAt } from "../compliance/guest-reminder";
 import type { RefundRequest, RefundResult } from "../integrations/stripe";
 import { trackEvent } from "../observability";
@@ -5236,7 +5237,7 @@ export class CommerceService {
 		const quote = await this.#quoteActivity(input);
 		return normalizeActivityQuoteSnapshot({
 			accountId: this.#activityAccountId,
-			provider: "bokun",
+			provider: ACTIVITY_PROVIDER,
 			quote,
 			ttlSeconds: this.#quoteTtlSeconds,
 		});

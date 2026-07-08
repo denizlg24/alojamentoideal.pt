@@ -3,7 +3,7 @@
 import { Button } from "@workspace/ui/components/button";
 import { cn } from "@workspace/ui/lib/utils";
 import { Check, ChevronLeft, ChevronRight } from "lucide-react";
-import { type ReactNode, useState } from "react";
+import { type ReactNode, useEffect, useState } from "react";
 
 export interface PassengerStep {
 	complete: boolean;
@@ -28,6 +28,9 @@ export function PassengerStepCarousel({
 	showErrors: boolean;
 }) {
 	const [step, setStep] = useState(0);
+	useEffect(() => {
+		setStep((value) => Math.max(0, Math.min(value, steps.length - 1)));
+	}, [steps.length]);
 	const active = Math.min(step, steps.length - 1);
 	const current = steps[active];
 	if (!current) {

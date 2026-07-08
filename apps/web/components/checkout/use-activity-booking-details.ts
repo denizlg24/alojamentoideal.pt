@@ -92,6 +92,9 @@ export function useActivityBookingDetails(
 	const [drafts, setDrafts] = useState<Map<string, ActivityBookingDraft>>(
 		new Map(),
 	);
+	const [retryTokens, setRetryTokens] = useState<Map<string, number>>(
+		new Map(),
+	);
 	// cartItemId -> selection signature already fetched, so unrelated cart
 	// updates (a new object identity every optimistic edit) never refetch.
 	const fetchedRef = useRef<Map<string, string>>(new Map());
@@ -102,7 +105,9 @@ export function useActivityBookingDetails(
 
 		for (const item of activityItems) {
 			seen.add(item.id);
-			const signature = selectionSignature(item);
+			const signature = `${selectionSignature(item)}|retry:${
+				retryTokens.get(item.id) ?? 0
+			}`;
 			if (fetchedRef.current.get(item.id) === signature) {
 				continue;
 			}
@@ -167,7 +172,7 @@ export function useActivityBookingDetails(
 		return () => {
 			cancelled = true;
 		};
-	}, [activityItems]);
+	}, [activityItems, retryTokens]);
 
 	const setAnswer = useCallback(
 		(cartItemId: string, key: string, value: string) => {
@@ -219,6 +224,11 @@ export function useActivityBookingDetails(
 		// Drop the fetched signature so the effect re-requests on its next run.
 		fetchedRef.current.delete(cartItemId);
 		setSchemas((prev) => new Map(prev).set(cartItemId, { status: "loading" }));
+		setRetryTokens((prev) => {
+			const next = new Map(prev);
+			next.set(cartItemId, (next.get(cartItemId) ?? 0) + 1);
+			return next;
+		});
 	}, []);
 
 	const entries = useMemo<ActivityBookingEntry[]>(

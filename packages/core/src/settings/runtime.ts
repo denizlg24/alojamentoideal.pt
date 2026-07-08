@@ -124,6 +124,13 @@ export function validateRuntimeSettingValue(
 			}
 			return [...new Set(ids)].join(",");
 		}
+		if (key === "payments.detoursStripeAccountId" && trimmed) {
+			if (!/^acct_[A-Za-z0-9]+$/.test(trimmed)) {
+				throw new Error(
+					`${definition.label} must be a Stripe connected account id (acct_...)`,
+				);
+			}
+		}
 		if (key === "bokun.activityLang" && trimmed) {
 			if (!/^[A-Za-z]{2,3}(?:[-_][A-Za-z]{2,4})?$/.test(trimmed)) {
 				throw new Error(`${definition.label} must be a language code`);

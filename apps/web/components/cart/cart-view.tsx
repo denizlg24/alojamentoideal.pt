@@ -36,6 +36,7 @@ import {
 } from "@/lib/checkout/cart-store";
 import { toCheckoutError } from "@/lib/checkout/errors";
 import {
+	formatActivityDateLong,
 	formatMinor,
 	formatStayRangeLong,
 	guestSummaryLabel,
@@ -102,7 +103,7 @@ function CartItemCard({
 			: `/homes/${item.listingId}`;
 	const meta =
 		item.type === "activity"
-			? `${item.activityDate} · ${item.totalParticipants} ${
+			? `${formatActivityDateLong(item.activityDate)} · ${item.totalParticipants} ${
 					item.totalParticipants === 1 ? "participant" : "participants"
 				}`
 			: `${formatStayRangeLong(item.checkIn, item.checkOut)} · ${nightsLabel(
@@ -416,7 +417,7 @@ export function CartView() {
 						<div className="flex flex-col gap-2 text-sm">
 							<div className="flex items-center justify-between text-muted-foreground">
 								<span>
-									{items.length} {items.length === 1 ? "stay" : "stays"}
+									{items.length} {items.length === 1 ? "item" : "items"}
 								</span>
 								<span>{formatMinor(cart.subtotalMinor, cart.currency)}</span>
 							</div>

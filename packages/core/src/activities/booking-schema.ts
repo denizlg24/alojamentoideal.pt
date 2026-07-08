@@ -7,6 +7,14 @@
  * captured provider payloads; the live fetch lives in the web app.
  */
 
+import {
+	asArray,
+	asBoolean,
+	asRecord,
+	asString,
+	parseQuestions,
+} from "./parsing";
+
 /** Bokun's rate-level pickup/dropoff selection modes. */
 export type ActivityPlaceSelectionType =
 	| "NOT_INCLUDED"
@@ -72,78 +80,6 @@ export interface NormalizeActivityBookingSchemaInput {
 	options: unknown;
 	pickupPlaces?: unknown;
 	pickupSelectionType?: string | null;
-}
-
-function asRecord(value: unknown): Record<string, unknown> | null {
-	return typeof value === "object" && value !== null && !Array.isArray(value)
-		? (value as Record<string, unknown>)
-		: null;
-}
-
-function asArray(value: unknown): unknown[] {
-	return Array.isArray(value) ? value : [];
-}
-
-function asString(value: unknown): string | null {
-	if (typeof value === "string" && value.trim()) {
-		return value.trim();
-	}
-	if (typeof value === "number") {
-		return String(value);
-	}
-	return null;
-}
-
-function asBoolean(value: unknown): boolean {
-	return value === true;
-}
-
-function parseOptions(raw: unknown): ActivityQuestionOption[] {
-	const options: ActivityQuestionOption[] = [];
-	for (const entry of asArray(raw)) {
-		const record = asRecord(entry);
-		if (!record) {
-			continue;
-		}
-		const value = asString(record.value);
-		if (value === null) {
-			continue;
-		}
-		options.push({ label: asString(record.label) ?? value, value });
-	}
-	return options;
-}
-
-function parseQuestion(raw: unknown): ActivityQuestionField | null {
-	const record = asRecord(raw);
-	if (!record) {
-		return null;
-	}
-	const questionId = asString(record.questionId);
-	if (questionId === null) {
-		return null;
-	}
-	return {
-		dataFormat: asString(record.dataFormat),
-		dataType: asString(record.dataType) ?? "SHORT_TEXT",
-		label: asString(record.label) ?? questionId,
-		options: parseOptions(record.answerOptions),
-		questionId,
-		required: asBoolean(record.required),
-		selectFromOptions: asBoolean(record.selectFromOptions),
-		selectMultiple: asBoolean(record.selectMultiple),
-	};
-}
-
-function parseQuestions(raw: unknown): ActivityQuestionField[] {
-	const fields: ActivityQuestionField[] = [];
-	for (const entry of asArray(raw)) {
-		const field = parseQuestion(entry);
-		if (field) {
-			fields.push(field);
-		}
-	}
-	return fields;
 }
 
 function parsePlaces(raw: unknown, key: string): ActivityPlaceOption[] {

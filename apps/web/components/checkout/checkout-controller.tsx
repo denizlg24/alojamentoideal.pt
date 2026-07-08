@@ -3,6 +3,7 @@
 import type { AccountProfile } from "@workspace/core/account";
 import type {
 	AccommodationCartItemDto,
+	ActivityCartItemDto,
 	CartDto,
 	CartItemDto,
 	CartValidationResponse,
@@ -31,12 +32,16 @@ import {
 } from "@/lib/checkout/cart-store";
 import { toCheckoutError } from "@/lib/checkout/errors";
 import {
+	formatActivityDateLong,
 	formatMinor,
 	formatStayRangeLong,
 	guestSummaryLabel,
 	nightsLabel,
 } from "@/lib/checkout/format";
 import {
+	type ActivityKeyInput,
+	activityCartItemClientMutationId,
+	activityCartItemIdempotencyKey,
 	cartItemClientMutationId,
 	cartItemIdempotencyKey,
 	randomIdempotencyKey,
@@ -163,6 +168,56 @@ function stayInputFromItem(item: AccommodationCartItemDto): StayKeyInput {
 		infants: item.infants,
 		listingId: item.listingId,
 	};
+}
+
+function activityInputFromItem(item: ActivityCartItemDto): ActivityKeyInput {
+	return {
+		activityDate: item.activityDate,
+		activityId: item.activityId,
+		participants: item.participants.map((participant) => ({
+			count: participant.count,
+			pricingCategoryId: participant.pricingCategoryId,
+		})),
+		rateId: item.rateId,
+		startTimeId: item.startTimeId,
+	};
+}
+
+async function addCartItemFromExisting(
+	cartId: string,
+	item: CartItemDto,
+): Promise<CartDto> {
+	if (item.type === "activity") {
+		const activity = activityInputFromItem(item);
+		return (
+			await api.addCartItem(cartId, {
+				activityDate: activity.activityDate,
+				activityId: activity.activityId,
+				answers: activity.answers ?? [],
+				clientMutationId: activityCartItemClientMutationId(activity),
+				idempotencyKey: activityCartItemIdempotencyKey(activity),
+				participants: activity.participants,
+				rateId: activity.rateId ?? null,
+				startTimeId: activity.startTimeId ?? null,
+				type: "activity",
+			})
+		).cart;
+	}
+
+	const stay = stayInputFromItem(item);
+	return (
+		await api.addCartItem(cartId, {
+			adults: stay.adults,
+			checkIn: stay.checkIn,
+			checkOut: stay.checkOut,
+			children: stay.children,
+			clientMutationId: cartItemClientMutationId(stay),
+			guests: stay.guests,
+			idempotencyKey: cartItemIdempotencyKey(stay),
+			infants: stay.infants,
+			listingId: stay.listingId,
+		})
+	).cart;
 }
 
 function cartHasStay(cart: CartDto, stayToken: string): boolean {
@@ -388,33 +443,23 @@ export function CheckoutController({ seed }: CheckoutControllerProps) {
 	);
 
 	/**
-	 * Creates a fresh mutable cart holding the given stays. Used when the current
+	 * Creates a fresh mutable cart holding the given items. Used when the current
 	 * cart is frozen (converted into a draft order) and must be edited or retried.
-	 * Stays whose dates went unavailable in the meantime are skipped rather than
-	 * failing the whole rebuild; the caller reports which stays were dropped.
+	 * Items whose selection went unavailable in the meantime are skipped rather than
+	 * failing the whole rebuild; the caller reports which items were dropped.
 	 */
 	const rebuildCartFromItems = useCallback(
 		async (
-			stays: StayKeyInput[],
-		): Promise<{ cart: CartDto; skippedStays: StayKeyInput[] }> => {
+			itemsToRebuild: CartItemDto[],
+		): Promise<{ cart: CartDto; skippedItems: CartItemDto[] }> => {
 			const created = (await api.createCart()).cart;
 			storeCartId(created.id);
-			const skippedStays: StayKeyInput[] = [];
-			for (const stay of stays) {
+			const skippedItems: CartItemDto[] = [];
+			for (const item of itemsToRebuild) {
 				try {
-					await api.addCartItem(created.id, {
-						adults: stay.adults,
-						checkIn: stay.checkIn,
-						checkOut: stay.checkOut,
-						children: stay.children,
-						clientMutationId: cartItemClientMutationId(stay),
-						guests: stay.guests,
-						idempotencyKey: cartItemIdempotencyKey(stay),
-						infants: stay.infants,
-						listingId: stay.listingId,
-					});
+					await addCartItemFromExisting(created.id, item);
 				} catch {
-					skippedStays.push(stay);
+					skippedItems.push(item);
 				}
 			}
 			const validated = await api.validateCart(created.id);
@@ -424,22 +469,20 @@ export function CheckoutController({ seed }: CheckoutControllerProps) {
 			setReviewError(null);
 			setTermsAccepted(false);
 			clearResumeState();
-			return { cart: validated.cart, skippedStays };
+			return { cart: validated.cart, skippedItems };
 		},
 		[applyValidation],
 	);
 
-	/** Rebuilds a mutable cart from the current (frozen) cart's stays. */
+	/** Rebuilds a mutable cart from the current (frozen) cart's active items. */
 	const rebuildCurrentCart = useCallback(async (): Promise<{
 		cart: CartDto;
-		skippedStays: StayKeyInput[];
+		skippedItems: CartItemDto[];
 	} | null> => {
 		if (items.length === 0) {
 			return null;
 		}
-		return rebuildCartFromItems(
-			items.filter(isStayItem).map(stayInputFromItem),
-		);
+		return rebuildCartFromItems(items);
 	}, [items, rebuildCartFromItems]);
 
 	// --- Bootstrap: resume a payable order, or converge the shared cart and the
@@ -572,8 +615,8 @@ export function CheckoutController({ seed }: CheckoutControllerProps) {
 					}
 				}
 
-				// Stays to carry into a fresh cart when the stored one is frozen.
-				let carryStays: StayKeyInput[] = [];
+				// Items to carry into a fresh cart when the stored one is frozen.
+				let carryItems: CartItemDto[] = [];
 				if (loaded && loaded.status === "converted") {
 					if (seedToken === null || cartHasStay(loaded, seedToken)) {
 						try {
@@ -587,7 +630,7 @@ export function CheckoutController({ seed }: CheckoutControllerProps) {
 							}
 						}
 					}
-					carryStays = activeStayItemsOf(loaded).map(stayInputFromItem);
+					carryItems = activeItemsOf(loaded);
 					loaded = null;
 				}
 
@@ -597,23 +640,11 @@ export function CheckoutController({ seed }: CheckoutControllerProps) {
 				}
 
 				let seedOverlapNotice: string | null = null;
-				for (const stay of carryStays) {
+				for (const item of carryItems) {
 					try {
-						loaded = (
-							await api.addCartItem(loaded.id, {
-								adults: stay.adults,
-								checkIn: stay.checkIn,
-								checkOut: stay.checkOut,
-								children: stay.children,
-								clientMutationId: cartItemClientMutationId(stay),
-								guests: stay.guests,
-								idempotencyKey: cartItemIdempotencyKey(stay),
-								infants: stay.infants,
-								listingId: stay.listingId,
-							})
-						).cart;
+						loaded = await addCartItemFromExisting(loaded.id, item);
 					} catch {
-						// A carried stay whose dates went unavailable is dropped; the
+						// A carried item whose selection went unavailable is dropped; the
 						// validation notice below covers the rest.
 					}
 				}
@@ -908,30 +939,22 @@ export function CheckoutController({ seed }: CheckoutControllerProps) {
 	}, [contact, saveToAccount, signedIn]);
 
 	/**
-	 * Recovers from a stay that failed at draft/hold time: rebuild a fresh
-	 * mutable cart from the frozen one (dropping stays that no longer quote),
+	 * Recovers from an item that failed at draft/hold time: rebuild a fresh
+	 * mutable cart from the frozen one (dropping items that no longer quote),
 	 * hand the failure message to the cart page, and send the guest there. The
-	 * cart page shows the message, names any stays the rebuild dropped, and
+	 * cart page shows the message, names any items the rebuild dropped, and
 	 * flags the remaining failures inline with edit controls.
 	 */
 	const recoverToCart = useCallback(
 		async (message: string) => {
-			const previousItems = items;
 			const rebuilt = await rebuildCurrentCart();
-			const removedTitles = (rebuilt?.skippedStays ?? [])
-				.map(
-					(stay) =>
-						previousItems.find(
-							(item) =>
-								isStayItem(item) &&
-								stayKeyToken(stayInputFromItem(item)) === stayKeyToken(stay),
-						)?.title ?? null,
-				)
-				.filter((title): title is string => title !== null);
+			const removedTitles = (rebuilt?.skippedItems ?? []).map(
+				(item) => item.title,
+			);
 			writeCartNotice({ message, removedTitles });
 			router.push("/cart");
 		},
-		[items, rebuildCurrentCart, router],
+		[rebuildCurrentCart, router],
 	);
 
 	const handleContactSubmit = useCallback(async () => {
@@ -1432,7 +1455,7 @@ export function CheckoutController({ seed }: CheckoutControllerProps) {
 			{items.map((item) => {
 				const summary =
 					item.type === "activity"
-						? `${item.activityDate} · ${item.totalParticipants} ${
+						? `${formatActivityDateLong(item.activityDate)} · ${item.totalParticipants} ${
 								item.totalParticipants === 1 ? "participant" : "participants"
 							}`
 						: `${formatStayRangeLong(item.checkIn, item.checkOut)} · ${nightsLabel(

@@ -26,6 +26,22 @@ export type {
  */
 export const INTERNAL_CONVERSATION_PROVIDER = "internal";
 
+/**
+ * A conversation is usable for chat when it is active and either has its
+ * provider thread linked or is backed by our internal conversation provider.
+ */
+export function isChatReadyConversation(conversation: {
+	externalThreadId: string | null;
+	provider: string;
+	status: ConversationStatus;
+}): boolean {
+	return (
+		conversation.status === "active" &&
+		(conversation.externalThreadId !== null ||
+			conversation.provider === INTERNAL_CONVERSATION_PROVIDER)
+	);
+}
+
 export interface ProviderConversationThread {
 	externalThreadId: string;
 	lastMessagePreview: string | null;

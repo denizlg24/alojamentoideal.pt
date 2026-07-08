@@ -8,6 +8,7 @@ import Image from "next/image";
 import Link from "next/link";
 import type { ReactNode } from "react";
 import {
+	formatActivityDateLong,
 	formatMinor,
 	formatStayRange,
 	guestSummaryLabel,
@@ -41,7 +42,7 @@ function SummaryItemRow({
 }) {
 	const meta =
 		item.type === "activity"
-			? `${item.activityDate} · ${item.totalParticipants} ${
+			? `${formatActivityDateLong(item.activityDate)} · ${item.totalParticipants} ${
 					item.totalParticipants === 1 ? "participant" : "participants"
 				}`
 			: `${formatStayRange(item.checkIn, item.checkOut)} · ${nightsLabel(

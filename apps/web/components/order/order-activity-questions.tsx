@@ -65,7 +65,7 @@ function toSections(
 			title: "Contact details",
 		},
 	];
-	for (const booking of snapshot.activityBookings) {
+	snapshot.activityBookings.forEach((booking, bookingIndex) => {
 		sections.push({
 			entries: toEntries("activity", null, booking.questions),
 			key: `activity-${booking.bookingId ?? "-"}`,
@@ -79,6 +79,10 @@ function toSections(
 			title: "Pickup details",
 		});
 		booking.passengers.forEach((passenger, index) => {
+			const passengerKey = [
+				booking.bookingId ?? bookingIndex,
+				passenger.bookingId ?? index,
+			].join("-");
 			sections.push({
 				entries: [
 					...toEntries(
@@ -92,14 +96,14 @@ function toSections(
 						passenger.questions,
 					),
 				],
-				key: `passenger-${passenger.bookingId ?? index}`,
+				key: `passenger-${passengerKey}`,
 				kind: "passenger",
 				title: passenger.title
 					? `${passenger.title} ${index + 1}`
 					: `Guest ${index + 1}`,
 			});
 		});
-	}
+	});
 	return sections.filter((section) => section.entries.length > 0);
 }
 

@@ -43,6 +43,7 @@ import { formatActivityMoney, formatLanguage } from "@/lib/activities/format";
 import { parseIsoDate } from "@/lib/catalog/dates";
 import { formatListingMoney } from "@/lib/catalog/pricing-display";
 import { addActivityToCart } from "@/lib/checkout/cart-store";
+import { toCheckoutError } from "@/lib/checkout/errors";
 
 const MAX_PER_CATEGORY = 30;
 
@@ -217,8 +218,8 @@ export function ActivityBookingWidget({
 			startTransition(() => {
 				router.push("/checkout");
 			});
-		} catch {
-			setError("We couldn't start your booking. Please try again.");
+		} catch (error) {
+			setError(toCheckoutError(error).message);
 		} finally {
 			setAdding(false);
 		}

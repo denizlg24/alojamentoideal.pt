@@ -2,7 +2,7 @@ import {
 	type ConversationMessageDto,
 	type ConversationSummary,
 	conversationChannelName,
-	INTERNAL_CONVERSATION_PROVIDER,
+	isChatReadyConversation,
 } from "@workspace/core/commerce";
 import {
 	Table,
@@ -63,12 +63,7 @@ function DefinitionRow({
 function primaryConversation(
 	conversations: ConversationSummary[],
 ): ConversationSummary | null {
-	const live = conversations.find(
-		(conversation) =>
-			conversation.status === "active" &&
-			(conversation.externalThreadId !== null ||
-				conversation.provider === INTERNAL_CONVERSATION_PROVIDER),
-	);
+	const live = conversations.find(isChatReadyConversation);
 	return live ?? conversations[0] ?? null;
 }
 
