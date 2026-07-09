@@ -14,9 +14,37 @@ function inputTypeFor(dataFormat: string | null): string {
 			return "email";
 		case "PHONE_NUMBER":
 			return "tel";
+		case "TIME":
+			return "time";
 		default:
 			return "text";
 	}
+}
+
+function RequiredMark({ required }: { required: boolean }) {
+	return required ? (
+		<span aria-hidden="true" className="text-destructive">
+			{" "}
+			*
+		</span>
+	) : null;
+}
+
+function QuestionLabel({
+	field,
+	id,
+	required,
+}: {
+	field: ActivityQuestionField;
+	id: string;
+	required: boolean;
+}) {
+	return (
+		<Label htmlFor={id}>
+			{field.label}
+			<RequiredMark required={required} />
+		</Label>
+	);
 }
 
 /**
@@ -30,13 +58,16 @@ export function ActivityQuestionControl({
 	value,
 	invalid,
 	onChange,
+	required,
 }: {
 	field: ActivityQuestionField;
 	id: string;
 	value: string;
 	invalid: boolean;
 	onChange: (value: string) => void;
+	required?: boolean;
 }) {
+	const isRequired = required ?? field.required;
 	if (isBooleanField(field)) {
 		return (
 			<label className="flex items-start gap-2" htmlFor={id}>
@@ -48,7 +79,10 @@ export function ActivityQuestionControl({
 						onChange(checked === true ? "true" : "")
 					}
 				/>
-				<span className="text-sm leading-tight">{field.label}</span>
+				<span className="text-sm leading-tight">
+					{field.label}
+					<RequiredMark required={isRequired} />
+				</span>
 			</label>
 		);
 	}
@@ -58,7 +92,7 @@ export function ActivityQuestionControl({
 	if (field.selectFromOptions && field.options.length > 0) {
 		return (
 			<div className="flex flex-col gap-1.5">
-				<Label htmlFor={id}>{field.label}</Label>
+				<QuestionLabel field={field} id={id} required={isRequired} />
 				<NativeSelect
 					aria-invalid={invalid}
 					className="w-full"
@@ -80,7 +114,7 @@ export function ActivityQuestionControl({
 	if (field.dataType.toUpperCase() === "LONG_TEXT") {
 		return (
 			<div className="flex flex-col gap-1.5">
-				<Label htmlFor={id}>{field.label}</Label>
+				<QuestionLabel field={field} id={id} required={isRequired} />
 				<Textarea
 					aria-invalid={invalid}
 					id={id}
@@ -92,15 +126,19 @@ export function ActivityQuestionControl({
 		);
 	}
 
-	const isDate = field.dataType.toUpperCase() === "DATE";
+	const dataType = field.dataType.toUpperCase();
+	const isDate = dataType === "DATE";
+	const isTime = dataType === "TIME";
 	return (
 		<div className="flex flex-col gap-1.5">
-			<Label htmlFor={id}>{field.label}</Label>
+			<QuestionLabel field={field} id={id} required={isRequired} />
 			<Input
 				aria-invalid={invalid}
 				id={id}
 				onChange={(event) => onChange(event.target.value)}
-				type={isDate ? "date" : inputTypeFor(field.dataFormat)}
+				type={
+					isDate ? "date" : isTime ? "time" : inputTypeFor(field.dataFormat)
+				}
 				value={value}
 			/>
 		</div>

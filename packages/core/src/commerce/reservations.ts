@@ -423,7 +423,13 @@ function pickupFields(
 	const pickupAnswers: BokunAnswerDto[] = [
 		...answersForGroup(activity.answers, "pickup"),
 	];
-	if (activity.roomNumber?.trim()) {
+	const suppliedPickupQuestions = new Set(
+		pickupAnswers.map((answer) => answer.questionId),
+	);
+	if (
+		activity.roomNumber?.trim() &&
+		!suppliedPickupQuestions.has("roomNumber")
+	) {
 		pickupAnswers.push({
 			questionId: "roomNumber",
 			values: [activity.roomNumber.trim()],

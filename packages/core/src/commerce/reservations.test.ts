@@ -143,6 +143,18 @@ describe("buildBokunActivityCheckoutRequest", () => {
 						participantIndex: 0,
 						questionId: "gender",
 					},
+					{
+						answer: "TP123",
+						group: "pickup",
+						participantIndex: null,
+						questionId: "flightNumber",
+					},
+					{
+						answer: "Main entrance",
+						group: "dropoff",
+						participantIndex: null,
+						questionId: "dropoffNote",
+					},
 				],
 				bokunActivityId: "1248387",
 				dropoffPlaceId: "14875488",
@@ -187,7 +199,11 @@ describe("buildBokunActivityCheckoutRequest", () => {
 		expect(activity?.dropoff).toBe(true);
 		expect(activity?.dropoffPlaceId).toBe(14875488);
 		expect(activity?.pickupAnswers).toEqual([
+			{ questionId: "flightNumber", values: ["TP123"] },
 			{ questionId: "roomNumber", values: ["12"] },
+		]);
+		expect(activity?.dropoffAnswers).toEqual([
+			{ questionId: "dropoffNote", values: ["Main entrance"] },
 		]);
 		expect(activity?.passengers).toEqual([
 			{

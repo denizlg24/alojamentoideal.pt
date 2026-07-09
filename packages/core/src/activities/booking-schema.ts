@@ -43,8 +43,11 @@ export interface ActivityQuestionField {
 }
 
 export interface ActivityPassengerQuestions {
+	/** Passenger identity/detail fields, sent as Bokun `passengerDetails`. */
 	fields: ActivityQuestionField[];
 	pricingCategoryId: number;
+	/** Passenger booking questions, sent as Bokun passenger `answers`. */
+	questions: ActivityQuestionField[];
 	title: string | null;
 	type: string | null;
 }
@@ -53,14 +56,18 @@ export interface ActivityPlaceOption {
 	askForRoomNumber: boolean;
 	id: string;
 	title: string;
+	type: string | null;
 }
 
 export interface ActivityPickupSchema {
 	/** The guest chooses a place (SELECTED_BY_CUSTOMER) vs a fixed one. */
 	customerSelectable: boolean;
 	places: ActivityPlaceOption[];
+	/** Provider questions that apply to the currently resolved place. */
+	questions: ActivityQuestionField[];
 	/** Bokun requires a place id on the booking. */
 	required: boolean;
+	/** Backward-compatible pointer for places that advertise room numbers. */
 	roomNumberField: ActivityQuestionField | null;
 }
 
@@ -77,7 +84,7 @@ export interface NormalizeActivityBookingSchemaInput {
 	activityId: string;
 	dropoffPlaces?: unknown;
 	dropoffSelectionType?: string | null;
-	/** Raw `checkout.optionsForBookingRequest` response. */
+	/** Raw Bokun checkout options response. */
 	options: unknown;
 	pickupPlaces?: unknown;
 	pickupSelectionType?: string | null;
@@ -100,6 +107,7 @@ function parsePlaces(raw: unknown, key: string): ActivityPlaceOption[] {
 			askForRoomNumber: asBoolean(record.askForRoomNumber),
 			id,
 			title: asString(record.title) ?? id,
+			type: asString(record.type)?.toUpperCase() ?? null,
 		});
 	}
 	return places;
@@ -124,6 +132,7 @@ function normalizeSelectionType(
 function buildPlaceSchema(
 	selectionType: ActivityPlaceSelectionType | null,
 	places: ActivityPlaceOption[],
+	questions: ActivityQuestionField[],
 	roomNumberField: ActivityQuestionField | null,
 ): ActivityPickupSchema | null {
 	if (selectionType === null) {
@@ -133,15 +142,16 @@ function buildPlaceSchema(
 		customerSelectable:
 			selectionType === "SELECTED_BY_CUSTOMER" || selectionType === "OPTIONAL",
 		places,
+		questions,
 		required: selectionType !== "OPTIONAL",
 		roomNumberField,
 	};
 }
 
 /**
- * Turns Bokun's `optionsForBookingRequest` questions, the pickup/dropoff place
- * lists and the rate's selection types into the checkout schema. Pickup/dropoff
- * are surfaced when the rate offers the service (OPTIONAL, PRESELECTED or
+ * Turns Bokun checkout option questions, the pickup/dropoff place lists and the
+ * rate's selection types into the checkout schema. Pickup/dropoff are surfaced
+ * when the rate offers the service (OPTIONAL, PRESELECTED or
  * SELECTED_BY_CUSTOMER). A PRESELECTED place is resolved server-side so the
  * guest is never asked; OPTIONAL lets the guest pick a place or decline the
  * service entirely (`required: false`).
@@ -165,15 +175,16 @@ export function normalizeActivityBookingSchema(
 		passengers.push({
 			fields: parseQuestions(record.passengerDetails),
 			pricingCategoryId: Number(pricingCategoryId),
+			questions: parseQuestions(record.questions),
 			title: asString(record.pricingCategoryTitle),
 			type: asString(record.pricingCategoryType),
 		});
 	}
 
+	const pickupQuestions = parseQuestions(firstBooking?.pickupQuestions);
 	const pickupRoomNumber =
-		parseQuestions(firstBooking?.pickupQuestions).find(
-			(field) => field.questionId === "roomNumber",
-		) ?? null;
+		pickupQuestions.find((field) => field.questionId === "roomNumber") ?? null;
+	const dropoffQuestions = parseQuestions(firstBooking?.dropoffQuestions);
 
 	return {
 		activityId: input.activityId,
@@ -181,6 +192,7 @@ export function normalizeActivityBookingSchema(
 		dropoff: buildPlaceSchema(
 			normalizeSelectionType(input.dropoffSelectionType),
 			parsePlaces(input.dropoffPlaces, "dropoffPlaces"),
+			dropoffQuestions,
 			null,
 		),
 		mainContactFields: parseQuestions(questions?.mainContactDetails),
@@ -188,6 +200,7 @@ export function normalizeActivityBookingSchema(
 		pickup: buildPlaceSchema(
 			normalizeSelectionType(input.pickupSelectionType),
 			parsePlaces(input.pickupPlaces, "pickupPlaces"),
+			pickupQuestions,
 			pickupRoomNumber,
 		),
 	};

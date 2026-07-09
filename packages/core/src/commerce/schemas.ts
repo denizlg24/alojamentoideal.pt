@@ -48,6 +48,14 @@ const activityParticipantSchema = z.object({
 	pricingCategoryId: z.coerce.number().int(),
 });
 
+const optionalPlaceId = z
+	.string()
+	.trim()
+	.min(1)
+	.max(64)
+	.nullish()
+	.transform((value) => value ?? null);
+
 const activityAnswerSchema = z.object({
 	answer: z.string().max(2000),
 	group: z.string().trim().min(1).max(120),
@@ -99,7 +107,9 @@ const addCartItemSchema = z.union([
 const activityBookingSchemaRequestSchema = z.object({
 	activityDate: z.iso.date("Use YYYY-MM-DD"),
 	activityId: idString,
+	dropoffPlaceId: optionalPlaceId,
 	participants: z.array(activityParticipantSchema).min(1).max(50),
+	pickupPlaceId: optionalPlaceId,
 	rateId: z
 		.string()
 		.trim()
@@ -211,14 +221,6 @@ const rawContactSchema = z
 			taxNumber: value.taxNumber ?? null,
 		}),
 	);
-
-const optionalPlaceId = z
-	.string()
-	.trim()
-	.min(1)
-	.max(64)
-	.nullish()
-	.transform((value) => value ?? null);
 
 const draftOrderActivityAnswerSchema: z.ZodType<ActivityBookingAnswerSnapshot> =
 	z.object({
