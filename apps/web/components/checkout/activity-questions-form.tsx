@@ -58,7 +58,13 @@ function PlaceControl({
 				onChange={(event) => onSelect(cartItemId, event.target.value || null)}
 				value={selected ?? ""}
 			>
-				<option value="">Select a location</option>
+				<option value="">
+					{prompt.optional
+						? prompt.kind === "pickup"
+							? "No pickup needed"
+							: "No drop-off needed"
+						: "Select a location"}
+				</option>
 				{prompt.places.map((place) => (
 					<option key={place.id} value={place.id}>
 						{place.title}
@@ -152,7 +158,7 @@ function ItemQuestions({
 				<PlaceControl
 					cartItemId={item.id}
 					draft={draft}
-					invalid={showErrors && !pickupId}
+					invalid={showErrors && !description.pickup.optional && !pickupId}
 					onSelect={setPickupPlace}
 					prompt={description.pickup}
 				/>
@@ -174,6 +180,7 @@ function ItemQuestions({
 					draft={draft}
 					invalid={
 						showErrors &&
+						!description.dropoff.optional &&
 						!resolvePlaceId(description.dropoff, draft.dropoffPlaceId)
 					}
 					onSelect={setDropoffPlace}

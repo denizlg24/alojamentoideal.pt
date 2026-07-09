@@ -18,6 +18,7 @@ import {
 /** Bokun's rate-level pickup/dropoff selection modes. */
 export type ActivityPlaceSelectionType =
 	| "NOT_INCLUDED"
+	| "OPTIONAL"
 	| "PRESELECTED"
 	| "SELECTED_BY_CUSTOMER";
 
@@ -108,6 +109,9 @@ function normalizeSelectionType(
 	value: string | null | undefined,
 ): ActivityPlaceSelectionType | null {
 	const upper = value?.trim().toUpperCase();
+	if (upper === "OPTIONAL") {
+		return "OPTIONAL";
+	}
 	if (upper === "PRESELECTED") {
 		return "PRESELECTED";
 	}
@@ -126,9 +130,10 @@ function buildPlaceSchema(
 		return null;
 	}
 	return {
-		customerSelectable: selectionType === "SELECTED_BY_CUSTOMER",
+		customerSelectable:
+			selectionType === "SELECTED_BY_CUSTOMER" || selectionType === "OPTIONAL",
 		places,
-		required: true,
+		required: selectionType !== "OPTIONAL",
 		roomNumberField,
 	};
 }
@@ -136,9 +141,10 @@ function buildPlaceSchema(
 /**
  * Turns Bokun's `optionsForBookingRequest` questions, the pickup/dropoff place
  * lists and the rate's selection types into the checkout schema. Pickup/dropoff
- * are surfaced only when the rate mandates a place (PRESELECTED or
- * SELECTED_BY_CUSTOMER); a PRESELECTED place is resolved server-side so the
- * guest is never asked.
+ * are surfaced when the rate offers the service (OPTIONAL, PRESELECTED or
+ * SELECTED_BY_CUSTOMER). A PRESELECTED place is resolved server-side so the
+ * guest is never asked; OPTIONAL lets the guest pick a place or decline the
+ * service entirely (`required: false`).
  */
 export function normalizeActivityBookingSchema(
 	input: NormalizeActivityBookingSchemaInput,

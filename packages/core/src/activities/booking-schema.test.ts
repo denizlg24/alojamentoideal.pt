@@ -187,6 +187,18 @@ describe("normalizeActivityBookingSchema", () => {
 	test("SELECTED_BY_CUSTOMER pickup is customer-selectable", () => {
 		const schema = build({ pickupSelectionType: "SELECTED_BY_CUSTOMER" });
 		expect(schema.pickup?.customerSelectable).toBe(true);
+		expect(schema.pickup?.required).toBe(true);
+	});
+
+	test("OPTIONAL pickup/dropoff is customer-selectable and not required", () => {
+		const schema = build({
+			dropoffSelectionType: "OPTIONAL",
+			pickupSelectionType: "OPTIONAL",
+		});
+		expect(schema.pickup?.customerSelectable).toBe(true);
+		expect(schema.pickup?.required).toBe(false);
+		expect(schema.dropoff?.customerSelectable).toBe(true);
+		expect(schema.dropoff?.required).toBe(false);
 	});
 
 	test("NOT_INCLUDED / absent selection type yields no pickup schema", () => {

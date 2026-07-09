@@ -48,8 +48,10 @@ export interface ActivityPassengerGroup {
 export interface ActivityPlacePrompt {
 	kind: "pickup" | "dropoff";
 	label: string;
+	/** The guest may decline the service; a null place id is a valid choice. */
+	optional: boolean;
 	places: ActivityPlaceOption[];
-	/** The guest must actively choose (more than one option offered). */
+	/** The guest actively chooses (multiple options, or an optional service). */
 	selectable: boolean;
 	/** Resolved when the place is fixed or the only option; sent without asking. */
 	autoPlaceId: string | null;
@@ -115,11 +117,19 @@ function placePrompt(
 	if (!schema) {
 		return null;
 	}
-	const selectable = schema.customerSelectable && schema.places.length > 1;
+	const optional = !schema.required;
+	if (optional && schema.places.length === 0) {
+		return null;
+	}
+	// An optional service is always a real choice (place vs none), even with a
+	// single place on offer; a mandatory one only needs asking when ambiguous.
+	const selectable =
+		schema.customerSelectable && (schema.places.length > 1 || optional);
 	return {
 		autoPlaceId: selectable ? null : (schema.places[0]?.id ?? null),
 		kind,
 		label: kind === "pickup" ? "Pickup location" : "Drop-off location",
+		optional,
 		places: schema.places,
 		selectable,
 	};
@@ -251,11 +261,12 @@ export function isActivityDetailComplete(
 		return false;
 	}
 	const pickupId = resolvePlaceId(desc.pickup, draft.pickupPlaceId);
-	if (desc.pickup?.selectable && !pickupId) {
+	if (desc.pickup?.selectable && !desc.pickup.optional && !pickupId) {
 		return false;
 	}
 	if (
 		desc.dropoff?.selectable &&
+		!desc.dropoff.optional &&
 		!resolvePlaceId(desc.dropoff, draft.dropoffPlaceId)
 	) {
 		return false;
