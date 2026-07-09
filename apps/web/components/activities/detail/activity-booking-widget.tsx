@@ -34,7 +34,14 @@ import {
 import { Separator } from "@workspace/ui/components/separator";
 import { cn } from "@workspace/ui/lib/utils";
 import { addDays, format, startOfDay } from "date-fns";
-import { CalendarDays, Loader2, Minus, Plus, Users } from "lucide-react";
+import {
+	CalendarDays,
+	Loader2,
+	Minus,
+	Plus,
+	ShoppingCart,
+	Users,
+} from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useCallback, useMemo, useState, useTransition } from "react";
 import type { DayButton as DayButtonProps } from "react-day-picker";
@@ -140,13 +147,17 @@ export function ActivityBookingWidget({
 	const [language, setLanguage] = useState<string | null>(
 		activity.languages[0] ?? null,
 	);
-	// `adding` covers the async cart write; `isNavigating` covers the transition
-	// to /checkout. Keeping the loading state on the transition (not a manual flag)
-	// means it clears when the checkout page commits and never sticks in the
-	// router-cached widget when the guest navigates back.
-	const [adding, setAdding] = useState(false);
+	// `pendingAction` covers the async cart write (and which button triggered
+	// it); `isNavigating` covers the transition to /checkout. Keeping the
+	// loading state on the transition (not a manual flag) means it clears when
+	// the checkout page commits and never sticks in the router-cached widget
+	// when the guest navigates back.
+	const [pendingAction, setPendingAction] = useState<"book" | "cart" | null>(
+		null,
+	);
+	const [added, setAdded] = useState(false);
 	const [isNavigating, startTransition] = useTransition();
-	const busy = adding || isNavigating;
+	const busy = pendingAction !== null || isNavigating;
 	const [error, setError] = useState<string | null>(null);
 
 	const selectedDay = selectedDate ? (days.get(selectedDate) ?? null) : null;
@@ -195,7 +206,10 @@ export function ActivityBookingWidget({
 		}));
 	};
 
-	const handleBook = async () => {
+	// One submit path for both actions: the shared cart store dedupes an
+	// identical selection server-side via its idempotency key, so re-adding the
+	// same departure never stacks a duplicate item.
+	const submitSelection = async (action: "book" | "cart") => {
 		if (!canBook || !departure || !selectedDate || busy) return;
 		const participantsInput = activity.pricingCategories
 			.map((category) => ({
@@ -205,7 +219,7 @@ export function ActivityBookingWidget({
 			.filter((entry) => entry.count > 0);
 		if (participantsInput.length === 0) return;
 		const rate = defaultRate(departure);
-		setAdding(true);
+		setPendingAction(action);
 		setError(null);
 		try {
 			await addActivityToCart({
@@ -215,13 +229,18 @@ export function ActivityBookingWidget({
 				rateId: rate?.id ?? null,
 				startTimeId: departure.startTimeId,
 			});
-			startTransition(() => {
-				router.push("/checkout");
-			});
+			if (action === "book") {
+				startTransition(() => {
+					router.push("/checkout");
+				});
+			} else {
+				setAdded(true);
+				window.setTimeout(() => setAdded(false), 2000);
+			}
 		} catch (error) {
 			setError(toCheckoutError(error).message);
 		} finally {
-			setAdding(false);
+			setPendingAction(null);
 		}
 	};
 
@@ -461,37 +480,59 @@ export function ActivityBookingWidget({
 		);
 	};
 
-	const renderBookAction = () => (
-		<div className="flex flex-col gap-2">
-			<Button
-				size="lg"
-				className="w-full"
-				disabled={!canBook || busy}
-				type="button"
-				onClick={handleBook}
-			>
-				{busy ? (
-					<Loader2 className="size-4 animate-spin" />
+	const renderBookAction = () => {
+		const booking = pendingAction === "book" || isNavigating;
+		return (
+			<div className="flex flex-col gap-2">
+				<Button
+					size="lg"
+					className="w-full"
+					disabled={!canBook || busy}
+					type="button"
+					onClick={() => submitSelection("book")}
+				>
+					{booking ? (
+						<Loader2 className="size-4 animate-spin" />
+					) : (
+						<CalendarDays className="size-4" />
+					)}
+					{booking
+						? "Preparing checkout…"
+						: canBook
+							? `Book · ${formatListingMoney(total ?? 0, currency)}`
+							: selectedDate
+								? "Book"
+								: "Choose a date"}
+				</Button>
+				<Button
+					variant="outline"
+					size="lg"
+					className="w-full"
+					disabled={!canBook || busy}
+					type="button"
+					onClick={() => submitSelection("cart")}
+				>
+					{pendingAction === "cart" ? (
+						<Loader2 className="size-4 animate-spin" />
+					) : (
+						<ShoppingCart className="size-4" />
+					)}
+					{added
+						? "Added to cart"
+						: pendingAction === "cart"
+							? "Adding"
+							: "Add to cart"}
+				</Button>
+				{error ? (
+					<p className="text-center text-destructive text-xs">{error}</p>
 				) : (
-					<CalendarDays className="size-4" />
+					<p className="text-center text-muted-foreground text-xs">
+						You won't be charged yet
+					</p>
 				)}
-				{busy
-					? "Adding to cart…"
-					: canBook
-						? `Book · ${formatListingMoney(total ?? 0, currency)}`
-						: selectedDate
-							? "Book"
-							: "Choose a date"}
-			</Button>
-			{error ? (
-				<p className="text-center text-destructive text-xs">{error}</p>
-			) : (
-				<p className="text-center text-muted-foreground text-xs">
-					You won't be charged yet
-				</p>
-			)}
-		</div>
-	);
+			</div>
+		);
+	};
 
 	const content = (
 		<div className="flex flex-col gap-5">
