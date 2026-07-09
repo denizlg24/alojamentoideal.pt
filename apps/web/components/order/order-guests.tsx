@@ -9,10 +9,7 @@ import type { BookingGuestIdentityStatus } from "@workspace/db";
 import { Button } from "@workspace/ui/components/button";
 import { Input } from "@workspace/ui/components/input";
 import { Label } from "@workspace/ui/components/label";
-import {
-	NativeSelect,
-	NativeSelectOption,
-} from "@workspace/ui/components/native-select";
+import { ResponsiveSelect } from "@workspace/ui/components/responsive-select";
 import { cn } from "@workspace/ui/lib/utils";
 import {
 	type FormEvent,
@@ -59,6 +56,11 @@ const DOCUMENT_TYPES = [
 	"Driving licence",
 	"Residence permit",
 	"Other",
+];
+
+const DOCUMENT_TYPE_OPTIONS = [
+	{ label: "Select", value: "" },
+	...DOCUMENT_TYPES.map((type) => ({ label: type, value: type })),
 ];
 
 type FormState = Record<keyof BookingGuestIdentityFields, string>;
@@ -221,19 +223,13 @@ function ManualGuestForm({
 				/>
 			</GuestField>
 			<GuestField htmlFor={fieldId("documentType")} label="Document type">
-				<NativeSelect
+				<ResponsiveSelect
 					className="w-full"
 					id={fieldId("documentType")}
-					onChange={(event) => update("documentType", event.target.value)}
+					onValueChange={(value) => update("documentType", value)}
+					options={DOCUMENT_TYPE_OPTIONS}
 					value={form.documentType}
-				>
-					<NativeSelectOption value="">Select</NativeSelectOption>
-					{DOCUMENT_TYPES.map((type) => (
-						<NativeSelectOption key={type} value={type}>
-							{type}
-						</NativeSelectOption>
-					))}
-				</NativeSelect>
+				/>
 			</GuestField>
 			<GuestField htmlFor={fieldId("documentNumber")} label="Document number">
 				<Input

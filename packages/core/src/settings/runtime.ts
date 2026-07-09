@@ -110,16 +110,26 @@ export function validateRuntimeSettingValue(
 			return trimmed.toUpperCase();
 		}
 		if (key === "bokun.activityIds") {
+			if (!trimmed) {
+				return "";
+			}
 			const ids = trimmed
 				.split(",")
 				.map((value) => value.trim())
 				.filter(Boolean);
-			if (ids.length === 0 || ids.some((value) => !/^\d+$/.test(value))) {
+			if (ids.some((value) => !/^\d+$/.test(value))) {
 				throw new Error(
 					`${definition.label} must be a comma-separated list of Bokun ids`,
 				);
 			}
 			return [...new Set(ids)].join(",");
+		}
+		if (key === "payments.detoursStripeAccountId" && trimmed) {
+			if (!/^acct_[A-Za-z0-9]+$/.test(trimmed)) {
+				throw new Error(
+					`${definition.label} must be a Stripe connected account id (acct_...)`,
+				);
+			}
 		}
 		if (key === "bokun.activityLang" && trimmed) {
 			if (!/^[A-Za-z]{2,3}(?:[-_][A-Za-z]{2,4})?$/.test(trimmed)) {

@@ -881,21 +881,106 @@ export const accommodationQuoteSnapshot = pgTable(
 	],
 );
 
+export interface ActivityParticipantSnapshot {
+	count: number;
+	label: string;
+	pricingCategoryId: number;
+	subtotalMinor: number;
+	unitPriceMinor: number;
+}
+
+export interface ActivityBookingAnswerSnapshot {
+	answer: string;
+	group: string;
+	participantIndex: number | null;
+	questionId: string;
+}
+
+export const activityQuoteSnapshot = pgTable(
+	"activity_quote_snapshots",
+	{
+		id: text("id").primaryKey(),
+		activityDate: date("activity_date", { mode: "string" }).notNull(),
+		answers: jsonb("answers")
+			.$type<ActivityBookingAnswerSnapshot[]>()
+			.notNull()
+			.default(sql`'[]'::jsonb`),
+		bokunActivityId: text("bokun_activity_id").notNull(),
+		createdAt: timestampWithTimezone("created_at").notNull().defaultNow(),
+		currency: text("currency").notNull(),
+		expiresAt: timestampWithTimezone("expires_at").notNull(),
+		externalAccountId: text("external_account_id").notNull(),
+		fetchedAt: timestampWithTimezone("fetched_at").notNull(),
+		participants: jsonb("participants")
+			.$type<ActivityParticipantSnapshot[]>()
+			.notNull()
+			.default(sql`'[]'::jsonb`),
+		provider: text("provider").notNull(),
+		providerPayload: jsonb("provider_payload").$type<Record<string, unknown>>(),
+		rateId: text("rate_id"),
+		startTimeId: text("start_time_id"),
+		subtotalMinor: bigint("subtotal_minor", { mode: "number" }).notNull(),
+		taxMinor: bigint("tax_minor", { mode: "number" }).notNull().default(0),
+		totalMinor: bigint("total_minor", { mode: "number" }).notNull(),
+		totalParticipants: integer("total_participants").notNull(),
+		validationStatus: text("validation_status").notNull().default("valid"),
+	},
+	(table) => [
+		index("activity_quote_snapshots_scope_date_idx").on(
+			table.provider,
+			table.externalAccountId,
+			table.bokunActivityId,
+			table.activityDate,
+		),
+		index("activity_quote_snapshots_expires_at_idx").on(table.expiresAt),
+		index("activity_quote_snapshots_validation_status_idx").on(
+			table.validationStatus,
+		),
+		check(
+			"activity_quote_snapshots_subtotal_minor_nonneg",
+			sql`${table.subtotalMinor} >= 0`,
+		),
+		check(
+			"activity_quote_snapshots_tax_minor_nonneg",
+			sql`${table.taxMinor} >= 0`,
+		),
+		check(
+			"activity_quote_snapshots_total_minor_nonneg",
+			sql`${table.totalMinor} >= 0`,
+		),
+		check(
+			"activity_quote_snapshots_total_ge_tax",
+			sql`${table.totalMinor} >= ${table.taxMinor}`,
+		),
+		check(
+			"activity_quote_snapshots_total_participants_positive",
+			sql`${table.totalParticipants} > 0`,
+		),
+		check(
+			"activity_quote_snapshots_validation_status_check",
+			sql`${table.validationStatus} in ('valid', 'unavailable', 'expired', 'provider_error')`,
+		),
+	],
+);
+
 export const cartItem = pgTable(
 	"cart_items",
 	{
 		id: text("id").primaryKey(),
+		activityQuoteSnapshotId: text("activity_quote_snapshot_id").references(
+			() => activityQuoteSnapshot.id,
+			{ onDelete: "restrict" },
+		),
 		cartId: text("cart_id")
 			.notNull()
 			.references(() => cart.id, { onDelete: "cascade" }),
 		clientMutationId: text("client_mutation_id"),
 		createdAt: timestampWithTimezone("created_at").notNull().defaultNow(),
 		position: integer("position").notNull(),
-		quoteSnapshotId: text("quote_snapshot_id")
-			.notNull()
-			.references(() => accommodationQuoteSnapshot.id, {
-				onDelete: "restrict",
-			}),
+		quoteSnapshotId: text("quote_snapshot_id").references(
+			() => accommodationQuoteSnapshot.id,
+			{ onDelete: "restrict" },
+		),
 		removedAt: timestampWithTimezone("removed_at"),
 		status: text("status").notNull().default("active"),
 		type: text("type").notNull().default("accommodation"),
@@ -917,6 +1002,13 @@ export const cartItem = pgTable(
 		check(
 			"cart_items_type_check",
 			sql`${table.type} in ('accommodation', 'activity')`,
+		),
+		// Exactly one typed quote snapshot per item, matching its type. An
+		// accommodation item carries an accommodation snapshot; an activity item
+		// carries an activity snapshot; never both, never neither.
+		check(
+			"cart_items_quote_snapshot_type_check",
+			sql`(${table.type} = 'accommodation' and ${table.quoteSnapshotId} is not null and ${table.activityQuoteSnapshotId} is null) or (${table.type} = 'activity' and ${table.activityQuoteSnapshotId} is not null and ${table.quoteSnapshotId} is null)`,
 		),
 	],
 );
@@ -1046,8 +1138,14 @@ export const orderContact = pgTable(
 			.default(sql`'{}'::jsonb`),
 		companyName: text("company_name"),
 		createdAt: timestampWithTimezone("created_at").notNull().defaultNow(),
+		// Activity bookings need Bokun's main-contact fields (first/last name, date
+		// of birth, language); accommodation-only orders leave them null.
+		dateOfBirth: date("date_of_birth", { mode: "string" }),
 		email: text("email").notNull(),
+		firstName: text("first_name"),
 		isCompany: boolean("is_company").notNull().default(false),
+		language: text("language"),
+		lastName: text("last_name"),
 		name: text("name").notNull(),
 		notes: text("notes"),
 		orderId: text("order_id")
@@ -1354,6 +1452,11 @@ export const conversation = pgTable(
 		uniqueIndex("conversations_provider_thread_uidx")
 			.on(table.provider, table.externalThreadId)
 			.where(sql`${table.externalThreadId} is not null`),
+		// One order-level internal conversation per order; provider-backed rows
+		// are keyed per booking/thread instead.
+		uniqueIndex("conversations_internal_order_uidx")
+			.on(table.orderId)
+			.where(sql`${table.provider} = 'internal'`),
 		index("conversations_active_sync_idx")
 			.on(table.lastSyncedAt)
 			.where(
@@ -1600,6 +1703,42 @@ export const accommodationItemDetail = pgTable(
 	],
 );
 
+export const activityItemDetail = pgTable(
+	"activity_item_details",
+	{
+		orderItemId: text("order_item_id")
+			.primaryKey()
+			.references(() => orderItem.id, { onDelete: "cascade" }),
+		activityDate: date("activity_date", { mode: "string" }).notNull(),
+		answers: jsonb("answers")
+			.$type<ActivityBookingAnswerSnapshot[]>()
+			.notNull()
+			.default(sql`'[]'::jsonb`),
+		bokunActivityId: text("bokun_activity_id").notNull(),
+		// Resolved Bokun pickup/dropoff place ids; set when the rate requires them.
+		dropoffPlaceId: text("dropoff_place_id"),
+		externalAccountId: text("external_account_id").notNull(),
+		participants: jsonb("participants")
+			.$type<ActivityParticipantSnapshot[]>()
+			.notNull()
+			.default(sql`'[]'::jsonb`),
+		pickupPlaceId: text("pickup_place_id"),
+		provider: text("provider").notNull(),
+		rateId: text("rate_id"),
+		roomNumber: text("room_number"),
+		startTimeId: text("start_time_id"),
+		totalParticipants: integer("total_participants").notNull(),
+	},
+	(table) => [
+		index("activity_item_details_activity_idx").on(
+			table.provider,
+			table.externalAccountId,
+			table.bokunActivityId,
+			table.activityDate,
+		),
+	],
+);
+
 export const orderItemCharge = pgTable(
 	"order_item_charges",
 	{
@@ -1631,7 +1770,7 @@ export const orderItemCharge = pgTable(
 		check("order_item_charges_tax_minor_nonneg", sql`${table.taxMinor} >= 0`),
 		check(
 			"order_item_charges_kind_check",
-			sql`${table.kind} in ('accommodation', 'tax', 'discount', 'fee')`,
+			sql`${table.kind} in ('accommodation', 'activity', 'tax', 'discount', 'fee')`,
 		),
 		check(
 			"order_item_charges_signed_amounts_check",
@@ -1766,6 +1905,12 @@ export const orderRefund = pgTable(
 			.default("pending"),
 		stripeRefundId: text("stripe_refund_id"),
 		stripeRefundIdempotencyKey: text("stripe_refund_idempotency_key").notNull(),
+		// Explicit Detours transfer reversal issued alongside the refund; null for
+		// accommodation-only refunds and refunds recorded before reversals existed.
+		stripeTransferReversalId: text("stripe_transfer_reversal_id"),
+		transferReversalAmountMinor: bigint("transfer_reversal_amount_minor", {
+			mode: "number",
+		}),
 		createdByUserId: text("created_by_user_id").references(() => user.id, {
 			onDelete: "set null",
 		}),

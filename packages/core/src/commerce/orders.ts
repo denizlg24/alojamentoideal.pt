@@ -1,12 +1,16 @@
 import type {
 	AccommodationQuoteFeeSnapshot,
+	ActivityBookingAnswerSnapshot,
+	ActivityParticipantSnapshot,
 	AppliedDiscountSnapshot,
+	CommerceCatalogSnapshot,
 } from "@workspace/db";
 import { feeLineNetMinor } from "./money";
 import type {
 	DraftOrderContactInput,
 	ListingDisplaySnapshot,
 	NormalizedAccommodationQuoteSnapshot,
+	NormalizedActivityQuoteSnapshot,
 } from "./types";
 
 export interface DraftOrderItemSource {
@@ -226,4 +230,110 @@ function chargeKind(line: AccommodationQuoteFeeSnapshot): string {
 		return "discount";
 	}
 	return "fee";
+}
+
+export interface DraftActivityItemSource {
+	cartItemId: string;
+	position: number;
+	quote: NormalizedActivityQuoteSnapshot;
+	snapshot: CommerceCatalogSnapshot;
+}
+
+export interface DraftActivityDetailRow {
+	activityDate: string;
+	answers: ActivityBookingAnswerSnapshot[];
+	bokunActivityId: string;
+	externalAccountId: string;
+	participants: ActivityParticipantSnapshot[];
+	provider: string;
+	rateId: string | null;
+	startTimeId: string | null;
+	totalParticipants: number;
+}
+
+export interface DraftActivityItemRow {
+	catalogSnapshot: CommerceCatalogSnapshot;
+	currency: string;
+	discountMinor: number;
+	imageUrlSnapshot: string | null;
+	position: number;
+	quantity: number;
+	sourceCartItemId: string;
+	status: "draft";
+	subtotalMinor: number;
+	taxMinor: number;
+	titleSnapshot: string;
+	totalMinor: number;
+	type: "activity";
+}
+
+export interface DraftActivityOrderRows {
+	charges: DraftOrderChargeRow[];
+	contact: DraftOrderContactInput;
+	detail: DraftActivityDetailRow;
+	item: DraftActivityItemRow;
+}
+
+/**
+ * Maps a normalized activity quote to the rows that persist an activity order
+ * item. An activity is a single priced line (no per-fee breakdown like a stay),
+ * so `charges` is one `activity` row carrying the participant total; tax is
+ * whatever the provider price already includes.
+ */
+export function buildActivityDraftOrderRows(
+	source: DraftActivityItemSource,
+	contact: DraftOrderContactInput,
+): DraftActivityOrderRows {
+	const quote = source.quote;
+	const netMinor = Math.max(0, quote.totalMinor - quote.taxMinor);
+	const participantCount = Math.max(quote.totalParticipants, 1);
+
+	return {
+		charges: [
+			{
+				grossMinor: quote.totalMinor,
+				kind: "activity",
+				name: source.snapshot.title,
+				netMinor,
+				position: 1,
+				providerChargeId: null,
+				quantity: quote.totalParticipants.toFixed(2),
+				rawPayload: {
+					participants: quote.participants,
+					rateId: quote.rateId,
+					startTimeId: quote.startTimeId,
+				},
+				taxMinor: quote.taxMinor,
+				taxRateBasisPoints: null,
+				unitNetMinor: Math.round(netMinor / participantCount),
+			},
+		],
+		contact,
+		detail: {
+			activityDate: quote.activityDate,
+			answers: quote.answers,
+			bokunActivityId: quote.bokunActivityId,
+			externalAccountId: quote.externalAccountId,
+			participants: quote.participants,
+			provider: quote.provider,
+			rateId: quote.rateId,
+			startTimeId: quote.startTimeId,
+			totalParticipants: quote.totalParticipants,
+		},
+		item: {
+			catalogSnapshot: source.snapshot,
+			currency: quote.currency,
+			discountMinor: 0,
+			imageUrlSnapshot: source.snapshot.imageUrl ?? null,
+			position: source.position,
+			quantity: 1,
+			sourceCartItemId: source.cartItemId,
+			status: "draft",
+			subtotalMinor: quote.subtotalMinor,
+			taxMinor: quote.taxMinor,
+			titleSnapshot: source.snapshot.title,
+			totalMinor: quote.totalMinor,
+			type: "activity",
+		},
+	};
 }

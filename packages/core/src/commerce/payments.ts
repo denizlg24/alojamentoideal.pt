@@ -92,6 +92,10 @@ export interface HoldReservationResponse {
  * amount on purpose, so this is the only trustworthy source.
  */
 export interface PayableOrder {
+	accommodationItemCount: number;
+	activityItemCount: number;
+	/** Minor-unit sum of the activity items; the Detours transfer share. */
+	activityTotalMinor: number;
 	cartId: string | null;
 	/** ISO instant the checkout window closes; null when no deadline is set. */
 	checkoutExpiresAt: string | null;
@@ -152,13 +156,24 @@ export interface OrderConfirmationStay {
 	title: string;
 }
 
+/** One booked activity/tour as rendered in the order emails. */
+export interface OrderConfirmationActivity {
+	activityDate: string;
+	imageUrl: string | null;
+	/** Provider code of the product booking; keys ticket/invoice PDF fetches. */
+	productConfirmationCode: string | null;
+	title: string;
+	totalParticipants: number;
+}
+
 /**
  * Contact + amount facts needed to send a single order-confirmation email.
  * Returned only on the first draft -> confirmed transition so re-delivered
- * webhooks never trigger a duplicate email. `stays` carries every booking on
- * the order (a multi-stay cart purchase produces several).
+ * webhooks never trigger a duplicate email. `stays` and `activities` carry every
+ * booking on the order (a multi-item cart purchase produces several).
  */
 export interface OrderConfirmationFacts {
+	activities: OrderConfirmationActivity[];
 	amountPaidMinor: number;
 	billingAddress: OrderBillingAddressSnapshot;
 	contactPhone: string;
@@ -211,6 +226,9 @@ export type MarkOrderPaidResult =
 export type HoldOrderResult =
 	| { outcome: "held" }
 	| { message: string; outcome: "unavailable" }
+	// Recoverable bad input (missing/invalid booking answers or pickup place):
+	// the order stays payable and the guest can retry after fixing the details.
+	| { message: string; outcome: "invalid" }
 	| { outcome: "transient_error" }
 	| { outcome: "not_holdable" };
 

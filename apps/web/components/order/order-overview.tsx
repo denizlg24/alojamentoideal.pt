@@ -1,6 +1,7 @@
 import type { OrderDetail } from "@workspace/core/commerce";
 import {
 	ChevronRight,
+	Compass,
 	Home,
 	MessageCircle,
 	ReceiptText,
@@ -8,7 +9,11 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import type { ReactNode } from "react";
-import { formatMinor, formatStayRangeLong } from "@/lib/checkout/format";
+import {
+	formatActivityDateLong,
+	formatMinor,
+	formatStayRangeLong,
+} from "@/lib/checkout/format";
 import { siteConfig } from "@/lib/site/config";
 import { countryName } from "@/lib/site/countries";
 
@@ -22,6 +27,21 @@ function isConfirmationDelayed(detail: OrderDetail): boolean {
 		detail.provisioningSubState === "paid-confirming" &&
 		detail.items.some((item) => item.providerBooking?.needsRecovery)
 	);
+}
+
+/** Heading for the bookings section, keyed to the mix of item types. */
+function bookingsHeading(detail: OrderDetail): string {
+	const items = detail.items;
+	if (items.length > 0 && items.every((item) => item.type === "activity")) {
+		return items.length === 1 ? "Your activity" : "Your activities";
+	}
+	if (
+		items.length > 0 &&
+		items.every((item) => item.type === "accommodation")
+	) {
+		return items.length === 1 ? "Your stay" : "Your stays";
+	}
+	return "Your bookings";
 }
 
 function statusBody(detail: OrderDetail): ReactNode {
@@ -129,7 +149,7 @@ function DisabledActionRow({
 function conversationSubtitle(detail: OrderDetail): string {
 	switch (detail.conversationAvailability) {
 		case "available":
-			return "Message the Alojamento Ideal team about your stay";
+			return "Message the Alojamento Ideal team about your booking";
 		case "pending":
 			return "Chat opens once your booking is confirmed";
 		default:
@@ -236,6 +256,8 @@ export function OrderOverview({ detail }: { detail: OrderDetail }) {
 	const root = `/order/${encodeURIComponent(detail.reference)}`;
 	const body = statusBody(detail);
 	const pricing = detail.pricing;
+	const hasStays = detail.items.some((item) => item.type === "accommodation");
+	const activityItems = detail.items.filter((item) => item.type === "activity");
 
 	return (
 		<div className="flex flex-col gap-8">
@@ -243,7 +265,7 @@ export function OrderOverview({ detail }: { detail: OrderDetail }) {
 
 			<section className="flex flex-col gap-2">
 				<h2 className="font-heading font-medium text-base">
-					{detail.items.length === 1 ? "Your stay" : "Your stays"}
+					{bookingsHeading(detail)}
 				</h2>
 				<dl className="divide-y divide-border/60">
 					{detail.items.map((item) => (
@@ -263,6 +285,22 @@ export function OrderOverview({ detail }: { detail: OrderDetail }) {
 									/>
 								)}
 								{item.guests && <Field label="Guests" value={item.guests} />}
+								{item.type === "activity" && item.activityDate && (
+									<Field
+										label="Date"
+										value={formatActivityDateLong(item.activityDate)}
+									/>
+								)}
+								{item.type === "activity" && item.totalParticipants != null && (
+									<Field
+										label="Participants"
+										value={`${item.totalParticipants} ${
+											item.totalParticipants === 1
+												? "participant"
+												: "participants"
+										}`}
+									/>
+								)}
 							</div>
 						</div>
 					))}
@@ -375,23 +413,38 @@ export function OrderOverview({ detail }: { detail: OrderDetail }) {
 						title="Messages"
 					/>
 				)}
-				<LinkRow
-					href={`${root}/stay`}
-					icon={<Home className="size-4" />}
-					subtitle="Photos, amenities, directions and house guide"
-					title="Stay details"
-				/>
-				<LinkRow
-					href={`${root}/guests`}
-					icon={<Users className="size-4" />}
-					subtitle={guestsSubtitle(detail)}
-					title="Guest registration"
-				/>
-				<DisabledActionRow
-					icon={<ReceiptText className="size-4" />}
-					subtitle="Invoice generation is not available yet"
-					title="Generate invoice"
-				/>
+				{hasStays && (
+					<LinkRow
+						href={`${root}/stay`}
+						icon={<Home className="size-4" />}
+						subtitle="Photos, amenities, directions and house guide"
+						title="Stay details"
+					/>
+				)}
+				{activityItems.map((item) => (
+					<LinkRow
+						href={`${root}/activity/${encodeURIComponent(item.id)}`}
+						icon={<Compass className="size-4" />}
+						key={item.id}
+						subtitle="Tickets, meeting point and booking information"
+						title={activityItems.length > 1 ? item.title : "Activity details"}
+					/>
+				))}
+				{hasStays && (
+					<LinkRow
+						href={`${root}/guests`}
+						icon={<Users className="size-4" />}
+						subtitle={guestsSubtitle(detail)}
+						title="Guest registration"
+					/>
+				)}
+				{hasStays && (
+					<DisabledActionRow
+						icon={<ReceiptText className="size-4" />}
+						subtitle="Invoice generation is not available yet"
+						title="Generate invoice"
+					/>
+				)}
 			</section>
 		</div>
 	);

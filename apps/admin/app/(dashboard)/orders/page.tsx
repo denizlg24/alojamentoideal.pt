@@ -12,7 +12,11 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { StatusDot } from "@/components/status-dot";
 import { formatDateTime, formatMoneyMinor } from "@/lib/format";
-import { isOrderStatusFilter, listAdminOrders } from "@/lib/orders/list";
+import {
+	type AdminOrderListRow,
+	isOrderStatusFilter,
+	listAdminOrders,
+} from "@/lib/orders/list";
 import { OrdersFilters } from "./orders-filters";
 
 export const metadata: Metadata = { title: "Orders" };
@@ -40,6 +44,25 @@ function pageHref(params: {
 	return query ? `/orders?${query}` : "/orders";
 }
 
+function itemSummary(row: AdminOrderListRow): string {
+	const parts: string[] = [];
+	if (row.accommodationItemCount > 0) {
+		parts.push(
+			`${row.accommodationItemCount} ${
+				row.accommodationItemCount === 1 ? "home" : "homes"
+			}`,
+		);
+	}
+	if (row.activityItemCount > 0) {
+		parts.push(
+			`${row.activityItemCount} ${
+				row.activityItemCount === 1 ? "activity" : "activities"
+			}`,
+		);
+	}
+	return parts.join(", ") || "No items";
+}
+
 export default async function OrdersPage({ searchParams }: OrdersPageProps) {
 	const params = await searchParams;
 	const status =
@@ -57,8 +80,8 @@ export default async function OrdersPage({ searchParams }: OrdersPageProps) {
 						Orders
 					</h1>
 					<p className="mt-1 text-muted-foreground text-sm">
-						Bookings across the reservation saga. Rows flagged with a warning
-						have a provider booking that needs manual recovery.
+						Home and activity bookings across checkout. Rows flagged with a
+						warning have a provider booking that needs manual recovery.
 					</p>
 				</div>
 				<OrdersFilters />
@@ -69,6 +92,7 @@ export default async function OrdersPage({ searchParams }: OrdersPageProps) {
 					<TableRow>
 						<TableHead>Reference</TableHead>
 						<TableHead>Status</TableHead>
+						<TableHead>Items</TableHead>
 						<TableHead>Guest</TableHead>
 						<TableHead className="text-right">Total</TableHead>
 						<TableHead className="text-right">Paid</TableHead>
@@ -80,7 +104,7 @@ export default async function OrdersPage({ searchParams }: OrdersPageProps) {
 						<TableRow>
 							<TableCell
 								className="py-10 text-center text-muted-foreground"
-								colSpan={6}
+								colSpan={7}
 							>
 								No orders match these filters.
 							</TableCell>
@@ -104,6 +128,9 @@ export default async function OrdersPage({ searchParams }: OrdersPageProps) {
 								</TableCell>
 								<TableCell>
 									<StatusDot status={row.status} />
+								</TableCell>
+								<TableCell className="text-muted-foreground">
+									{itemSummary(row)}
 								</TableCell>
 								<TableCell className="text-muted-foreground">
 									{row.contactName ?? row.contactEmail ?? "—"}

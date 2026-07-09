@@ -17,6 +17,31 @@ export type {
 	ConversationStatus,
 };
 
+/**
+ * Provider tag for conversations that live entirely in our own database and
+ * realtime channel, with no external inbox behind them. Used for orders whose
+ * bookings have no provider chat (e.g. activity-only orders): the conversation
+ * is active from the moment it is provisioned and messages are delivered the
+ * moment they are stored.
+ */
+export const INTERNAL_CONVERSATION_PROVIDER = "internal";
+
+/**
+ * A conversation is usable for chat when it is active and either has its
+ * provider thread linked or is backed by our internal conversation provider.
+ */
+export function isChatReadyConversation(conversation: {
+	externalThreadId: string | null;
+	provider: string;
+	status: ConversationStatus;
+}): boolean {
+	return (
+		conversation.status === "active" &&
+		(conversation.externalThreadId !== null ||
+			conversation.provider === INTERNAL_CONVERSATION_PROVIDER)
+	);
+}
+
 export interface ProviderConversationThread {
 	externalThreadId: string;
 	lastMessagePreview: string | null;
@@ -64,6 +89,7 @@ export interface ConversationSummary {
 	id: string;
 	lastMessageAt: string | null;
 	lastMessagePreview: string | null;
+	provider: string;
 	providerBookingId: string | null;
 	status: ConversationStatus;
 	unreadCount: number;

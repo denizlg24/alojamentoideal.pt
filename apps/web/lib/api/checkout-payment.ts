@@ -11,6 +11,7 @@ import {
 	StripeConfigurationError,
 } from "@workspace/core/integrations/stripe";
 import { logger } from "@workspace/core/observability";
+import { getRuntimeSettings } from "@workspace/core/settings";
 
 const SLOW_PAYMENT_RESPONSE_LOG_THRESHOLD_MS = 2_000;
 const SLOW_RESERVATION_HOLD_LOG_THRESHOLD_MS = 2_000;
@@ -26,6 +27,27 @@ function assertOrderBelongsToCart(order: PayableOrder, cartId: string): void {
 	if (order.cartId !== cartId) {
 		throw new CommerceError("order_not_found", "Order not found.", 404);
 	}
+}
+
+async function activityTransferDestination(
+	order: PayableOrder,
+): Promise<string | null> {
+	if (order.activityItemCount === 0) {
+		return null;
+	}
+
+	const settings = await getRuntimeSettings();
+	const destination = String(
+		settings["payments.detoursStripeAccountId"] ?? "",
+	).trim();
+	if (!destination) {
+		throw new CommerceError(
+			"payment_unavailable",
+			"Activity payments are not available right now.",
+			503,
+		);
+	}
+	return destination;
 }
 
 /**
@@ -55,10 +77,16 @@ export async function holdReservationForPayment(
 	if (hold.outcome === "unavailable") {
 		throw new CommerceError("reservation_unavailable", hold.message, 409);
 	}
+	if (hold.outcome === "invalid") {
+		// Recoverable: the guest fixes the flagged detail and retries. Deliberately
+		// not a 409 so the client shows an inline error instead of rebuilding the
+		// cart.
+		throw new CommerceError("activity_details_invalid", hold.message, 422);
+	}
 	if (hold.outcome === "transient_error") {
 		throw new CommerceError(
 			"payment_unavailable",
-			"We could not hold this stay just now. Please try again.",
+			"We could not hold this booking just now. Please try again.",
 			503,
 		);
 	}
@@ -121,6 +149,16 @@ export async function buildPaymentIntentResponse(
 	}
 
 	const stripeStartedAt = performance.now();
+	// Activity-only orders settle wholly to Detours (on_behalf_of + full-charge
+	// transfer). Mixed orders keep the platform as merchant of record and route
+	// only the activity share via transfer_data.amount. A mixed order whose
+	// activity share is zero has nothing to transfer (Stripe rejects amount 0).
+	const mixedOrder =
+		order.accommodationItemCount > 0 && order.activityItemCount > 0;
+	const transferDestination =
+		mixedOrder && order.activityTotalMinor <= 0
+			? null
+			: await activityTransferDestination(order);
 	const snapshot = await createOrUpdatePaymentIntent(stripe, {
 		amountMinor: order.totalMinor,
 		cartId,
@@ -129,8 +167,12 @@ export async function buildPaymentIntentResponse(
 		existingPaymentIntentId: order.stripePaymentIntentId,
 		// Deterministic per order: one intent per draft order, retry-safe.
 		idempotencyKey: `pi:${order.orderId}`,
+		onBehalfOf: mixedOrder ? null : transferDestination,
 		orderId: order.orderId,
 		publicReference: order.publicReference,
+		transferAmountMinor:
+			mixedOrder && transferDestination ? order.activityTotalMinor : null,
+		transferDestination,
 	});
 	const stripeMs = elapsedSince(stripeStartedAt);
 

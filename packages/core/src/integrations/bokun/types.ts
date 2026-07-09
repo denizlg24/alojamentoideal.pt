@@ -120,6 +120,7 @@ export type BokunItineraryBookingQuery = BokunJsonBody;
 export type BokunSingleActivityBookingRequest = BokunJsonBody;
 export type BokunSingleTransportBookingRequest = BokunJsonBody;
 export type BokunSingleAccommodationBookingRequest = BokunJsonBody;
+export type BokunBookingQuestionsAnswerRequest = BokunJsonBody;
 
 /* ------------------------------------------------------------------ */
 /* v2 query parameters                                                */

@@ -1,5 +1,6 @@
 import {
 	accommodationItemDetail as accommodationItemDetailTable,
+	activityItemDetail as activityItemDetailTable,
 	bookingGuest as bookingGuestTable,
 	type Database,
 	type GuestSubmissionJobStatus,
@@ -89,11 +90,45 @@ export interface GuestInfoReminderSummary {
 	reminderEmailsSkipped: number;
 }
 
-export type GuestSubmissionRunSummary = GuestSubmissionProcessSummary &
+/**
+ * One activity booking whose required provider questions may still be
+ * unanswered. Whether they actually are is only known provider-side, so the
+ * dispatch callback performs the live check and reports the outcome.
+ */
+export interface ActivityQuestionsReminderFacts {
+	/** Local activity date, `YYYY-MM-DD`. */
+	activityDate: string;
+	activityTitle: string;
+	email: string;
+	orderId: string;
+	orderItemId: string;
+	/** Provider code of the product booking; keys the live questions read. */
+	productConfirmationCode: string | null;
+	publicReference: string;
+}
+
+/**
+ * `sent`: a reminder email went out (schedules the next reverse-backoff send).
+ * `complete`: every required question is answered (stops reminding for good).
+ */
+export type ActivityQuestionsReminderOutcome = "complete" | "sent";
+
+export interface ActivityQuestionsReminderSummary {
+	activityQuestionRemindersDismissed: number;
+	activityQuestionRemindersFailed: number;
+	activityQuestionRemindersSent: number;
+	activityQuestionRemindersSkipped: number;
+}
+
+export type GuestSubmissionRunSummary = ActivityQuestionsReminderSummary &
+	GuestSubmissionProcessSummary &
 	GuestSubmissionSweepSummary &
 	GuestInfoReminderSummary;
 
 export interface GuestComplianceRunOptions {
+	onActivityQuestionsReminder?: (
+		facts: ActivityQuestionsReminderFacts,
+	) => Promise<ActivityQuestionsReminderOutcome>;
 	onGuestInfoReminder?: (facts: GuestInfoReminderFacts) => Promise<void>;
 }
 
@@ -156,7 +191,11 @@ export class GuestComplianceService {
 			limit,
 			options.onGuestInfoReminder,
 		);
-		return { ...sweep, ...process, ...reminders };
+		const activityReminders = await this.dispatchDueActivityQuestionReminders(
+			limit,
+			options.onActivityQuestionsReminder,
+		);
+		return { ...sweep, ...process, ...reminders, ...activityReminders };
 	}
 
 	/**
@@ -363,6 +402,154 @@ export class GuestComplianceService {
 		return summary;
 	}
 
+	/**
+	 * Sends reminders for confirmed activity bookings whose required provider
+	 * questions may still be unanswered. Shares the guest-info reminder cadence
+	 * and per-booking reminder columns; whether required answers are actually
+	 * missing is only known provider-side, so the callback does the live check
+	 * and reports back: `complete` stops the reminders, `sent` schedules the
+	 * next reverse-backoff send, a throw retries on the failure cadence.
+	 */
+	async dispatchDueActivityQuestionReminders(
+		limit = 20,
+		onReminder?: (
+			facts: ActivityQuestionsReminderFacts,
+		) => Promise<ActivityQuestionsReminderOutcome>,
+	): Promise<ActivityQuestionsReminderSummary> {
+		const summary = emptyActivityQuestionsReminderSummary();
+		if (!onReminder) {
+			return summary;
+		}
+
+		const now = this.#now();
+		const due = await this.#db
+			.select({ id: providerBookingTable.id })
+			.from(providerBookingTable)
+			.innerJoin(orderTable, eq(orderTable.id, providerBookingTable.orderId))
+			.innerJoin(
+				orderItemTable,
+				eq(orderItemTable.id, providerBookingTable.orderItemId),
+			)
+			.where(
+				and(
+					eq(orderItemTable.type, "activity"),
+					eq(orderTable.status, "confirmed"),
+					inArray(providerBookingTable.normalizedStatus, [
+						"confirmed",
+						"completed",
+					]),
+					sql`${providerBookingTable.guestReminderEmailNextAt} is not null`,
+					lte(providerBookingTable.guestReminderEmailNextAt, now),
+					gt(providerBookingTable.stayStartsAt, now),
+				),
+			)
+			.orderBy(asc(providerBookingTable.guestReminderEmailNextAt))
+			.limit(limit);
+
+		for (const { id } of due) {
+			const claimed = await this.#claimGuestInfoReminder(id, now);
+			if (!claimed) {
+				summary.activityQuestionRemindersSkipped += 1;
+				continue;
+			}
+
+			const target = await this.#loadActivityQuestionsReminderTarget(id, now);
+			if (!target) {
+				await this.#dismissGuestInfoReminder(id, now);
+				summary.activityQuestionRemindersSkipped += 1;
+				continue;
+			}
+
+			try {
+				const outcome = await onReminder(target.facts);
+				if (outcome === "complete") {
+					await this.#dismissGuestInfoReminder(id, this.#now());
+					summary.activityQuestionRemindersDismissed += 1;
+				} else {
+					await this.#markGuestInfoReminderSent(id, target, this.#now());
+					summary.activityQuestionRemindersSent += 1;
+				}
+			} catch (error) {
+				await this.#recordGuestInfoReminderFailure(
+					id,
+					describeError(error),
+					this.#now(),
+				);
+				summary.activityQuestionRemindersFailed += 1;
+			}
+		}
+
+		return summary;
+	}
+
+	async #loadActivityQuestionsReminderTarget(
+		providerBookingId: string,
+		now: Date,
+	): Promise<{
+		facts: ActivityQuestionsReminderFacts;
+		reminderEmailCount: number;
+		stayStartsAt: Date;
+	} | null> {
+		const [row] = await this.#db
+			.select({
+				activityDate: activityItemDetailTable.activityDate,
+				activityTitle: orderItemTable.titleSnapshot,
+				email: orderContactTable.email,
+				orderId: orderTable.id,
+				orderItemId: orderItemTable.id,
+				productConfirmationCode: providerBookingTable.providerTransactionId,
+				publicReference: orderTable.publicReference,
+				reminderEmailCount: providerBookingTable.guestReminderEmailCount,
+				stayStartsAt: providerBookingTable.stayStartsAt,
+			})
+			.from(providerBookingTable)
+			.innerJoin(orderTable, eq(orderTable.id, providerBookingTable.orderId))
+			.innerJoin(
+				orderContactTable,
+				eq(orderContactTable.orderId, orderTable.id),
+			)
+			.innerJoin(
+				orderItemTable,
+				eq(orderItemTable.id, providerBookingTable.orderItemId),
+			)
+			.innerJoin(
+				activityItemDetailTable,
+				eq(
+					activityItemDetailTable.orderItemId,
+					providerBookingTable.orderItemId,
+				),
+			)
+			.where(
+				and(
+					eq(providerBookingTable.id, providerBookingId),
+					eq(orderTable.status, "confirmed"),
+					inArray(providerBookingTable.normalizedStatus, [
+						"confirmed",
+						"completed",
+					]),
+				),
+			)
+			.limit(1);
+
+		if (!row?.stayStartsAt || row.stayStartsAt.getTime() <= now.getTime()) {
+			return null;
+		}
+
+		return {
+			facts: {
+				activityDate: row.activityDate,
+				activityTitle: row.activityTitle,
+				email: row.email,
+				orderId: row.orderId,
+				orderItemId: row.orderItemId,
+				productConfirmationCode: row.productConfirmationCode,
+				publicReference: row.publicReference,
+			},
+			reminderEmailCount: row.reminderEmailCount,
+			stayStartsAt: row.stayStartsAt,
+		};
+	}
+
 	async #claimGuestInfoReminder(
 		providerBookingId: string,
 		now: Date,
@@ -469,7 +656,7 @@ export class GuestComplianceService {
 
 	async #markGuestInfoReminderSent(
 		providerBookingId: string,
-		target: GuestReminderDispatchTarget,
+		target: { reminderEmailCount: number; stayStartsAt: Date },
 		now: Date,
 	): Promise<void> {
 		await this.#db
@@ -817,6 +1004,15 @@ function emptyGuestInfoReminderSummary(): GuestInfoReminderSummary {
 		reminderEmailsFailed: 0,
 		reminderEmailsSent: 0,
 		reminderEmailsSkipped: 0,
+	};
+}
+
+function emptyActivityQuestionsReminderSummary(): ActivityQuestionsReminderSummary {
+	return {
+		activityQuestionRemindersDismissed: 0,
+		activityQuestionRemindersFailed: 0,
+		activityQuestionRemindersSent: 0,
+		activityQuestionRemindersSkipped: 0,
 	};
 }
 

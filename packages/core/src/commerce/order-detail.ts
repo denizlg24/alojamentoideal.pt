@@ -5,6 +5,7 @@ import type {
 	OrderMemberStatus,
 	ProviderBookingStatus,
 } from "@workspace/db";
+import { isChatReadyConversation } from "./conversations";
 import { type OrderRole, orderRoleCan } from "./order-access";
 import type {
 	OrderBookingStatus,
@@ -45,7 +46,29 @@ export interface OrderItemPricing {
 	totalMinor: number;
 }
 
+/**
+ * Persisted activity booking facts an owner needs to render the activity
+ * section and to key live provider (Bokun) reads: the product confirmation
+ * code plus the pickup/dropoff and start-time selections captured at checkout.
+ */
+export interface OrderDetailItemActivity {
+	bokunActivityId: string;
+	dropoffPlaceId: string | null;
+	externalAccountId: string;
+	pickupPlaceId: string | null;
+	/** Provider code of the product booking (e.g. Bokun `productConfirmationCode`). */
+	productConfirmationCode: string | null;
+	provider: string;
+	rateId: string | null;
+	roomNumber: string | null;
+	startTimeId: string | null;
+}
+
 export interface OrderDetailItem {
+	/** Owner-only activity facts. Null for non-activity items and member viewers. */
+	activity: OrderDetailItemActivity | null;
+	/** Local activity date, `YYYY-MM-DD`. Null for non-activity items. */
+	activityDate: string | null;
 	adults: number | null;
 	charges: OrderDetailCharge[] | null;
 	checkIn: string | null;
@@ -68,6 +91,8 @@ export interface OrderDetailItem {
 		status: ProviderBookingStatus;
 	} | null;
 	title: string;
+	/** Booked participant count for an activity. Null for non-activity items. */
+	totalParticipants: number | null;
 	type: string;
 }
 
@@ -110,6 +135,7 @@ export interface OrderConversationSummary {
 	id: string;
 	lastMessageAt: string | null;
 	lastMessagePreview: string | null;
+	provider: string;
 	providerBookingId: string | null;
 	status: ConversationStatus;
 	unreadCount: number;
@@ -208,15 +234,11 @@ export function scopeOrderItemsToViewer<T extends { bookingId: string | null }>(
 export function summarizeConversationAvailability(
 	conversations: ReadonlyArray<{
 		externalThreadId: string | null;
+		provider: string;
 		status: ConversationStatus;
 	}>,
 ): OrderConversationAvailability {
-	if (
-		conversations.some(
-			(conversation) =>
-				conversation.status === "active" && conversation.externalThreadId,
-		)
-	) {
+	if (conversations.some(isChatReadyConversation)) {
 		return "available";
 	}
 	if (conversations.length > 0) {

@@ -1,4 +1,16 @@
 import { randomUUID } from "node:crypto";
+import type {
+	ActivityBookingAnswerSnapshot,
+	ActivityParticipantSnapshot,
+} from "@workspace/db";
+import type { BokunClient } from "../integrations/bokun";
+import {
+	BokunApiError,
+	BokunNetworkError,
+	type BokunRequestContext,
+	BokunResponseValidationError,
+	BokunTimeoutError,
+} from "../integrations/bokun";
 import type { HostifyClient } from "../integrations/hostify";
 import {
 	HostifyApiError,
@@ -35,9 +47,29 @@ const CANCELLED_PROVIDER_STATUSES: ReadonlySet<string> = new Set([
 	"cancelled_by_guest",
 	"no_show",
 ]);
+const BOKUN_CONFIRMED_STATUSES: ReadonlySet<string> = new Set([
+	"ARRIVED",
+	"CONFIRMED",
+]);
+const BOKUN_HOLD_STATUSES: ReadonlySet<string> = new Set([
+	"REQUESTED",
+	"RESERVED",
+]);
+const BOKUN_TERMINAL_STATUSES: ReadonlySet<string> = new Set([
+	"ABORTED",
+	"CANCELLED",
+	"ERROR",
+	"NO_SHOW",
+	"REJECTED",
+	"TIMEOUT",
+]);
 
 export interface ReservationContact {
+	dateOfBirth?: string | null;
 	email: string;
+	firstName?: string | null;
+	language?: string | null;
+	lastName?: string | null;
 	name: string;
 	phone: string;
 }
@@ -78,10 +110,37 @@ export interface BuildReservationInput {
  * completed when the hold is confirmed and left incomplete when it is released.
  */
 export interface HostifyHoldRequest {
+	kind?: "hostify";
 	reservation: HostifyCreateReservationInput;
 	/** Transaction payload sans `reservation_id` (filled once the hold exists). */
 	transaction: Omit<HostifyCreateTransactionInput, "reservation_id">;
 }
+
+export interface BokunActivityHoldRequest {
+	activity: {
+		activityDate: string;
+		answers: ActivityBookingAnswerSnapshot[];
+		bokunActivityId: string;
+		/** Bokun dropoff place id; set when the rate requires a dropoff place. */
+		dropoffPlaceId?: string | null;
+		participants: ActivityParticipantSnapshot[];
+		/** Bokun pickup place id; set when the rate requires a pickup place. */
+		pickupPlaceId?: string | null;
+		rateId: string | null;
+		/** Free-text pickup room number, when the pickup place asks for one. */
+		roomNumber?: string | null;
+		startTimeId: string | null;
+	};
+	amountMinor: number;
+	contact: ReservationContact;
+	currency: string;
+	kind: "bokun_activity";
+	orderItemId: string;
+	publicReference: string;
+	source: string;
+}
+
+export type ProviderHoldRequest = BokunActivityHoldRequest | HostifyHoldRequest;
 
 /** Deterministic dedupe tag for a hold (order reference + item). */
 export function reservationTag(
@@ -98,8 +157,8 @@ function buildReservationNote(
 	return `Alojamento Ideal direct booking [${reservationTag(publicReference, orderItemId)}]`;
 }
 
-/** Converts integer minor units to the decimal major-unit number Hostify expects. */
-function toHostifyMoney(minor: number, currency: string): number {
+/** Converts integer minor units to the decimal major-unit number providers expect. */
+function toProviderMoney(minor: number, currency: string): number {
 	return minor / minorUnitFactor(currency);
 }
 
@@ -138,7 +197,7 @@ export function buildCreateReservationInput(
 	);
 
 	return {
-		base_price: toHostifyMoney(basePriceMinor, currency),
+		base_price: toProviderMoney(basePriceMinor, currency),
 		email: contact.email,
 		end_date: detail.checkOut,
 		guests: detail.guests,
@@ -151,8 +210,8 @@ export function buildCreateReservationInput(
 		source: input.source,
 		start_date: detail.checkIn,
 		status: "pending",
-		tax_amount: toHostifyMoney(taxMinor, currency),
-		total_price: toHostifyMoney(input.itemTotalMinor, currency),
+		tax_amount: toProviderMoney(taxMinor, currency),
+		total_price: toProviderMoney(input.itemTotalMinor, currency),
 	};
 }
 
@@ -169,7 +228,7 @@ export function buildTransactionInput(
 	input: BuildReservationInput,
 ): Omit<HostifyCreateTransactionInput, "reservation_id"> {
 	return {
-		amount: toHostifyMoney(input.itemTotalMinor, input.currency),
+		amount: toProviderMoney(input.itemTotalMinor, input.currency),
 		arrival_date: input.detail.checkIn,
 		charge_date: input.chargeDate ?? todayUtc(),
 		currency: input.currency.toUpperCase(),
@@ -184,8 +243,279 @@ export function buildHoldRequest(
 	input: BuildReservationInput,
 ): HostifyHoldRequest {
 	return {
+		kind: "hostify",
 		reservation: buildCreateReservationInput(input),
 		transaction: buildTransactionInput(input),
+	};
+}
+
+interface BokunAnswerDto {
+	questionId: string;
+	values: string[];
+}
+
+function toBokunAnswer(answer: ActivityBookingAnswerSnapshot): BokunAnswerDto {
+	return { questionId: answer.questionId, values: [answer.answer] };
+}
+
+function answersForGroup(
+	answers: ActivityBookingAnswerSnapshot[],
+	group: string,
+): BokunAnswerDto[] {
+	return answers
+		.filter((answer) => answer.participantIndex === null)
+		.filter((answer) => answer.group === group)
+		.map(toBokunAnswer);
+}
+
+function firstPassengerDetail(
+	answers: ActivityBookingAnswerSnapshot[],
+	questionId: string,
+): string | null {
+	const value = answers.find(
+		(answer) =>
+			answer.group === "passengerDetails" &&
+			answer.participantIndex === 0 &&
+			answer.questionId === questionId,
+	)?.answer;
+	const trimmed = value?.trim();
+	return trimmed ? trimmed : null;
+}
+
+function activityAnswers(
+	answers: ActivityBookingAnswerSnapshot[],
+): BokunAnswerDto[] {
+	return answers
+		.filter((answer) => answer.participantIndex === null)
+		.filter(
+			(answer) =>
+				answer.group === "activity" ||
+				(answer.group !== "mainContact" &&
+					answer.group !== "pickup" &&
+					answer.group !== "dropoff"),
+		)
+		.map(toBokunAnswer);
+}
+
+function passengerAnswers(
+	answers: ActivityBookingAnswerSnapshot[],
+	index: number,
+	group: "passenger" | "passengerDetails",
+): BokunAnswerDto[] {
+	return answers
+		.filter((answer) => answer.participantIndex === index)
+		.filter((answer) => answer.group === group)
+		.map(toBokunAnswer);
+}
+
+function buildPassengers(
+	participants: ActivityParticipantSnapshot[],
+	answers: ActivityBookingAnswerSnapshot[],
+): Record<string, unknown>[] {
+	const participantAnswers = answers.filter(
+		(answer) => answer.participantIndex !== null,
+	);
+	if (participantAnswers.length === 0) {
+		return participants
+			.filter((participant) => participant.count > 0)
+			.map((participant) => ({
+				answers: [],
+				extras: [],
+				groupSize: participant.count,
+				passengerDetails: [],
+				pricingCategoryId: participant.pricingCategoryId,
+			}));
+	}
+
+	const passengers: Record<string, unknown>[] = [];
+	let participantIndex = 0;
+	for (const participant of participants) {
+		for (let offset = 0; offset < participant.count; offset += 1) {
+			passengers.push({
+				answers: passengerAnswers(answers, participantIndex, "passenger"),
+				extras: [],
+				groupSize: 1,
+				passengerDetails: passengerAnswers(
+					answers,
+					participantIndex,
+					"passengerDetails",
+				),
+				pricingCategoryId: participant.pricingCategoryId,
+			});
+			participantIndex += 1;
+		}
+	}
+	return passengers;
+}
+
+type BokunActivityBookingInput = BokunActivityHoldRequest["activity"];
+
+function contactFirstName(contact: ReservationContact): string {
+	if (contact.firstName?.trim()) {
+		return contact.firstName.trim();
+	}
+	const [first] = contact.name.trim().split(/\s+/);
+	return first || contact.name;
+}
+
+function contactLastName(contact: ReservationContact): string | null {
+	if (contact.lastName?.trim()) {
+		return contact.lastName.trim();
+	}
+	const parts = contact.name.trim().split(/\s+/);
+	return parts.length > 1 ? parts.slice(1).join(" ") : null;
+}
+
+/**
+ * Bokun requires `firstName`, `lastName`, `email`, `phoneNumber` and — for this
+ * operator's activities — `language` and `dateOfBirth` on the main contact.
+ * Custom main-contact questions ride along through the `mainContact` answer
+ * group. Optional fields are omitted when absent rather than sent empty.
+ */
+function buildMainContactDetails(
+	contact: ReservationContact,
+	answers: ActivityBookingAnswerSnapshot[],
+): BokunAnswerDto[] {
+	const mainContactAnswers = answersForGroup(answers, "mainContact");
+	const supplied = new Set(
+		mainContactAnswers.map((answer) => answer.questionId),
+	);
+	const details: BokunAnswerDto[] = [...mainContactAnswers];
+
+	const append = (questionId: string, value: string | null | undefined) => {
+		const trimmed = value?.trim();
+		if (!trimmed || supplied.has(questionId)) {
+			return;
+		}
+		details.push({ questionId, values: [trimmed] });
+		supplied.add(questionId);
+	};
+
+	append("firstName", contactFirstName(contact));
+	append(
+		"lastName",
+		contact.lastName?.trim() ||
+			contactLastName(contact) ||
+			firstPassengerDetail(answers, "lastName"),
+	);
+	append("email", contact.email);
+	append("phoneNumber", contact.phone);
+	append(
+		"language",
+		contact.language?.trim() || firstPassengerDetail(answers, "language"),
+	);
+	append(
+		"dateOfBirth",
+		contact.dateOfBirth?.trim() || firstPassengerDetail(answers, "dateOfBirth"),
+	);
+	return details;
+}
+
+/**
+ * Pickup fields for the activity booking. Bokun rejects a booking whose rate
+ * preselects a pickup place unless `pickup:true` and the place id are sent, so a
+ * resolved `pickupPlaceId` drives the flag. A pickup place that asks for a room
+ * number carries it as a pickup answer. A guest-specified pickup travels as the
+ * reserved `pickupDescription` answer and is lifted onto Bokun's custom-pickup
+ * wire shape (`pickup:true + pickupDescription`, no place id).
+ */
+function pickupFields(
+	activity: BokunActivityBookingInput,
+): Record<string, unknown> {
+	const groupAnswers = answersForGroup(activity.answers, "pickup");
+	const pickupDescription =
+		groupAnswers
+			.find((answer) => answer.questionId === "pickupDescription")
+			?.values.map((value) => value.trim())
+			.find((value) => value.length > 0) ?? null;
+	const pickupAnswers: BokunAnswerDto[] = groupAnswers.filter(
+		(answer) => answer.questionId !== "pickupDescription",
+	);
+	const suppliedPickupQuestions = new Set(
+		pickupAnswers.map((answer) => answer.questionId),
+	);
+	if (
+		activity.roomNumber?.trim() &&
+		!suppliedPickupQuestions.has("roomNumber")
+	) {
+		pickupAnswers.push({
+			questionId: "roomNumber",
+			values: [activity.roomNumber.trim()],
+		});
+	}
+	if (activity.pickupPlaceId != null && String(activity.pickupPlaceId).trim()) {
+		return {
+			pickup: true,
+			pickupAnswers,
+			pickupPlaceId: Number(activity.pickupPlaceId),
+		};
+	}
+	if (pickupDescription) {
+		return { pickup: true, pickupAnswers, pickupDescription };
+	}
+	return { pickup: false, pickupAnswers };
+}
+
+function dropoffFields(
+	activity: BokunActivityBookingInput,
+): Record<string, unknown> {
+	const dropoffAnswers = answersForGroup(activity.answers, "dropoff");
+	if (
+		activity.dropoffPlaceId != null &&
+		String(activity.dropoffPlaceId).trim()
+	) {
+		return {
+			dropoff: true,
+			dropoffAnswers,
+			dropoffPlaceId: Number(activity.dropoffPlaceId),
+		};
+	}
+	return { dropoff: false, dropoffAnswers };
+}
+
+/**
+ * Maps a persisted activity item into Bokun's direct checkout request. The
+ * payment method reserves the booking for external payment; Stripe remains the
+ * customer-facing payment processor.
+ */
+export function buildBokunActivityCheckoutRequest(
+	input: BokunActivityHoldRequest,
+): Record<string, unknown> {
+	const { activity, contact } = input;
+	return {
+		amount: toProviderMoney(input.amountMinor, input.currency),
+		checkoutOption: "CUSTOMER_FULL_PAYMENT",
+		currency: input.currency.toUpperCase(),
+		directBooking: {
+			activityBookings: [
+				{
+					activityId: Number(activity.bokunActivityId),
+					answers: activityAnswers(activity.answers),
+					checkedIn: false,
+					customized: false,
+					date: activity.activityDate,
+					note: buildReservationNote(input.publicReference, input.orderItemId),
+					passengers: buildPassengers(activity.participants, activity.answers),
+					...pickupFields(activity),
+					...dropoffFields(activity),
+					...(activity.rateId ? { rateId: Number(activity.rateId) } : {}),
+					...(activity.startTimeId
+						? { startTimeId: Number(activity.startTimeId) }
+						: {}),
+				},
+			],
+			externalBookingEntityCode: input.source,
+			externalBookingEntityName: "Alojamento Ideal",
+			externalBookingReference: reservationTag(
+				input.publicReference,
+				input.orderItemId,
+			),
+			mainContactDetails: buildMainContactDetails(contact, activity.answers),
+		},
+		paymentMethod: "RESERVE_FOR_EXTERNAL_PAYMENT",
+		sendNotificationToMainContact: false,
+		showPricesInNotification: true,
+		source: "DIRECT_REQUEST",
 	};
 }
 
@@ -198,8 +528,11 @@ export interface PlacedHold {
 }
 
 export interface ConfirmHoldArgs {
+	amountMinor?: number;
+	currency?: string;
 	/** Stripe payment reference recorded on the transaction detail. */
 	paymentReference: string | null;
+	publicReference?: string;
 	reservationId: string;
 	transactionId: string | null;
 }
@@ -213,6 +546,7 @@ export interface CancelHoldArgs {
 export type PlaceHoldResult =
 	| ({ kind: "created" } & PlacedHold)
 	| { kind: "unavailable"; message: string }
+	| { kind: "invalid"; message: string }
 	| { code: string; kind: "transient"; message: string }
 	| { code: string; kind: "permanent"; message: string };
 
@@ -259,7 +593,7 @@ export interface ProviderReservationGateway {
 	cancelHold(args: CancelHoldArgs): Promise<SettledMutateResult>;
 	confirmHold(args: ConfirmHoldArgs): Promise<MutateHoldResult>;
 	findExistingHold(query: FindHoldQuery): Promise<PlacedHold | null>;
-	placeHold(request: HostifyHoldRequest): Promise<PlaceHoldResult>;
+	placeHold(request: ProviderHoldRequest): Promise<PlaceHoldResult>;
 }
 
 interface ClassifiedError {
@@ -370,7 +704,14 @@ export class HostifyReservationGateway implements ProviderReservationGateway {
 		this.#context = options.context;
 	}
 
-	async placeHold(request: HostifyHoldRequest): Promise<PlaceHoldResult> {
+	async placeHold(request: ProviderHoldRequest): Promise<PlaceHoldResult> {
+		if (request.kind === "bokun_activity") {
+			return {
+				code: "invalid_hold_request",
+				kind: "permanent",
+				message: "Hostify cannot place activity holds.",
+			};
+		}
 		try {
 			const response = await this.#client.reservations.create(
 				request.reservation,
@@ -711,6 +1052,348 @@ export class HostifyReservationGateway implements ProviderReservationGateway {
 	}
 }
 
+function classifyBokunError(error: unknown): ClassifiedError {
+	if (error instanceof BokunApiError) {
+		return {
+			code: `http_${error.status}`,
+			message: error.providerMessage ?? error.message,
+			transient: error.retryable,
+		};
+	}
+	if (
+		error instanceof BokunTimeoutError ||
+		error instanceof BokunNetworkError
+	) {
+		return { code: error.name, message: error.message, transient: true };
+	}
+	if (error instanceof BokunResponseValidationError) {
+		return { code: error.name, message: error.message, transient: false };
+	}
+	return {
+		code: error instanceof Error ? error.name : "unknown_error",
+		message: error instanceof Error ? error.message : String(error),
+		transient: false,
+	};
+}
+
+function toBokunMutationFailure(error: unknown): SettledMutateResult {
+	const classified = classifyBokunError(error);
+	if (error instanceof BokunResponseValidationError) {
+		return {
+			code: classified.code,
+			kind: "transient",
+			message: classified.message,
+		};
+	}
+	return toMutateFailure(classified);
+}
+
+function optionalString(value: unknown): string | null {
+	if (typeof value === "string" && value.trim()) {
+		return value.trim();
+	}
+	if (typeof value === "number" && Number.isFinite(value)) {
+		return String(value);
+	}
+	return null;
+}
+
+function recordValue(
+	value: unknown,
+	key: string,
+): Record<string, unknown> | null {
+	if (!value || typeof value !== "object") {
+		return null;
+	}
+	const nested = (value as Record<string, unknown>)[key];
+	return nested && typeof nested === "object"
+		? (nested as Record<string, unknown>)
+		: null;
+}
+
+function checkoutBooking(
+	response: Record<string, unknown>,
+): Record<string, unknown> | null {
+	return recordValue(response, "booking");
+}
+
+function checkoutConfirmationCode(
+	response: Record<string, unknown>,
+): string | null {
+	const booking = checkoutBooking(response);
+	return (
+		optionalString(response.confirmationCode) ??
+		optionalString(booking?.confirmationCode)
+	);
+}
+
+function checkoutProviderStatus(
+	response: Record<string, unknown>,
+): string | null {
+	return optionalString(checkoutBooking(response)?.status);
+}
+
+function checkoutActivityProductCode(
+	response: Record<string, unknown>,
+): string | null {
+	const activityBookings = checkoutBooking(response)?.activityBookings;
+	if (!Array.isArray(activityBookings)) {
+		return null;
+	}
+	for (const item of activityBookings) {
+		if (!item || typeof item !== "object") {
+			continue;
+		}
+		const row = item as Record<string, unknown>;
+		const code =
+			optionalString(row.productConfirmationCode) ??
+			optionalString(row.confirmationCode) ??
+			optionalString(row.id);
+		if (code) {
+			return code;
+		}
+	}
+	return null;
+}
+
+function bookingStatus(raw: Record<string, unknown>): string | null {
+	return optionalString(raw.status)?.toUpperCase() ?? null;
+}
+
+function buildBokunBookingConfirmation(
+	args: ConfirmHoldArgs,
+): Record<string, unknown> {
+	return {
+		...(args.amountMinor !== undefined && args.currency
+			? { amount: toProviderMoney(args.amountMinor, args.currency) }
+			: {}),
+		...(args.currency ? { currency: args.currency.toUpperCase() } : {}),
+		externalBookingEntityCode: "alojamentoideal",
+		externalBookingEntityName: "Alojamento Ideal",
+		externalBookingReference: args.publicReference ?? args.reservationId,
+		sendNotificationToMainContact: false,
+		showPricesInNotification: true,
+		transactionDetails: {
+			transactionDate: new Date().toISOString(),
+			transactionId: args.paymentReference ?? args.reservationId,
+		},
+	};
+}
+
+export interface BokunReservationGatewayOptions {
+	client: BokunClient;
+	context?: BokunRequestContext;
+	lang?: string;
+}
+
+/**
+ * Bokun implementation of {@link ProviderReservationGateway} for activity-only
+ * holds. The provider reservation id is Bokun's booking confirmation code; the
+ * provider transaction id stores the first activity product confirmation code
+ * when Bokun returns one.
+ */
+export class BokunReservationGateway implements ProviderReservationGateway {
+	readonly #client: BokunClient;
+	readonly #context?: BokunRequestContext;
+	readonly #lang?: string;
+
+	constructor(options: BokunReservationGatewayOptions) {
+		this.#client = options.client;
+		this.#context = options.context;
+		this.#lang = options.lang;
+	}
+
+	async placeHold(request: ProviderHoldRequest): Promise<PlaceHoldResult> {
+		if (request.kind !== "bokun_activity") {
+			return {
+				code: "invalid_hold_request",
+				kind: "permanent",
+				message: "Bokun cannot place accommodation holds.",
+			};
+		}
+
+		try {
+			const response = (await this.#client.v1.checkout.submit(
+				buildBokunActivityCheckoutRequest(request),
+				this.#lang ? { lang: this.#lang } : {},
+				this.#context,
+			)) as Record<string, unknown>;
+
+			const reservationId = checkoutConfirmationCode(response);
+			if (!reservationId) {
+				if (response.success === false) {
+					return {
+						kind: "unavailable",
+						message: "This activity is no longer available.",
+					};
+				}
+				return {
+					code: "missing_confirmation_code",
+					kind: "permanent",
+					message: "Bokun reserved an activity without a confirmation code.",
+				};
+			}
+
+			return {
+				kind: "created",
+				providerStatus: checkoutProviderStatus(response) ?? "RESERVED",
+				raw: toRecord(response),
+				reservationId,
+				transactionId: checkoutActivityProductCode(response),
+			};
+		} catch (error) {
+			if (
+				error instanceof BokunApiError &&
+				!error.retryable &&
+				(error.status === 409 || error.status === 422)
+			) {
+				return {
+					kind: "unavailable",
+					message:
+						error.providerMessage ?? "This activity is no longer available.",
+				};
+			}
+			// A 400 is Bokun rejecting the request shape (missing/invalid answers or
+			// pickup place), not lost availability. It is recoverable once the guest
+			// fixes the affected details, so it must not fail the order or wipe the
+			// cart the way `unavailable` does.
+			if (error instanceof BokunApiError && error.status === 400) {
+				return {
+					kind: "invalid",
+					message:
+						error.providerMessage ??
+						"Some booking details are missing or invalid.",
+				};
+			}
+			const classified = classifyBokunError(error);
+			return {
+				code: classified.code,
+				kind: classified.transient ? "transient" : "permanent",
+				message: classified.message,
+			};
+		}
+	}
+
+	async findExistingHold(_query: FindHoldQuery): Promise<PlacedHold | null> {
+		return null;
+	}
+
+	async confirmHold(args: ConfirmHoldArgs): Promise<MutateHoldResult> {
+		try {
+			const response = (await this.#client.v1.checkout.confirmReserved(
+				args.reservationId,
+				buildBokunBookingConfirmation(args),
+				this.#context,
+			)) as Record<string, unknown>;
+			const status = checkoutProviderStatus(response);
+			if (status && BOKUN_HOLD_STATUSES.has(status.toUpperCase())) {
+				return { kind: "not_settled", providerStatus: status, raw: response };
+			}
+			if (response.success === false) {
+				return {
+					code: "confirm_failed",
+					kind: "permanent",
+					message: "Bokun did not confirm the reserved activity.",
+				};
+			}
+			return {
+				kind: "ok",
+				providerStatus: status ?? "CONFIRMED",
+				raw: toRecord(response),
+			};
+		} catch (error) {
+			const verified = await this.#verifyBookingStatus(args.reservationId);
+			if (verified) {
+				return verified;
+			}
+			return toBokunMutationFailure(error);
+		}
+	}
+
+	async cancelHold(args: CancelHoldArgs): Promise<SettledMutateResult> {
+		try {
+			const response = (await this.#client.v1.booking.abortReserved(
+				args.reservationId,
+				{},
+				this.#context,
+			)) as Record<string, unknown>;
+			return {
+				kind: "ok",
+				providerStatus: "ABORTED",
+				raw: toRecord(response),
+			};
+		} catch (error) {
+			const verified = await this.#verifyBookingReleased(args.reservationId);
+			if (verified) {
+				return verified;
+			}
+			return toBokunMutationFailure(error);
+		}
+	}
+
+	async #verifyBookingStatus(
+		confirmationCode: string,
+	): Promise<MutateHoldResult | null> {
+		try {
+			const response = (await this.#client.v1.booking.getByConfirmationCode(
+				confirmationCode,
+				{},
+				this.#context,
+			)) as Record<string, unknown>;
+			const status = bookingStatus(response);
+			if (status && BOKUN_CONFIRMED_STATUSES.has(status)) {
+				return { kind: "ok", providerStatus: status, raw: response };
+			}
+			if (status && BOKUN_HOLD_STATUSES.has(status)) {
+				return { kind: "not_settled", providerStatus: status, raw: response };
+			}
+			if (status && BOKUN_TERMINAL_STATUSES.has(status)) {
+				return {
+					code: `hold_${status.toLowerCase()}`,
+					kind: "permanent",
+					message: `Bokun booking ${confirmationCode} is ${status}; the hold can no longer be confirmed.`,
+				};
+			}
+			return null;
+		} catch {
+			return null;
+		}
+	}
+
+	async #verifyBookingReleased(
+		confirmationCode: string,
+	): Promise<SettledMutateResult | null> {
+		try {
+			const response = (await this.#client.v1.booking.getByConfirmationCode(
+				confirmationCode,
+				{},
+				this.#context,
+			)) as Record<string, unknown>;
+			const status = bookingStatus(response);
+			if (status && BOKUN_TERMINAL_STATUSES.has(status)) {
+				return { kind: "ok", providerStatus: status, raw: response };
+			}
+			if (status && BOKUN_CONFIRMED_STATUSES.has(status)) {
+				return {
+					code: `hold_${status.toLowerCase()}`,
+					kind: "permanent",
+					message: `Bokun booking ${confirmationCode} is ${status}; the hold can no longer be aborted.`,
+				};
+			}
+			if (status && BOKUN_HOLD_STATUSES.has(status)) {
+				return {
+					code: "cancel_not_settled",
+					kind: "transient",
+					message: `Bokun booking ${confirmationCode} is still ${status}; abort must be retried.`,
+				};
+			}
+			return null;
+		} catch {
+			return null;
+		}
+	}
+}
+
 function toMutateFailure(classified: ClassifiedError): SettledMutateResult {
 	return {
 		code: classified.code,
@@ -768,10 +1451,13 @@ export const STUB_RESERVATION_PREFIX = "STUB";
  * before it ever reaches the gateway.
  */
 export class StubReservationGateway implements ProviderReservationGateway {
-	async placeHold(request: HostifyHoldRequest): Promise<PlaceHoldResult> {
+	async placeHold(request: ProviderHoldRequest): Promise<PlaceHoldResult> {
 		return {
 			kind: "created",
-			providerStatus: request.reservation.status,
+			providerStatus:
+				request.kind === "bokun_activity"
+					? "RESERVED"
+					: request.reservation.status,
 			raw: { stub: true },
 			reservationId: `${STUB_RESERVATION_PREFIX}-${randomUUID()}`,
 			transactionId: null,

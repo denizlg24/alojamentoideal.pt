@@ -40,11 +40,11 @@ describe("cartNoticeBody", () => {
 			removedTitles: [],
 		});
 		expect(body).toBe(
-			"These dates are no longer available. Please review your stays and try again.",
+			"These dates are no longer available. Please review your cart and try again.",
 		);
 	});
 
-	test("names a single removed stay", () => {
+	test("names a single removed item", () => {
 		const body = cartNoticeBody({
 			message: "These dates are no longer available.",
 			removedTitles: ["Sea View Apartment"],
@@ -52,10 +52,12 @@ describe("cartNoticeBody", () => {
 		expect(
 			body.includes('We removed "Sea View Apartment" from your cart'),
 		).toBe(true);
-		expect(body.includes("it is no longer available")).toBe(true);
+		expect(
+			body.includes("it is no longer available for the selected details"),
+		).toBe(true);
 	});
 
-	test("lists multiple removed stays", () => {
+	test("lists multiple removed items", () => {
 		const body = cartNoticeBody({
 			message: "These dates are no longer available.",
 			removedTitles: [
@@ -69,6 +71,8 @@ describe("cartNoticeBody", () => {
 				'"Sea View Apartment", "Porto Loft" and "Canidelo Beach Flat"',
 			),
 		).toBe(true);
-		expect(body.includes("they are no longer available")).toBe(true);
+		expect(
+			body.includes("they are no longer available for the selected details"),
+		).toBe(true);
 	});
 });

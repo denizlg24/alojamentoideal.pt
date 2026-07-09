@@ -14,8 +14,27 @@ export interface PaymentIntentParams {
 	environment: string;
 	existingPaymentIntentId?: string | null;
 	idempotencyKey: string;
+	/**
+	 * Stripe Connect connected account (Detours) that acts as the settlement
+	 * merchant of record for the charge. Set together with `transferDestination`
+	 * for activity charges.
+	 */
+	onBehalfOf?: string | null;
 	orderId: string;
 	publicReference: string;
+	/**
+	 * Minor-unit portion of the charge routed to `transferDestination`. Set for
+	 * mixed orders so only the activity share reaches the connected account; left
+	 * unset for activity-only orders, where the whole charge transfers.
+	 */
+	transferAmountMinor?: number | null;
+	/**
+	 * Stripe Connect destination for a destination charge. Activity-only orders
+	 * omit `transferAmountMinor`, so the whole charge is transferred, matching
+	 * the activity-only money split (data-architecture 2.4). Left unset for
+	 * accommodation-only orders, which settle on the platform balance.
+	 */
+	transferDestination?: string | null;
 }
 
 /** Normalized PaymentIntent fields the checkout boundary needs. */
@@ -26,6 +45,17 @@ export interface PaymentIntentSnapshot {
 	id: string;
 	paymentMethod: StripePaymentMethodSummary | null;
 	status: Stripe.PaymentIntent.Status;
+}
+
+/** Charge and balance-transaction facts needed for settlement reporting. */
+export interface PaymentIntentSettlementSnapshot {
+	amountMinor: number;
+	balanceTransactionId: string | null;
+	chargeCurrency: string | null;
+	chargeId: string | null;
+	paymentIntentId: string;
+	stripeFeeCurrency: string | null;
+	stripeFeeMinor: number | null;
 }
 
 /** Non-sensitive payment method display data from Stripe charge details. */
@@ -66,6 +96,12 @@ function expandedCharge(
 	charge: Stripe.PaymentIntent["latest_charge"],
 ): Stripe.Charge | null {
 	return charge && typeof charge !== "string" ? charge : null;
+}
+
+function expandedBalanceTransaction(
+	transaction: Stripe.Charge["balance_transaction"],
+): Stripe.BalanceTransaction | null {
+	return transaction && typeof transaction !== "string" ? transaction : null;
 }
 
 function paymentMethodSummaryFromIntent(
@@ -112,33 +148,67 @@ export async function createOrUpdatePaymentIntent(
 			);
 		}
 
-		if (
-			UPDATABLE_STATUSES.has(existing.status) &&
-			existing.amount !== params.amountMinor
-		) {
-			const updated = await stripe.paymentIntents.update(existing.id, {
-				amount: params.amountMinor,
-			});
-			return toSnapshot(updated);
+		if (UPDATABLE_STATUSES.has(existing.status)) {
+			const updateParams: Stripe.PaymentIntentUpdateParams = {};
+			if (existing.amount !== params.amountMinor) {
+				updateParams.amount = params.amountMinor;
+			}
+			// `transfer_data.destination` is immutable after creation, so only the
+			// transferred amount can drift and only intents created with
+			// `transfer_data` accept a patch.
+			if (
+				existing.transfer_data &&
+				params.transferAmountMinor != null &&
+				existing.transfer_data.amount !== params.transferAmountMinor
+			) {
+				updateParams.transfer_data = { amount: params.transferAmountMinor };
+			}
+			if (Object.keys(updateParams).length > 0) {
+				const updated = await stripe.paymentIntents.update(
+					existing.id,
+					updateParams,
+				);
+				return toSnapshot(updated);
+			}
 		}
 
 		return toSnapshot(existing);
 	}
 
-	const created = await stripe.paymentIntents.create(
-		{
-			amount: params.amountMinor,
-			automatic_payment_methods: { enabled: true },
-			currency,
-			metadata: {
-				cartId: params.cartId,
-				environment: params.environment,
-				orderId: params.orderId,
-				publicReference: params.publicReference,
-			},
+	const createParams: Stripe.PaymentIntentCreateParams = {
+		amount: params.amountMinor,
+		automatic_payment_methods: { enabled: true },
+		currency,
+		metadata: {
+			cartId: params.cartId,
+			environment: params.environment,
+			orderId: params.orderId,
+			publicReference: params.publicReference,
+			...(params.transferAmountMinor != null
+				? { activityTotalMinor: String(params.transferAmountMinor) }
+				: {}),
 		},
-		{ idempotencyKey: params.idempotencyKey },
-	);
+	};
+
+	if (params.transferDestination) {
+		// Destination charge. Without `amount` the full charge routes to the
+		// connected account (activity-only order settles to Detours); with
+		// `amount` only the activity share transfers (mixed order, platform keeps
+		// the stay portion and stays merchant of record).
+		createParams.transfer_data = {
+			destination: params.transferDestination,
+			...(params.transferAmountMinor != null
+				? { amount: params.transferAmountMinor }
+				: {}),
+		};
+		if (params.onBehalfOf) {
+			createParams.on_behalf_of = params.onBehalfOf;
+		}
+	}
+
+	const created = await stripe.paymentIntents.create(createParams, {
+		idempotencyKey: params.idempotencyKey,
+	});
 
 	return toSnapshot(created);
 }
@@ -154,4 +224,49 @@ export async function retrievePaymentIntentSnapshot(
 		options.includePaymentMethod ? { expand: ["latest_charge"] } : undefined,
 	);
 	return toSnapshot(intent);
+}
+
+/**
+ * Reads the captured charge and Stripe fee for a PaymentIntent. Destination
+ * charges charge the platform account for fees, so the charge balance
+ * transaction is the authoritative source for Detours settlement reporting.
+ */
+export async function retrievePaymentIntentSettlementSnapshot(
+	stripe: Stripe,
+	paymentIntentId: string,
+): Promise<PaymentIntentSettlementSnapshot> {
+	const intent = await stripe.paymentIntents.retrieve(paymentIntentId, {
+		expand: ["latest_charge.balance_transaction"],
+	});
+
+	const charge =
+		expandedCharge(intent.latest_charge) ??
+		(typeof intent.latest_charge === "string"
+			? await stripe.charges.retrieve(intent.latest_charge, {
+					expand: ["balance_transaction"],
+				})
+			: null);
+	const balanceTransaction = charge
+		? expandedBalanceTransaction(charge.balance_transaction)
+		: null;
+	const balanceTransactionId =
+		typeof charge?.balance_transaction === "string"
+			? charge.balance_transaction
+			: (charge?.balance_transaction?.id ?? null);
+
+	return {
+		amountMinor: intent.amount,
+		balanceTransactionId,
+		chargeCurrency: charge?.currency.toUpperCase() ?? null,
+		chargeId:
+			typeof intent.latest_charge === "string"
+				? intent.latest_charge
+				: (charge?.id ?? null),
+		paymentIntentId: intent.id,
+		stripeFeeCurrency:
+			balanceTransaction?.currency.toUpperCase() ??
+			charge?.currency.toUpperCase() ??
+			null,
+		stripeFeeMinor: balanceTransaction?.fee ?? null,
+	};
 }

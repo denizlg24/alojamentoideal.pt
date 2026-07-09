@@ -3,10 +3,7 @@
 import { Button } from "@workspace/ui/components/button";
 import { Input } from "@workspace/ui/components/input";
 import { Label } from "@workspace/ui/components/label";
-import {
-	NativeSelect,
-	NativeSelectOption,
-} from "@workspace/ui/components/native-select";
+import { ResponsiveSelect } from "@workspace/ui/components/responsive-select";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { toast } from "sonner";
@@ -114,17 +111,13 @@ export function ReservationPanel({
 			<div className="flex flex-wrap items-end gap-2">
 				<div className="min-w-40 flex-1 space-y-1.5">
 					<Label htmlFor={`res-status-${bookingId}`}>New status</Label>
-					<NativeSelect
+					<ResponsiveSelect
+						className="w-full"
 						id={`res-status-${bookingId}`}
-						onChange={(event) => setStatus(event.target.value)}
+						onValueChange={setStatus}
+						options={STATUS_TARGETS}
 						value={status}
-					>
-						{STATUS_TARGETS.map((option) => (
-							<NativeSelectOption key={option.value} value={option.value}>
-								{option.label}
-							</NativeSelectOption>
-						))}
-					</NativeSelect>
+					/>
 				</div>
 				<Button
 					disabled={pending}

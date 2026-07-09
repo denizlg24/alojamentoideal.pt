@@ -2,6 +2,8 @@ import {
 	type ConversationMessageDto,
 	type ConversationSummary,
 	conversationChannelName,
+	isChatReadyConversation,
+	type OrderDetailItem,
 } from "@workspace/core/commerce";
 import {
 	Table,
@@ -24,6 +26,7 @@ import {
 } from "@/lib/api/commerce";
 import { invoicingEnabled, invoicingService } from "@/lib/api/invoicing";
 import { formatDate, formatDateTime, formatMoneyMinor } from "@/lib/format";
+import { buildRefundPolicySuggestions } from "@/lib/orders/refund-policy";
 import { ConversationPanel } from "./conversation-panel";
 import { GuestEditDialog } from "./guest-edit-dialog";
 import { InvoicePanel } from "./invoice-panel";
@@ -62,11 +65,91 @@ function DefinitionRow({
 function primaryConversation(
 	conversations: ConversationSummary[],
 ): ConversationSummary | null {
-	const live = conversations.find(
-		(conversation) =>
-			conversation.status === "active" && conversation.externalThreadId,
-	);
+	const live = conversations.find(isChatReadyConversation);
 	return live ?? conversations[0] ?? null;
+}
+
+function itemTypeLabel(type: string): string {
+	if (type === "accommodation") {
+		return "Home";
+	}
+	if (type === "activity") {
+		return "Activity";
+	}
+	return type;
+}
+
+function pluralize(count: number, singular: string, plural: string): string {
+	return `${count} ${count === 1 ? singular : plural}`;
+}
+
+function itemMeta(item: OrderDetailItem): string {
+	const parts = [itemTypeLabel(item.type)];
+	if (item.type === "accommodation" && item.checkIn && item.checkOut) {
+		parts.push(`${formatDate(item.checkIn)} → ${formatDate(item.checkOut)}`);
+		if (item.guests) {
+			parts.push(pluralize(item.guests, "guest", "guests"));
+		}
+		if (item.nights) {
+			parts.push(pluralize(item.nights, "night", "nights"));
+		}
+	}
+	if (item.type === "activity") {
+		if (item.activityDate) {
+			parts.push(formatDate(item.activityDate));
+		}
+		if (item.totalParticipants) {
+			parts.push(
+				pluralize(item.totalParticipants, "participant", "participants"),
+			);
+		}
+	}
+	return parts.join(" · ");
+}
+
+function ActivityDetails({ item }: { item: OrderDetailItem }) {
+	if (item.type !== "activity") {
+		return null;
+	}
+
+	return (
+		<dl className="mt-3 grid grid-cols-2 gap-x-6 gap-y-3 sm:grid-cols-4">
+			<DefinitionRow
+				label="Activity date"
+				value={
+					item.activityDate ? formatDate(item.activityDate) : "Not available"
+				}
+			/>
+			<DefinitionRow
+				label="Participants"
+				value={item.totalParticipants ?? "Not available"}
+			/>
+			<DefinitionRow
+				label="Booking code"
+				value={item.activity?.productConfirmationCode ?? "Not available"}
+			/>
+			<DefinitionRow
+				label="Bokun activity"
+				value={item.activity?.bokunActivityId ?? "Not available"}
+			/>
+			<DefinitionRow
+				label="Start time"
+				value={item.activity?.startTimeId ?? "Not available"}
+			/>
+			<DefinitionRow
+				label="Pickup"
+				value={item.activity?.pickupPlaceId ?? "Not available"}
+			/>
+			<DefinitionRow
+				label="Dropoff"
+				value={item.activity?.dropoffPlaceId ?? "Not available"}
+			/>
+			<DefinitionRow
+				label="Room"
+				value={item.activity?.roomNumber ?? "Not available"}
+			/>
+		</dl>
+	);
 }
 
 export default async function OrderDetailPage({
@@ -87,11 +170,14 @@ export default async function OrderDetailPage({
 		orderRefundService().listOrderRefunds(row.id),
 	]);
 
-	const bookingIds = detail.items
+	const accommodationBookingIds = detail.items
+		.filter((item) => item.type === "accommodation")
 		.map((item) => item.providerBooking?.id)
 		.filter((id): id is string => typeof id === "string");
 	const guestLists = await Promise.all(
-		bookingIds.map((bookingId) => service.readBookingGuests(access, bookingId)),
+		accommodationBookingIds.map((bookingId) =>
+			service.readBookingGuests(access, bookingId),
+		),
 	);
 	const guestsByBooking = new Map(
 		guestLists.map((list) => [list.bookingId, list.guests]),
@@ -104,9 +190,21 @@ export default async function OrderDetailPage({
 		0,
 		row.amountPaidMinor - row.amountRefundedMinor,
 	);
+	// Policy suggestions hit Bokun live; only pay that cost when the refund
+	// dialog can actually render.
+	const policySuggestions =
+		row.amountPaidMinor > 0 && refundableMinor > 0
+			? await buildRefundPolicySuggestions(detail)
+			: [];
+	const policySuggestionByItem = new Map(
+		policySuggestions.map((suggestion) => [suggestion.itemId, suggestion]),
+	);
 	const refundItems = detail.items.map((item) => ({
 		amountMinor: item.pricing?.totalMinor ?? null,
 		id: item.id,
+		policyLabel: policySuggestionByItem.get(item.id)?.label ?? null,
+		policySuggestedAmountMinor:
+			policySuggestionByItem.get(item.id)?.suggestedAmountMinor ?? null,
 		title: item.title,
 	}));
 	const itemTitleById = new Map(
@@ -263,6 +361,7 @@ export default async function OrderDetailPage({
 				<div className="mt-3 divide-y divide-border/60 border-border/60 border-t border-b">
 					{detail.items.map((item) => {
 						const booking = item.providerBooking;
+						const isAccommodation = item.type === "accommodation";
 						const guests = booking ? guestsByBooking.get(booking.id) : null;
 						const invoiceDraft = invoiceDraftById.get(item.id) ?? null;
 						return (
@@ -271,11 +370,7 @@ export default async function OrderDetailPage({
 									<div>
 										<p className="font-medium text-sm">{item.title}</p>
 										<p className="mt-0.5 text-muted-foreground text-sm">
-											{item.checkIn && item.checkOut
-												? `${formatDate(item.checkIn)} → ${formatDate(item.checkOut)}`
-												: item.type}
-											{item.guests ? ` · ${item.guests} guests` : ""}
-											{item.nights ? ` · ${item.nights} nights` : ""}
+											{itemMeta(item)}
 										</p>
 									</div>
 									<div className="flex items-center gap-3">
@@ -297,7 +392,9 @@ export default async function OrderDetailPage({
 									</div>
 								</div>
 
-								{booking && guests && guests.length > 0 ? (
+								<ActivityDetails item={item} />
+
+								{isAccommodation && booking && guests && guests.length > 0 ? (
 									<Table className="mt-3">
 										<TableHeader>
 											<TableRow>
@@ -340,7 +437,7 @@ export default async function OrderDetailPage({
 									</Table>
 								) : null}
 
-								{booking ? (
+								{isAccommodation && booking ? (
 									<ReservationPanel
 										bookingId={booking.id}
 										checkIn={item.checkIn}
@@ -408,7 +505,7 @@ export default async function OrderDetailPage({
 									</TableCell>
 									<TableCell className="text-muted-foreground">
 										{refund.orderItemId
-											? (itemTitleById.get(refund.orderItemId) ?? "Reservation")
+											? (itemTitleById.get(refund.orderItemId) ?? "Item")
 											: "Whole order"}
 									</TableCell>
 									<TableCell className="text-muted-foreground">

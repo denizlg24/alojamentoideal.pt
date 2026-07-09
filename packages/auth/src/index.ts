@@ -6,12 +6,15 @@ export {
 } from "./auth";
 export { type AuthConfig, getAuthConfig } from "./config";
 export {
+	type ActivityQuestionsReminderEmailInput,
+	buildActivityQuestionsReminderEmail,
 	buildOrderAmountMismatchRefundEmail,
 	buildOrderConfirmationEmail,
 	buildOrderCouldNotConfirmEmail,
 	buildOrderGuestReminderEmail,
 	buildOrderInviteEmail,
 	buildOrderPendingConfirmationEmail,
+	type EmailAttachment,
 	type EmailMessage,
 	type EmailSender,
 	escapeHtml,

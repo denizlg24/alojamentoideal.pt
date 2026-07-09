@@ -1,6 +1,13 @@
-import type { AccommodationQuoteFeeSnapshot } from "@workspace/db";
+import type {
+	AccommodationQuoteFeeSnapshot,
+	ActivityBookingAnswerSnapshot,
+	ActivityParticipantSnapshot,
+} from "@workspace/db";
 import type { AccommodationQuoteResult } from "../accommodations";
-import type { NormalizedAccommodationQuoteSnapshot } from "./types";
+import type {
+	NormalizedAccommodationQuoteSnapshot,
+	NormalizedActivityQuoteSnapshot,
+} from "./types";
 
 const ZERO_DECIMAL_CURRENCIES = new Set([
 	"BIF",
@@ -171,4 +178,70 @@ function normalizeFeeLines(
 	}
 
 	return lines;
+}
+
+/**
+ * Raw activity price the injected `quoteActivity` adapter returns. Unlike the
+ * accommodation quote (major-unit decimals converted here), the Bokun adapter
+ * prices participant categories directly into minor units, so this boundary only
+ * assigns identity/expiry/scope. `available: false` marks a sold-out departure.
+ */
+export interface ActivityQuoteResult {
+	activityDate: string;
+	answers: ActivityBookingAnswerSnapshot[];
+	available: boolean;
+	bokunActivityId: string;
+	currency: string;
+	expiresAt?: Date | string | null;
+	fetchedAt: Date | string;
+	participants: ActivityParticipantSnapshot[];
+	providerPayload?: Record<string, unknown>;
+	rateId: string | null;
+	startTimeId: string | null;
+	subtotalMinor: number;
+	taxMinor: number;
+	totalMinor: number;
+	totalParticipants: number;
+}
+
+export interface NormalizeActivityQuoteSnapshotInput {
+	accountId: string;
+	provider: string;
+	quote: ActivityQuoteResult;
+	quoteId?: string;
+	ttlSeconds: number;
+}
+
+export function normalizeActivityQuoteSnapshot({
+	accountId,
+	provider,
+	quote,
+	quoteId = crypto.randomUUID(),
+	ttlSeconds,
+}: NormalizeActivityQuoteSnapshotInput): NormalizedActivityQuoteSnapshot {
+	const fetchedAt = new Date(quote.fetchedAt);
+	const expiresAt = quote.expiresAt
+		? new Date(quote.expiresAt)
+		: new Date(fetchedAt.getTime() + Math.max(ttlSeconds, 0) * 1000);
+
+	return {
+		activityDate: quote.activityDate,
+		answers: quote.answers,
+		bokunActivityId: quote.bokunActivityId,
+		currency: quote.currency.toUpperCase(),
+		expiresAt,
+		externalAccountId: accountId,
+		fetchedAt,
+		id: quoteId,
+		participants: quote.participants,
+		provider,
+		providerPayload: quote.providerPayload ?? {},
+		rateId: quote.rateId,
+		startTimeId: quote.startTimeId,
+		subtotalMinor: quote.subtotalMinor,
+		taxMinor: quote.taxMinor,
+		totalMinor: quote.totalMinor,
+		totalParticipants: quote.totalParticipants,
+		validationStatus: quote.available ? "valid" : "unavailable",
+	};
 }

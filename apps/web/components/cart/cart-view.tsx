@@ -1,6 +1,7 @@
 "use client";
 
 import type {
+	AccommodationCartItemDto,
 	CartDto,
 	CartItemDto,
 	CartValidationResponse,
@@ -35,6 +36,7 @@ import {
 } from "@/lib/checkout/cart-store";
 import { toCheckoutError } from "@/lib/checkout/errors";
 import {
+	formatActivityDateLong,
 	formatMinor,
 	formatStayRangeLong,
 	guestSummaryLabel,
@@ -43,6 +45,10 @@ import {
 
 function activeItems(cart: CartDto | null): CartItemDto[] {
 	return cart?.items.filter((item) => item.status === "active") ?? [];
+}
+
+function isStayItem(item: CartItemDto): item is AccommodationCartItemDto {
+	return item.type === "accommodation";
 }
 
 function EmptyCart() {
@@ -79,7 +85,7 @@ export function CartLoading() {
 interface CartItemCardProps {
 	failure: string | null;
 	item: CartItemDto;
-	onEdit: () => void;
+	onEdit?: () => void;
 	onRemove: () => void;
 	repricing: boolean;
 }
@@ -91,13 +97,26 @@ function CartItemCard({
 	onRemove,
 	repricing,
 }: CartItemCardProps) {
+	const href =
+		item.type === "activity"
+			? `/activities/${item.activityId}`
+			: `/homes/${item.listingId}`;
+	const meta =
+		item.type === "activity"
+			? `${formatActivityDateLong(item.activityDate)} · ${item.totalParticipants} ${
+					item.totalParticipants === 1 ? "participant" : "participants"
+				}`
+			: `${formatStayRangeLong(item.checkIn, item.checkOut)} · ${nightsLabel(
+					item.nights,
+				)}`;
+
 	return (
 		<div className="flex flex-col gap-3 rounded-2xl border bg-card p-4 shadow-sm">
 			<div className="flex gap-4">
 				<Link
 					aria-label={item.title}
 					className="block size-24 shrink-0 overflow-hidden rounded-xl bg-muted sm:size-28"
-					href={`/homes/${item.listingId}`}
+					href={href}
 				>
 					{item.imageUrl && (
 						<Image
@@ -112,21 +131,20 @@ function CartItemCard({
 				<div className="flex min-w-0 flex-1 flex-col gap-1">
 					<Link
 						className="line-clamp-2 font-medium text-sm hover:underline"
-						href={`/homes/${item.listingId}`}
+						href={href}
 					>
 						{item.title}
 					</Link>
-					<p className="text-muted-foreground text-sm">
-						{formatStayRangeLong(item.checkIn, item.checkOut)} ·{" "}
-						{nightsLabel(item.nights)}
-					</p>
-					<p className="text-muted-foreground text-sm">
-						{guestSummaryLabel({
-							adults: item.adults,
-							children: item.children,
-							infants: item.infants,
-						})}
-					</p>
+					<p className="text-muted-foreground text-sm">{meta}</p>
+					{item.type === "accommodation" && (
+						<p className="text-muted-foreground text-sm">
+							{guestSummaryLabel({
+								adults: item.adults,
+								children: item.children,
+								infants: item.infants,
+							})}
+						</p>
+					)}
 					{repricing ? (
 						<Skeleton className="mt-auto h-5 w-24" />
 					) : (
@@ -144,13 +162,15 @@ function CartItemCard({
 			)}
 
 			<div className="flex flex-wrap items-center gap-4 border-t pt-3">
-				<Button
-					className="h-auto p-0 text-sm underline"
-					onClick={onEdit}
-					variant="link"
-				>
-					Edit stay
-				</Button>
+				{onEdit && (
+					<Button
+						className="h-auto p-0 text-sm underline"
+						onClick={onEdit}
+						variant="link"
+					>
+						Edit stay
+					</Button>
+				)}
 				<Button
 					className="ml-auto h-auto p-0 text-destructive text-sm underline"
 					onClick={onRemove}
@@ -190,8 +210,9 @@ export function CartView() {
 	repricingRef.current = repricingItemIds;
 
 	const items = activeItems(cart);
+	const stayItems = items.filter(isStayItem);
 	const constraints = useListingConstraints(
-		items.map((item) => item.listingId),
+		stayItems.map((item) => item.listingId),
 	);
 
 	const applyValidation = useCallback((validated: CartValidationResponse) => {
@@ -227,10 +248,20 @@ export function CartView() {
 		})();
 	}, [applyValidation]);
 
+	// Broadcasts an optimistic cart to the header badge and advances the applied
+	// fingerprint so the cart-changed listener below recognizes the broadcast as
+	// our own edit (matching fingerprint) instead of re-reading the server cart
+	// and rolling the optimistic removal back.
+	const notifyOptimisticCart = useCallback((next: CartDto) => {
+		lastAppliedFingerprintRef.current = cartContentFingerprint(next);
+		notifyCartChanged(next);
+	}, []);
+
 	const edits = useOptimisticStayEdits({
 		applyValidated: applyValidation,
 		cart,
 		onError: setNotice,
+		onOptimisticCart: notifyOptimisticCart,
 		setCart,
 		setRepricingItemIds,
 	});
@@ -279,6 +310,13 @@ export function CartView() {
 	// checkout flow). Skips while an edit is in flight, since that edit's own
 	// reconcile converges the view; keying the route on cart id (not content)
 	// means this never remounts mid-edit.
+	//
+	// With cacheComponents, Next.js hides visited routes inside React
+	// `<Activity>` instead of unmounting them, and hidden components have their
+	// effects torn down — cart changes fired while this view was hidden are
+	// missed. Effects re-run on reveal, so the immediate `onChanged()` call
+	// below replays whatever was missed; the fingerprint check inside
+	// `refreshFromStoredCart` makes it a no-op when nothing changed.
 	useEffect(() => {
 		const onChanged = () => {
 			if (repricingRef.current.size > 0) {
@@ -290,11 +328,14 @@ export function CartView() {
 
 		window.addEventListener(CART_CHANGED_EVENT, onChanged);
 		window.addEventListener("storage", onChanged);
+		if (phase === "ready") {
+			onChanged();
+		}
 		return () => {
 			window.removeEventListener(CART_CHANGED_EVENT, onChanged);
 			window.removeEventListener("storage", onChanged);
 		};
-	}, [refreshFromStoredCart]);
+	}, [refreshFromStoredCart, phase]);
 
 	useEffect(() => {
 		if (repricingItemIds.size > 0 || !needsSkippedChangeReplayRef.current) {
@@ -307,9 +348,9 @@ export function CartView() {
 	const dialogItem = useMemo(
 		() =>
 			dialogItemId
-				? (items.find((item) => item.id === dialogItemId) ?? null)
+				? (stayItems.find((item) => item.id === dialogItemId) ?? null)
 				: null,
-		[dialogItemId, items],
+		[dialogItemId, stayItems],
 	);
 	const dialogConstraints = dialogItem
 		? (constraints.get(dialogItem.listingId) ?? DEFAULT_LISTING_CONSTRAINTS)
@@ -355,7 +396,11 @@ export function CartView() {
 						failure={failures.get(item.id) ?? null}
 						item={item}
 						key={item.id}
-						onEdit={() => setDialogItemId(item.id)}
+						onEdit={
+							item.type === "accommodation"
+								? () => setDialogItemId(item.id)
+								: undefined
+						}
 						onRemove={() => edits.removeStay(item.id)}
 						repricing={repricingItemIds.has(item.id)}
 					/>
@@ -382,7 +427,7 @@ export function CartView() {
 						<div className="flex flex-col gap-2 text-sm">
 							<div className="flex items-center justify-between text-muted-foreground">
 								<span>
-									{items.length} {items.length === 1 ? "stay" : "stays"}
+									{items.length} {items.length === 1 ? "item" : "items"}
 								</span>
 								<span>{formatMinor(cart.subtotalMinor, cart.currency)}</span>
 							</div>

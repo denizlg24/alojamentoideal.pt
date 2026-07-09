@@ -1,10 +1,7 @@
 "use client";
 
 import { Input } from "@workspace/ui/components/input";
-import {
-	NativeSelect,
-	NativeSelectOption,
-} from "@workspace/ui/components/native-select";
+import { ResponsiveSelect } from "@workspace/ui/components/responsive-select";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { type FormEvent, useTransition } from "react";
 
@@ -58,18 +55,13 @@ export function OrdersFilters() {
 				placeholder="Search reference, name or email"
 				type="search"
 			/>
-			<NativeSelect
+			<ResponsiveSelect
 				aria-label="Filter by status"
 				className="w-full sm:w-auto"
-				defaultValue={searchParams.get("status") ?? ""}
-				onChange={(event) => apply({ status: event.target.value })}
-			>
-				{STATUS_OPTIONS.map((option) => (
-					<NativeSelectOption key={option.value} value={option.value}>
-						{option.label}
-					</NativeSelectOption>
-				))}
-			</NativeSelect>
+				onValueChange={(status) => apply({ status })}
+				options={STATUS_OPTIONS}
+				value={searchParams.get("status") ?? ""}
+			/>
 		</form>
 	);
 }

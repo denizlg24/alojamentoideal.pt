@@ -15,7 +15,9 @@ export {
 export {
 	createOrUpdatePaymentIntent,
 	type PaymentIntentParams,
+	type PaymentIntentSettlementSnapshot,
 	type PaymentIntentSnapshot,
+	retrievePaymentIntentSettlementSnapshot,
 	retrievePaymentIntentSnapshot,
 	type StripePaymentMethodSummary,
 } from "./payment-intents";
@@ -24,6 +26,11 @@ export {
 	type RefundRequest,
 	type RefundResult,
 } from "./refunds";
+export {
+	reverseChargeTransfer,
+	type TransferReversalRequest,
+	type TransferReversalResult,
+} from "./transfers";
 export {
 	constructStripeEvent,
 	getStripeWebhookSecret,

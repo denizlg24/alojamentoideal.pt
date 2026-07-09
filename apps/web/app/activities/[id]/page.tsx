@@ -7,6 +7,7 @@ import { notFound } from "next/navigation";
 import { Suspense } from "react";
 import { ActivityBooking } from "@/components/activities/detail/activity-booking";
 import { ActivityBookingSkeleton } from "@/components/activities/detail/activity-booking-skeleton";
+import { ActivityCancellationPolicy } from "@/components/activities/detail/activity-cancellation-policy";
 import { ActivityDescription } from "@/components/activities/detail/activity-description";
 import { ActivityFacts } from "@/components/activities/detail/activity-facts";
 import { ActivityGallery } from "@/components/activities/detail/activity-gallery";
@@ -135,6 +136,7 @@ export default async function ActivityDetailPage({
 
 							<ActivityFacts activity={activity} />
 							<ActivityDescription activity={activity} />
+							<ActivityCancellationPolicy activity={activity} />
 						</div>
 
 						<div className="lg:pt-1">

@@ -1,8 +1,14 @@
-import type { OrderBillingAddressSnapshot } from "@workspace/db";
+import type {
+	ActivityBookingAnswerSnapshot,
+	OrderBillingAddressSnapshot,
+} from "@workspace/db";
 import { z } from "zod";
 import { parseQuoteBody, type QuoteRequest } from "../accommodations";
 import type { BookingGuestUpdateInput } from "./order-guests";
-import type { DraftOrderContactInput } from "./types";
+import type {
+	CommerceActivityQuoteInput,
+	DraftOrderContactInput,
+} from "./types";
 
 const idString = z.string().trim().min(1).max(128);
 const optionalIdString = idString.optional();
@@ -23,7 +29,7 @@ const createCartSchema = z.object({
 	idempotencyKey: idempotencyKey.optional(),
 });
 
-const addCartItemSchema = z.object({
+const addAccommodationCartItemSchema = z.object({
 	adults: z.coerce.number().int().min(1).max(30).optional(),
 	checkIn: z.string(),
 	checkOut: z.string(),
@@ -34,6 +40,90 @@ const addCartItemSchema = z.object({
 	infants: z.coerce.number().int().min(0).max(5).optional(),
 	listingId: idString,
 	pets: z.coerce.number().int().min(0).max(10).optional(),
+	type: z.literal("accommodation").optional().default("accommodation"),
+});
+
+const activityParticipantSchema = z.object({
+	count: z.coerce.number().int().min(1).max(100),
+	pricingCategoryId: z.coerce.number().int(),
+});
+
+const optionalPlaceId = z
+	.string()
+	.trim()
+	.min(1)
+	.max(64)
+	.nullish()
+	.transform((value) => value ?? null);
+
+const activityAnswerSchema = z.object({
+	answer: z.string().max(2000),
+	group: z.string().trim().min(1).max(120),
+	participantIndex: z.coerce
+		.number()
+		.int()
+		.min(0)
+		.nullish()
+		.transform((value) => value ?? null),
+	questionId: z.string().trim().min(1).max(200),
+});
+
+// Activities are single-day Bokun items priced by pricing-category headcount. The
+// widget collects only Bokun-required questions inline; answers are opaque
+// provider payload carried through to `checkout.submit`.
+const addActivityCartItemSchema = z.object({
+	activityDate: z.iso.date("Use YYYY-MM-DD"),
+	activityId: idString,
+	answers: z.array(activityAnswerSchema).max(200).optional().default([]),
+	clientMutationId: optionalIdString,
+	idempotencyKey,
+	participants: z.array(activityParticipantSchema).min(1).max(50),
+	rateId: z
+		.string()
+		.trim()
+		.min(1)
+		.max(128)
+		.nullish()
+		.transform((value) => value ?? null),
+	startTimeId: z
+		.string()
+		.trim()
+		.min(1)
+		.max(128)
+		.nullish()
+		.transform((value) => value ?? null),
+	type: z.literal("activity"),
+});
+
+const addCartItemSchema = z.union([
+	addActivityCartItemSchema,
+	addAccommodationCartItemSchema,
+]);
+
+// Read-only lookup of the Bokun booking-question schema for one activity
+// selection. Mirrors the activity cart-add fields (minus answers) so the
+// checkout page can fetch which required questions/pickup places a guest must
+// supply before the reservation hold.
+const activityBookingSchemaRequestSchema = z.object({
+	activityDate: z.iso.date("Use YYYY-MM-DD"),
+	activityId: idString,
+	dropoffPlaceId: optionalPlaceId,
+	participants: z.array(activityParticipantSchema).min(1).max(50),
+	pickupPlaceId: optionalPlaceId,
+	rateId: z
+		.string()
+		.trim()
+		.min(1)
+		.max(128)
+		.nullish()
+		.transform((value) => value ?? null),
+	startTimeId: z
+		.string()
+		.trim()
+		.min(1)
+		.max(128)
+		.nullish()
+		.transform((value) => value ?? null),
 });
 
 const updateCartItemSchema = z.object({
@@ -88,8 +178,18 @@ const rawContactSchema = z
 	.object({
 		billingAddress: billingAddressSchema.optional(),
 		companyName: z.string().trim().min(1).max(200).optional(),
+		// Bokun activity bookings require these main-contact fields; accommodation
+		// checkouts leave them undefined.
+		dateOfBirth: z
+			.string()
+			.trim()
+			.regex(/^\d{4}-\d{2}-\d{2}$/, "Use YYYY-MM-DD")
+			.optional(),
 		email: z.string().trim().email().max(320),
+		firstName: z.string().trim().min(1).max(120).optional(),
 		isCompany: z.boolean().optional().default(false),
+		language: z.string().trim().min(2).max(16).optional(),
+		lastName: z.string().trim().min(1).max(120).optional(),
 		name: z.string().trim().min(1).max(200),
 		notes: z.string().trim().max(1000).optional(),
 		phone: z.string().trim().min(3).max(64).optional(),
@@ -109,8 +209,12 @@ const rawContactSchema = z
 		(value): DraftOrderContactInput => ({
 			billingAddress: value.billingAddress ?? {},
 			companyName: value.companyName ?? null,
+			dateOfBirth: value.dateOfBirth ?? null,
 			email: value.email.toLowerCase(),
+			firstName: value.firstName ?? null,
 			isCompany: value.isCompany,
+			language: value.language ?? null,
+			lastName: value.lastName ?? null,
 			name: value.name,
 			notes: value.notes ?? null,
 			phoneE164: value.phoneE164 ?? value.phone ?? "",
@@ -118,7 +222,36 @@ const rawContactSchema = z
 		}),
 	);
 
+const draftOrderActivityAnswerSchema: z.ZodType<ActivityBookingAnswerSnapshot> =
+	z.object({
+		answer: z.string().max(2000),
+		group: z.string().trim().min(1).max(64),
+		participantIndex: z.number().int().min(0).max(100).nullable(),
+		questionId: z.string().trim().min(1).max(128),
+	});
+
+// Bokun activity guest details are collected at checkout (not add-to-cart), so
+// they ride on the draft-order body keyed by the source cart item.
+const draftOrderActivityDetailSchema = z.object({
+	answers: z
+		.array(draftOrderActivityAnswerSchema)
+		.max(300)
+		.optional()
+		.default([]),
+	cartItemId: idString,
+	dropoffPlaceId: optionalPlaceId,
+	pickupPlaceId: optionalPlaceId,
+	roomNumber: z
+		.string()
+		.trim()
+		.min(1)
+		.max(200)
+		.nullish()
+		.transform((value) => value ?? null),
+});
+
 const draftOrderSchema = z.object({
+	activityDetails: z.array(draftOrderActivityDetailSchema).max(20).optional(),
 	billingAddress: billingAddressSchema.optional(),
 	cartId: idString,
 	companyName: z.string().trim().min(1).max(200).optional(),
@@ -131,6 +264,10 @@ const draftOrderSchema = z.object({
 	phone: z.string().trim().min(3).max(64).optional(),
 	phoneE164: z.string().trim().min(3).max(64).optional(),
 	taxNumber: z.string().trim().min(1).max(64).optional(),
+});
+
+const updateDraftOrderActivityDetailsSchema = z.object({
+	activityDetails: z.array(draftOrderActivityDetailSchema).max(20),
 });
 
 const draftOrderContactFieldsSchema = draftOrderSchema.pick({
@@ -215,10 +352,21 @@ export interface CreateCartBody {
 	idempotencyKey?: string;
 }
 
-export interface AddCartItemBody extends QuoteRequest {
+export interface AddAccommodationCartItemBody extends QuoteRequest {
 	clientMutationId?: string;
 	idempotencyKey: string;
+	type: "accommodation";
 }
+
+export interface AddActivityCartItemBody extends CommerceActivityQuoteInput {
+	clientMutationId?: string;
+	idempotencyKey: string;
+	type: "activity";
+}
+
+export type AddCartItemBody =
+	| AddAccommodationCartItemBody
+	| AddActivityCartItemBody;
 
 export interface UpdateCartItemBody {
 	adults?: number;
@@ -241,7 +389,16 @@ export interface ApplyDiscountBody {
 	idempotencyKey?: string;
 }
 
+export interface DraftOrderActivityDetailInput {
+	answers: ActivityBookingAnswerSnapshot[];
+	cartItemId: string;
+	dropoffPlaceId: string | null;
+	pickupPlaceId: string | null;
+	roomNumber: string | null;
+}
+
 export interface DraftOrderBody {
+	activityDetails?: DraftOrderActivityDetailInput[];
 	cartId: string;
 	contact: DraftOrderContactInput;
 	idempotencyKey?: string;
@@ -251,6 +408,10 @@ export interface CreatePaymentIntentBody {
 	cartId: string;
 	idempotencyKey?: string;
 	orderId?: string;
+}
+
+export interface UpdateDraftOrderActivityDetailsBody {
+	activityDetails: DraftOrderActivityDetailInput[];
 }
 
 export interface UpdateBookingGuestsBody {
@@ -271,6 +432,10 @@ export function parseAddCartItemBody(
 		return parsed;
 	}
 
+	if (parsed.data.type === "activity") {
+		return { data: parsed.data, success: true };
+	}
+
 	// Cart-add reuses the quote the widget already warmed for these exact dates;
 	// the reservation hold re-checks availability before any charge.
 	const quote = parseQuoteBody({ ...parsed.data, forceFresh: false });
@@ -283,9 +448,20 @@ export function parseAddCartItemBody(
 			...quote.data,
 			clientMutationId: parsed.data.clientMutationId,
 			idempotencyKey: parsed.data.idempotencyKey,
+			type: "accommodation",
 		},
 		success: true,
 	};
+}
+
+export type ActivityBookingSchemaRequest = z.infer<
+	typeof activityBookingSchemaRequestSchema
+>;
+
+export function parseActivityBookingSchemaRequest(
+	body: unknown,
+): CommerceParseResult<ActivityBookingSchemaRequest> {
+	return activityBookingSchemaRequestSchema.safeParse(body);
 }
 
 export function parseUpdateCartItemBody(
@@ -318,6 +494,12 @@ export function parseUpdateBookingGuestsBody(
 	return updateBookingGuestsSchema.safeParse(body);
 }
 
+export function parseUpdateDraftOrderActivityDetailsBody(
+	body: unknown,
+): CommerceParseResult<UpdateDraftOrderActivityDetailsBody> {
+	return updateDraftOrderActivityDetailsSchema.safeParse(body);
+}
+
 /**
  * Parses a standalone contact update (the same nested contact shape the
  * draft-order route accepts under `contact`) into a normalized snapshot.
@@ -342,6 +524,7 @@ export function parseDraftOrderBody(
 	if (parsed.data.contact) {
 		return {
 			data: {
+				activityDetails: parsed.data.activityDetails,
 				cartId: parsed.data.cartId,
 				contact: parsed.data.contact,
 				idempotencyKey: parsed.data.idempotencyKey,
@@ -362,6 +545,7 @@ export function parseDraftOrderBody(
 
 	return {
 		data: {
+			activityDetails: parsed.data.activityDetails,
 			cartId: parsed.data.cartId,
 			contact: contact.data,
 			idempotencyKey: parsed.data.idempotencyKey,

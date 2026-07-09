@@ -10,7 +10,7 @@
 export interface CartRecoveryNotice {
 	/** Guest-friendly reason the purchase stopped (already normalized copy). */
 	message: string;
-	/** Titles of stays dropped during the cart rebuild because they no longer quote. */
+	/** Titles of items dropped during the cart rebuild because they no longer quote. */
 	removedTitles: string[];
 }
 
@@ -49,12 +49,12 @@ export function parseCartNotice(raw: string | null): CartRecoveryNotice | null {
 }
 
 /**
- * Full alert body for a recovery notice: the failure reason plus, when stays
+ * Full alert body for a recovery notice: the failure reason plus, when items
  * were dropped in the rebuild, which ones were taken out of the cart.
  */
 export function cartNoticeBody(notice: CartRecoveryNotice): string {
 	if (notice.removedTitles.length === 0) {
-		return `${notice.message} Please review your stays and try again.`;
+		return `${notice.message} Please review your cart and try again.`;
 	}
 	const names = notice.removedTitles.map((title) => `"${title}"`);
 	const list =
@@ -62,7 +62,7 @@ export function cartNoticeBody(notice: CartRecoveryNotice): string {
 			? names[0]
 			: `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
 	const subject = names.length === 1 ? "it is" : "they are";
-	return `${notice.message} We removed ${list} from your cart because ${subject} no longer available for the selected dates.`;
+	return `${notice.message} We removed ${list} from your cart because ${subject} no longer available for the selected details.`;
 }
 
 export function writeCartNotice(notice: CartRecoveryNotice): void {

@@ -119,12 +119,16 @@ describe("summarizeConversationAvailability", () => {
 	test("reports pending until an active external thread is linked", () => {
 		expect(
 			summarizeConversationAvailability([
-				{ externalThreadId: null, status: "pending" },
+				{ externalThreadId: null, provider: "hostify", status: "pending" },
 			]),
 		).toBe("pending");
 		expect(
 			summarizeConversationAvailability([
-				{ externalThreadId: "thread_1", status: "archived" },
+				{
+					externalThreadId: "thread_1",
+					provider: "hostify",
+					status: "archived",
+				},
 			]),
 		).toBe("pending");
 	});
@@ -132,8 +136,24 @@ describe("summarizeConversationAvailability", () => {
 	test("reports available for an active linked thread", () => {
 		expect(
 			summarizeConversationAvailability([
-				{ externalThreadId: "thread_1", status: "active" },
+				{ externalThreadId: "thread_1", provider: "hostify", status: "active" },
 			]),
 		).toBe("available");
+	});
+
+	test("reports available for an active internal conversation with no thread", () => {
+		expect(
+			summarizeConversationAvailability([
+				{ externalThreadId: null, provider: "internal", status: "active" },
+			]),
+		).toBe("available");
+	});
+
+	test("an archived internal conversation stays pending", () => {
+		expect(
+			summarizeConversationAvailability([
+				{ externalThreadId: null, provider: "internal", status: "archived" },
+			]),
+		).toBe("pending");
 	});
 });

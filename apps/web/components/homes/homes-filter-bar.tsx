@@ -17,13 +17,7 @@ import {
 	DialogHeader,
 	DialogTitle,
 } from "@workspace/ui/components/dialog";
-import {
-	Select,
-	SelectContent,
-	SelectItem,
-	SelectTrigger,
-	SelectValue,
-} from "@workspace/ui/components/select";
+import { ResponsiveSelect } from "@workspace/ui/components/responsive-select";
 import { Separator } from "@workspace/ui/components/separator";
 import { Slider } from "@workspace/ui/components/slider";
 import { cn } from "@workspace/ui/lib/utils";
@@ -425,6 +419,43 @@ export function HomesFilterBar({
 		});
 	}
 
+	const sortOptions = [
+		{
+			icon: <Sparkles className="text-muted-foreground" />,
+			label: "Newest",
+			value: "recent",
+		},
+		...(visibleFilters.place
+			? [
+					{
+						icon: <MapPin className="text-muted-foreground" />,
+						label: "Nearest",
+						value: "distance",
+					},
+				]
+			: []),
+		{
+			icon: <ArrowUpNarrowWide className="text-muted-foreground" />,
+			label: "Price: low to high",
+			value: "price_asc",
+		},
+		{
+			icon: <ArrowDownWideNarrow className="text-muted-foreground" />,
+			label: "Price: high to low",
+			value: "price_desc",
+		},
+		{
+			icon: <Maximize2 className="text-muted-foreground" />,
+			label: "Largest",
+			value: "capacity",
+		},
+		{
+			icon: <ArrowDownAZ className="text-muted-foreground" />,
+			label: "A to Z",
+			value: "name",
+		},
+	];
+
 	return (
 		<div className="flex flex-col gap-3">
 			<div className="flex items-center gap-2 sm:hidden">
@@ -825,41 +856,15 @@ export function HomesFilterBar({
 				</p>
 				<div className="flex items-center gap-2">
 					<span className="text-muted-foreground text-sm">Sort by</span>
-					<Select
-						value={visibleFilters.sort ?? "recent"}
+					<ResponsiveSelect
+						aria-label="Sort by"
+						className={cn("min-w-40")}
 						onValueChange={(sort) => apply({ ...visibleFilters, sort })}
-					>
-						<SelectTrigger size="sm" className={cn("min-w-40")}>
-							<SelectValue placeholder="Sort" />
-						</SelectTrigger>
-						<SelectContent>
-							<SelectItem value="recent">
-								<Sparkles className="text-muted-foreground" />
-								Newest
-							</SelectItem>
-							{visibleFilters.place && (
-								<SelectItem value="distance">
-									<MapPin className="text-muted-foreground" />
-									Nearest
-								</SelectItem>
-							)}
-							<SelectItem value="price_asc">
-								<ArrowUpNarrowWide className="text-muted-foreground" />
-								Price: low to high
-							</SelectItem>
-							<SelectItem value="price_desc">
-								<ArrowDownWideNarrow className="text-muted-foreground" />
-								Price: high to low
-							</SelectItem>
-							<SelectItem value="capacity">
-								<Maximize2 className="text-muted-foreground" />
-								Largest
-							</SelectItem>
-							<SelectItem value="name">
-								<ArrowDownAZ className="text-muted-foreground" />A to Z
-							</SelectItem>
-						</SelectContent>
-					</Select>
+						options={sortOptions}
+						placeholder="Sort"
+						size="sm"
+						value={visibleFilters.sort ?? "recent"}
+					/>
 				</div>
 			</div>
 		</div>

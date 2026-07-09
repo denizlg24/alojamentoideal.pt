@@ -15,7 +15,7 @@ export interface RuntimeSettingDefinition {
 	defaultValue: AppSettingValue;
 	description: string;
 	envName?: string;
-	group: "bokun" | "features" | "hostify" | "hostkit";
+	group: "bokun" | "features" | "hostify" | "hostkit" | "payments";
 	key: string;
 	label: string;
 	max?: number;
@@ -312,7 +312,8 @@ export const runtimeSettingDefinitions = [
 	},
 	{
 		defaultValue: DEFAULT_ACTIVITY_IDS.join(","),
-		description: "Comma-separated Bokun activity ids exposed on the site.",
+		description:
+			"Comma-separated Bokun activity ids exposed on the site. Leave blank to disable activities.",
 		envName: "BOKUN_ACTIVITY_IDS",
 		group: "bokun",
 		key: "bokun.activityIds",
@@ -421,6 +422,16 @@ export const runtimeSettingDefinitions = [
 		max: 120_000,
 		min: 1,
 		type: "integer",
+	},
+	{
+		defaultValue: "",
+		description:
+			"Stripe connected account id (acct_…) that receives activity payouts. Required to sell activities; when empty, activity checkout is blocked.",
+		envName: "STRIPE_DETOURS_ACCOUNT_ID",
+		group: "payments",
+		key: "payments.detoursStripeAccountId",
+		label: "Detours Stripe account",
+		type: "string",
 	},
 ] as const satisfies readonly RuntimeSettingDefinition[];
 

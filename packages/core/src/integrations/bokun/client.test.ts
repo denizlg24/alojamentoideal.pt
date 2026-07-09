@@ -105,13 +105,15 @@ describe("BokunClient", () => {
 		expect((error as BokunApiError).providerMessage).toBe("Forbidden");
 	});
 
-	it("returns raw text for ticket endpoints", async () => {
+	it("returns ticket endpoints base64-encoded so PDF bytes survive", async () => {
 		const client = clientWith(
-			async () => new Response("<html>ticket</html>", { status: 200 }),
+			async () => new Response("%PDF-1.7 ticket", { status: 200 }),
 		);
 
 		const ticket = await client.v1.booking.getActivityTicket("ABC123");
-		expect(ticket).toBe("<html>ticket</html>");
+		expect(Buffer.from(ticket, "base64").toString("utf8")).toBe(
+			"%PDF-1.7 ticket",
+		);
 	});
 
 	it("retries idempotent GETs on retryable status codes", async () => {

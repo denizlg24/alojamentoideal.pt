@@ -4,7 +4,13 @@ import {
 	getAccommodationsConfigFromSettings,
 } from "@workspace/core/accommodations";
 import {
+	ACTIVITY_PROVIDER,
+	getActivityCacheConfigFromSettings,
+} from "@workspace/core/activities/cache";
+import {
+	BokunReservationGateway,
 	type CartOwner,
+	type CommerceActivityQuoteInput,
 	CommerceError,
 	type CommerceIssue,
 	type CommerceParseResult,
@@ -14,15 +20,21 @@ import {
 	HostifyReservationGateway,
 	mapStripePaymentStatus,
 	type OrderAccessContext,
+	OrderRefundService,
 	type ProviderReservationGateway,
 	StubReservationGateway,
 } from "@workspace/core/commerce";
+import {
+	BokunConfigurationError,
+	createBokunClientFromEnv,
+} from "@workspace/core/integrations/bokun";
 import { createHostifyClientFromEnv } from "@workspace/core/integrations/hostify";
 import {
 	createRefund,
 	createStripeClientFromEnv,
 	resolvePromotionCode,
 	retrievePaymentIntentSnapshot,
+	reverseChargeTransfer,
 	StripeConfigurationError,
 } from "@workspace/core/integrations/stripe";
 import { getRedis } from "@workspace/core/redis";
@@ -30,6 +42,7 @@ import { getRuntimeSettings } from "@workspace/core/settings";
 import type { AppliedDiscountSnapshot } from "@workspace/db";
 import { CART_COOKIE_NAME, getDb } from "@workspace/db";
 import { cookies } from "next/headers";
+import { quoteBokunActivity } from "@/lib/activities/quote";
 import { getCurrentUser, getServerUser } from "@/lib/auth/session";
 import { HOSTIFY_PROVIDER } from "@/lib/catalog/constants";
 import { quoteFailure } from "./hostify-errors";
@@ -64,6 +77,7 @@ function orderMemberCookieName(reference: string): string {
  * no real bookings are placed in the Hostify account. See `StubReservationGateway`.
  */
 let warnedHostifyDisabled = false;
+let warnedBokunUnavailable = false;
 
 function resolveHostifyGateway(
 	hostifyClient: ReturnType<typeof createHostifyClientFromEnv>,
@@ -79,6 +93,28 @@ function resolveHostifyGateway(
 		);
 	}
 	return new StubReservationGateway();
+}
+
+function resolveBokunGateway(
+	lang: string,
+): ProviderReservationGateway | undefined {
+	try {
+		return new BokunReservationGateway({
+			client: createBokunClientFromEnv(),
+			lang,
+		});
+	} catch (error) {
+		if (error instanceof BokunConfigurationError) {
+			if (!warnedBokunUnavailable) {
+				warnedBokunUnavailable = true;
+				console.warn(
+					"Bokun reservation gateway is unavailable: missing Bokun configuration.",
+				);
+			}
+			return undefined;
+		}
+		throw error;
+	}
 }
 
 export async function readJson(request: Request): Promise<unknown> {
@@ -247,6 +283,7 @@ function optionalStripeClient(): ReturnType<
 export async function commerceService(): Promise<CommerceService> {
 	const settings = await getRuntimeSettings();
 	const config = await getAccommodationsConfigFromSettings(settings);
+	const activityConfig = await getActivityCacheConfigFromSettings();
 	const hostifyClient = createHostifyClientFromEnv();
 	const stripe = optionalStripeClient();
 	const hostifyBookingsEnabled =
@@ -260,6 +297,7 @@ export async function commerceService(): Promise<CommerceService> {
 
 	return new CommerceService({
 		accountId: config.hostifyAccountId,
+		activityAccountId: activityConfig.accountId,
 		// Default on; Finance can switch to manual recovery through the Commerce
 		// auto-refund runtime setting.
 		autoRefundOnFailure:
@@ -278,7 +316,9 @@ export async function commerceService(): Promise<CommerceService> {
 		resolveReservationGateway: (provider) =>
 			provider === HOSTIFY_PROVIDER
 				? resolveHostifyGateway(hostifyClient, hostifyBookingsEnabled)
-				: undefined,
+				: provider === ACTIVITY_PROVIDER
+					? resolveBokunGateway(activityConfig.lang)
+					: undefined,
 		resolveConversationGateway: (provider) =>
 			provider === HOSTIFY_PROVIDER
 				? new HostifyConversationGateway({ client: hostifyClient })
@@ -325,6 +365,8 @@ export async function commerceService(): Promise<CommerceService> {
 				throw error;
 			}
 		},
+		quoteActivity: (input: CommerceActivityQuoteInput) =>
+			quoteBokunActivity(input, activityConfig),
 		quoteTtlSeconds: config.quoteCacheTtlSeconds,
 		resolveDiscount: async (
 			code: string,
@@ -338,6 +380,24 @@ export async function commerceService(): Promise<CommerceService> {
 			}
 			return resolvePromotionCode(stripe, code);
 		},
+	});
+}
+
+/**
+ * Request-scoped service for the refund ledger reconciler cron. Mirrors the
+ * admin app's factory: when Stripe is not configured the reconciler leaves
+ * pending rows untouched instead of failing them.
+ */
+export function orderRefundService(): OrderRefundService {
+	const stripe = optionalStripeClient();
+	return new OrderRefundService({
+		db: getDb(),
+		refundPayment: stripe
+			? (request) => createRefund(stripe, request)
+			: undefined,
+		reverseActivityTransfer: stripe
+			? (request) => reverseChargeTransfer(stripe, request)
+			: undefined,
 	});
 }
 

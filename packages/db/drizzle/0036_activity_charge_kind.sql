@@ -1,0 +1,2 @@
+ALTER TABLE "order_item_charges" DROP CONSTRAINT "order_item_charges_kind_check";--> statement-breakpoint
+ALTER TABLE "order_item_charges" ADD CONSTRAINT "order_item_charges_kind_check" CHECK ("order_item_charges"."kind" in ('accommodation', 'activity', 'tax', 'discount', 'fee'));

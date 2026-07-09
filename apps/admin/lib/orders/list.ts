@@ -1,4 +1,10 @@
-import { getDb, order, orderContact, providerBooking } from "@workspace/db";
+import {
+	getDb,
+	order,
+	orderContact,
+	orderItem,
+	providerBooking,
+} from "@workspace/db";
 import { and, desc, eq, ilike, or, type SQL, sql } from "drizzle-orm";
 
 export const ORDER_STATUSES = [
@@ -17,6 +23,8 @@ export function isOrderStatusFilter(value: string): value is OrderStatusFilter {
 
 export interface AdminOrderListRow {
 	amountPaidMinor: number;
+	activityItemCount: number;
+	accommodationItemCount: number;
 	contactEmail: string | null;
 	contactName: string | null;
 	createdAt: Date;
@@ -57,6 +65,16 @@ export async function listAdminOrders(filter: {
 
 	const rows = await getDb()
 		.select({
+			accommodationItemCount: sql<number>`coalesce((
+				select count(*)::int from ${orderItem}
+				where ${orderItem.orderId} = ${order.id}
+				and ${orderItem.type} = 'accommodation'
+			), 0)`,
+			activityItemCount: sql<number>`coalesce((
+				select count(*)::int from ${orderItem}
+				where ${orderItem.orderId} = ${order.id}
+				and ${orderItem.type} = 'activity'
+			), 0)`,
 			amountPaidMinor: order.amountPaidMinor,
 			contactEmail: orderContact.email,
 			contactName: orderContact.name,

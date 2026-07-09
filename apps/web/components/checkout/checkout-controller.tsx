@@ -2,12 +2,16 @@
 
 import type { AccountProfile } from "@workspace/core/account";
 import type {
+	AccommodationCartItemDto,
+	ActivityCartItemDto,
 	CartDto,
 	CartItemDto,
 	CartValidationResponse,
+	DraftOrderActivityDetailInput,
 	PaymentIntentResponse,
 } from "@workspace/core/commerce";
 import { Button } from "@workspace/ui/components/button";
+import { Separator } from "@workspace/ui/components/separator";
 import { Skeleton } from "@workspace/ui/components/skeleton";
 import { ShoppingCart } from "lucide-react";
 import Link from "next/link";
@@ -28,12 +32,16 @@ import {
 } from "@/lib/checkout/cart-store";
 import { toCheckoutError } from "@/lib/checkout/errors";
 import {
+	formatActivityDateLong,
 	formatMinor,
 	formatStayRangeLong,
 	guestSummaryLabel,
 	nightsLabel,
 } from "@/lib/checkout/format";
 import {
+	type ActivityKeyInput,
+	activityCartItemClientMutationId,
+	activityCartItemIdempotencyKey,
 	cartItemClientMutationId,
 	cartItemIdempotencyKey,
 	randomIdempotencyKey,
@@ -46,6 +54,10 @@ import {
 	stayKeyToken,
 	writeResumeState,
 } from "@/lib/checkout/resume";
+import {
+	ActivityMainContactQuestions,
+	ActivityQuestionsForm,
+} from "./activity-questions-form";
 import { CartSummary } from "./cart-summary";
 import { CheckoutAlert } from "./checkout-alert";
 import { CheckoutAuthPrompt } from "./checkout-auth-prompt";
@@ -70,6 +82,7 @@ import {
 	hasBillingDetails,
 	profileInputFromContactDraft,
 } from "./types";
+import { useActivityBookingDetails } from "./use-activity-booking-details";
 import {
 	DEFAULT_LISTING_CONSTRAINTS,
 	useListingConstraints,
@@ -137,7 +150,15 @@ function activeItemsOf(cart: CartDto | null): CartItemDto[] {
 	return cart?.items.filter((entry) => entry.status === "active") ?? [];
 }
 
-function stayInputFromItem(item: CartItemDto): StayKeyInput {
+function isStayItem(item: CartItemDto): item is AccommodationCartItemDto {
+	return item.type === "accommodation";
+}
+
+function activeStayItemsOf(cart: CartDto | null): AccommodationCartItemDto[] {
+	return activeItemsOf(cart).filter(isStayItem);
+}
+
+function stayInputFromItem(item: AccommodationCartItemDto): StayKeyInput {
 	return {
 		adults: item.adults,
 		checkIn: item.checkIn,
@@ -149,8 +170,58 @@ function stayInputFromItem(item: CartItemDto): StayKeyInput {
 	};
 }
 
+function activityInputFromItem(item: ActivityCartItemDto): ActivityKeyInput {
+	return {
+		activityDate: item.activityDate,
+		activityId: item.activityId,
+		participants: item.participants.map((participant) => ({
+			count: participant.count,
+			pricingCategoryId: participant.pricingCategoryId,
+		})),
+		rateId: item.rateId,
+		startTimeId: item.startTimeId,
+	};
+}
+
+async function addCartItemFromExisting(
+	cartId: string,
+	item: CartItemDto,
+): Promise<CartDto> {
+	if (item.type === "activity") {
+		const activity = activityInputFromItem(item);
+		return (
+			await api.addCartItem(cartId, {
+				activityDate: activity.activityDate,
+				activityId: activity.activityId,
+				answers: activity.answers ?? [],
+				clientMutationId: activityCartItemClientMutationId(activity),
+				idempotencyKey: activityCartItemIdempotencyKey(activity),
+				participants: activity.participants,
+				rateId: activity.rateId ?? null,
+				startTimeId: activity.startTimeId ?? null,
+				type: "activity",
+			})
+		).cart;
+	}
+
+	const stay = stayInputFromItem(item);
+	return (
+		await api.addCartItem(cartId, {
+			adults: stay.adults,
+			checkIn: stay.checkIn,
+			checkOut: stay.checkOut,
+			children: stay.children,
+			clientMutationId: cartItemClientMutationId(stay),
+			guests: stay.guests,
+			idempotencyKey: cartItemIdempotencyKey(stay),
+			infants: stay.infants,
+			listingId: stay.listingId,
+		})
+	).cart;
+}
+
 function cartHasStay(cart: CartDto, stayToken: string): boolean {
-	return activeItemsOf(cart).some(
+	return activeStayItemsOf(cart).some(
 		(item) => stayKeyToken(stayInputFromItem(item)) === stayToken,
 	);
 }
@@ -262,6 +333,53 @@ export function CheckoutController({ seed }: CheckoutControllerProps) {
 	const [repricingItemIds, setRepricingItemIds] = useState<Set<string>>(
 		new Set(),
 	);
+	// Set when a submit is blocked on missing activity questions, so the inline
+	// form reveals which required fields still need answers.
+	const [activityError, setActivityError] = useState<string | null>(null);
+
+	// Loads the Bokun booking-question schema for any activity in the cart and
+	// holds the guest's answers/pickup choices. Kept in a ref so the submit
+	// handler reads the latest state without re-creating on every keystroke.
+	const activityBooking = useActivityBookingDetails(cart);
+	const activityBookingRef = useRef(activityBooking);
+	activityBookingRef.current = activityBooking;
+
+	const activityBookingComplete = activityBooking.isComplete;
+	useEffect(() => {
+		if (activityBookingComplete) {
+			setActivityError(null);
+		}
+	}, [activityBookingComplete]);
+
+	const buildReadyActivityDetails = useCallback(():
+		| DraftOrderActivityDetailInput[]
+		| null => {
+		const activity = activityBookingRef.current;
+		if (!activity.hasActivities) {
+			setActivityError(null);
+			return [];
+		}
+		if (activity.loading) {
+			setActivityError(
+				"Just a moment while we load your activity booking options.",
+			);
+			return null;
+		}
+		if (activity.hasError) {
+			setActivityError(
+				"We couldn't load the activity booking questions. Please retry above.",
+			);
+			return null;
+		}
+		if (!activity.isComplete) {
+			setActivityError(
+				"Please complete the activity details above before continuing.",
+			);
+			return null;
+		}
+		setActivityError(null);
+		return activity.buildActivityDetails();
+	}, []);
 
 	const bootstrapStarted = useRef(false);
 	// Fingerprint of the cart last reconciled here, so the external-change
@@ -282,6 +400,7 @@ export function CheckoutController({ seed }: CheckoutControllerProps) {
 	const currency = cart?.currency ?? "EUR";
 	const totalLabel = cart ? formatMinor(cart.totalMinor, currency) : "";
 	const hasFailures = failures.size > 0;
+	const stayItems = useMemo(() => activeStayItemsOf(cart), [cart]);
 
 	// Same-origin path the auth pages return to after sign-in.
 	const authNext = useMemo(() => {
@@ -302,46 +421,45 @@ export function CheckoutController({ seed }: CheckoutControllerProps) {
 		setNotice(first ? first.message : null);
 	}, []);
 
+	// Keeps the header badge in step with an optimistic edit while syncing the
+	// applied fingerprint so the cart-changed listener treats the broadcast as our
+	// own edit instead of re-reading and rolling it back.
+	const notifyOptimisticCart = useCallback((next: CartDto) => {
+		lastAppliedFingerprintRef.current = cartContentFingerprint(next);
+		notifyCartChanged(next);
+	}, []);
+
 	const stayEdits = useOptimisticStayEdits({
 		applyValidated: applyValidation,
 		cart,
 		onError: setNotice,
+		onOptimisticCart: notifyOptimisticCart,
 		setCart,
 		setRepricingItemIds,
 	});
 
 	const listingConstraints = useListingConstraints(
-		activeItemsOf(cart).map((item) => item.listingId),
+		stayItems.map((item) => item.listingId),
 	);
 
 	/**
-	 * Creates a fresh mutable cart holding the given stays. Used when the current
+	 * Creates a fresh mutable cart holding the given items. Used when the current
 	 * cart is frozen (converted into a draft order) and must be edited or retried.
-	 * Stays whose dates went unavailable in the meantime are skipped rather than
-	 * failing the whole rebuild; the caller reports which stays were dropped.
+	 * Items whose selection went unavailable in the meantime are skipped rather than
+	 * failing the whole rebuild; the caller reports which items were dropped.
 	 */
 	const rebuildCartFromItems = useCallback(
 		async (
-			stays: StayKeyInput[],
-		): Promise<{ cart: CartDto; skippedStays: StayKeyInput[] }> => {
+			itemsToRebuild: CartItemDto[],
+		): Promise<{ cart: CartDto; skippedItems: CartItemDto[] }> => {
 			const created = (await api.createCart()).cart;
 			storeCartId(created.id);
-			const skippedStays: StayKeyInput[] = [];
-			for (const stay of stays) {
+			const skippedItems: CartItemDto[] = [];
+			for (const item of itemsToRebuild) {
 				try {
-					await api.addCartItem(created.id, {
-						adults: stay.adults,
-						checkIn: stay.checkIn,
-						checkOut: stay.checkOut,
-						children: stay.children,
-						clientMutationId: cartItemClientMutationId(stay),
-						guests: stay.guests,
-						idempotencyKey: cartItemIdempotencyKey(stay),
-						infants: stay.infants,
-						listingId: stay.listingId,
-					});
+					await addCartItemFromExisting(created.id, item);
 				} catch {
-					skippedStays.push(stay);
+					skippedItems.push(item);
 				}
 			}
 			const validated = await api.validateCart(created.id);
@@ -351,20 +469,20 @@ export function CheckoutController({ seed }: CheckoutControllerProps) {
 			setReviewError(null);
 			setTermsAccepted(false);
 			clearResumeState();
-			return { cart: validated.cart, skippedStays };
+			return { cart: validated.cart, skippedItems };
 		},
 		[applyValidation],
 	);
 
-	/** Rebuilds a mutable cart from the current (frozen) cart's stays. */
+	/** Rebuilds a mutable cart from the current (frozen) cart's active items. */
 	const rebuildCurrentCart = useCallback(async (): Promise<{
 		cart: CartDto;
-		skippedStays: StayKeyInput[];
+		skippedItems: CartItemDto[];
 	} | null> => {
 		if (items.length === 0) {
 			return null;
 		}
-		return rebuildCartFromItems(items.map(stayInputFromItem));
+		return rebuildCartFromItems(items);
 	}, [items, rebuildCartFromItems]);
 
 	// --- Bootstrap: resume a payable order, or converge the shared cart and the
@@ -497,8 +615,8 @@ export function CheckoutController({ seed }: CheckoutControllerProps) {
 					}
 				}
 
-				// Stays to carry into a fresh cart when the stored one is frozen.
-				let carryStays: StayKeyInput[] = [];
+				// Items to carry into a fresh cart when the stored one is frozen.
+				let carryItems: CartItemDto[] = [];
 				if (loaded && loaded.status === "converted") {
 					if (seedToken === null || cartHasStay(loaded, seedToken)) {
 						try {
@@ -512,7 +630,7 @@ export function CheckoutController({ seed }: CheckoutControllerProps) {
 							}
 						}
 					}
-					carryStays = activeItemsOf(loaded).map(stayInputFromItem);
+					carryItems = activeItemsOf(loaded);
 					loaded = null;
 				}
 
@@ -522,23 +640,11 @@ export function CheckoutController({ seed }: CheckoutControllerProps) {
 				}
 
 				let seedOverlapNotice: string | null = null;
-				for (const stay of carryStays) {
+				for (const item of carryItems) {
 					try {
-						loaded = (
-							await api.addCartItem(loaded.id, {
-								adults: stay.adults,
-								checkIn: stay.checkIn,
-								checkOut: stay.checkOut,
-								children: stay.children,
-								clientMutationId: cartItemClientMutationId(stay),
-								guests: stay.guests,
-								idempotencyKey: cartItemIdempotencyKey(stay),
-								infants: stay.infants,
-								listingId: stay.listingId,
-							})
-						).cart;
+						loaded = await addCartItemFromExisting(loaded.id, item);
 					} catch {
-						// A carried stay whose dates went unavailable is dropped; the
+						// A carried item whose selection went unavailable is dropped; the
 						// validation notice below covers the rest.
 					}
 				}
@@ -692,6 +798,12 @@ export function CheckoutController({ seed }: CheckoutControllerProps) {
 
 		window.addEventListener(CART_CHANGED_EVENT, onChanged);
 		window.addEventListener("storage", onChanged);
+		// With cacheComponents, Next.js hides visited routes inside React
+		// `<Activity>`; hidden effects are torn down, so cart changes fired while
+		// this route was hidden never reach the listeners above. Effects re-run on
+		// reveal, so this immediate call replays whatever was missed; the
+		// fingerprint guard inside `onChanged` makes it a no-op otherwise.
+		onChanged();
 		return () => {
 			window.removeEventListener(CART_CHANGED_EVENT, onChanged);
 			window.removeEventListener("storage", onChanged);
@@ -833,29 +945,22 @@ export function CheckoutController({ seed }: CheckoutControllerProps) {
 	}, [contact, saveToAccount, signedIn]);
 
 	/**
-	 * Recovers from a stay that failed at draft/hold time: rebuild a fresh
-	 * mutable cart from the frozen one (dropping stays that no longer quote),
+	 * Recovers from an item that failed at draft/hold time: rebuild a fresh
+	 * mutable cart from the frozen one (dropping items that no longer quote),
 	 * hand the failure message to the cart page, and send the guest there. The
-	 * cart page shows the message, names any stays the rebuild dropped, and
+	 * cart page shows the message, names any items the rebuild dropped, and
 	 * flags the remaining failures inline with edit controls.
 	 */
 	const recoverToCart = useCallback(
 		async (message: string) => {
-			const previousItems = items;
 			const rebuilt = await rebuildCurrentCart();
-			const removedTitles = (rebuilt?.skippedStays ?? [])
-				.map(
-					(stay) =>
-						previousItems.find(
-							(item) =>
-								stayKeyToken(stayInputFromItem(item)) === stayKeyToken(stay),
-						)?.title ?? null,
-				)
-				.filter((title): title is string => title !== null);
+			const removedTitles = (rebuilt?.skippedItems ?? []).map(
+				(item) => item.title,
+			);
 			writeCartNotice({ message, removedTitles });
 			router.push("/cart");
 		},
-		[items, rebuildCurrentCart, router],
+		[rebuildCurrentCart, router],
 	);
 
 	const handleContactSubmit = useCallback(async () => {
@@ -868,6 +973,13 @@ export function CheckoutController({ seed }: CheckoutControllerProps) {
 			);
 			return;
 		}
+		// Activity holds need the guest's Bokun questions/pickup places, collected
+		// inline above. They are saved on draft creation and updated in place when
+		// the guest reopens details after the payment step is ready.
+		const activityDetails = buildReadyActivityDetails();
+		if (!activityDetails) {
+			return;
+		}
 		setPreparing(true);
 		setContactError(null);
 		try {
@@ -878,19 +990,27 @@ export function CheckoutController({ seed }: CheckoutControllerProps) {
 			let intent: PaymentIntentResponse;
 			if (draftOrder) {
 				// The order already exists (e.g. the guest reopened the payment step
-				// to edit details): persist any contact changes before recreating the
-				// intent so the order never diverges from the submitted form.
+				// to edit details): persist contact and activity changes before
+				// recreating the intent so the order never diverges from the submitted
+				// form.
 				const { contact: saved } = await api.updateOrderContact(
 					draftOrder.publicReference,
 					buildContactInput(),
 				);
 				setContact(contactDraftFromOrderContact(saved));
+				if (activityDetails.length > 0) {
+					await api.updateOrderActivityDetails(
+						draftOrder.publicReference,
+						activityDetails,
+					);
+				}
 				intent = await api.createPaymentIntent({
 					cartId: cart.id,
 					orderId: draftOrder.orderId,
 				});
 			} else {
 				intent = await api.preparePayment({
+					activityDetails: activityDetails.length ? activityDetails : undefined,
 					cartId: cart.id,
 					contact: buildContactInput(),
 					idempotencyKey: `draft:${cart.id}`,
@@ -959,6 +1079,7 @@ export function CheckoutController({ seed }: CheckoutControllerProps) {
 	}, [
 		applyValidation,
 		buildContactInput,
+		buildReadyActivityDetails,
 		cart,
 		draftOrder,
 		hasFailures,
@@ -968,10 +1089,14 @@ export function CheckoutController({ seed }: CheckoutControllerProps) {
 		saveContactToAccount,
 	]);
 
-	// Edits the contact on the existing draft order in place. The contact does
-	// not affect the total, so the PaymentIntent is left untouched.
+	// Edits contact and activity answers on the existing draft order in place.
+	// These details do not affect the total, so the PaymentIntent is left intact.
 	const handleContactUpdate = useCallback(async () => {
 		if (!draftOrder) {
+			return;
+		}
+		const activityDetails = buildReadyActivityDetails();
+		if (!activityDetails) {
 			return;
 		}
 		setSavingContact(true);
@@ -982,6 +1107,12 @@ export function CheckoutController({ seed }: CheckoutControllerProps) {
 				buildContactInput(),
 			);
 			setContact(contactDraftFromOrderContact(saved));
+			if (activityDetails.length > 0) {
+				await api.updateOrderActivityDetails(
+					draftOrder.publicReference,
+					activityDetails,
+				);
+			}
 			setEditingContact(false);
 			void saveContactToAccount();
 		} catch (error) {
@@ -989,7 +1120,12 @@ export function CheckoutController({ seed }: CheckoutControllerProps) {
 		} finally {
 			setSavingContact(false);
 		}
-	}, [buildContactInput, draftOrder, saveContactToAccount]);
+	}, [
+		buildContactInput,
+		buildReadyActivityDetails,
+		draftOrder,
+		saveContactToAccount,
+	]);
 
 	const validateBeforePay = useCallback(async (): Promise<boolean> => {
 		if (!cart || !draftOrder || payment?.kind !== "payment_intent") {
@@ -1048,6 +1184,12 @@ export function CheckoutController({ seed }: CheckoutControllerProps) {
 			// cart and let the guest fix the affected stay on the cart page.
 			if (err.code === "reservation_unavailable") {
 				await recoverToCart(err.message);
+				return false;
+			}
+			if (err.code === "activity_details_invalid") {
+				setActivityError(err.message);
+				setEditingContact(true);
+				setReviewError(null);
 				return false;
 			}
 			// A genuinely non-payable order (expired/cancelled checkout window) can no
@@ -1184,6 +1326,12 @@ export function CheckoutController({ seed }: CheckoutControllerProps) {
 	const showPaymentLoading = preparing && !payment && !editingContact;
 	const showReview = hasPayment && !editingContact;
 	const reviewState = showReview ? "active" : "upcoming";
+	const editDetailsLabel = activityBooking.hasActivities
+		? "Edit details"
+		: "Edit contact details";
+	const saveDetailsLabel = activityBooking.hasActivities
+		? "Save details"
+		: "Save contact details";
 
 	// "Paying as …" row shared by the loading skeleton and the live Payment
 	// Element. Editing is only possible once a draft order exists, so the button
@@ -1199,7 +1347,7 @@ export function CheckoutController({ seed }: CheckoutControllerProps) {
 				onClick={canEdit ? () => setEditingContact(true) : undefined}
 				variant="link"
 			>
-				Edit contact details
+				{editDetailsLabel}
 			</Button>
 		</div>
 	);
@@ -1207,16 +1355,39 @@ export function CheckoutController({ seed }: CheckoutControllerProps) {
 	const paymentBody = showContactForm ? (
 		<div className="flex flex-col gap-4">
 			{!signedIn && !editingContact && <CheckoutAuthPrompt next={authNext} />}
+			{activityBooking.hasActivities && (
+				<ActivityQuestionsForm
+					booking={activityBooking}
+					showErrors={activityError !== null}
+				/>
+			)}
+			{activityError && (
+				<p className="text-destructive text-sm">{activityError}</p>
+			)}
+			{activityBooking.hasActivities && (
+				<div className="flex flex-col gap-3 pt-1">
+					<Separator />
+					<h2 className="font-medium text-base">Main contact details</h2>
+				</div>
+			)}
 			<ContactBillingForm
 				canSaveToAccount={signedIn}
 				error={contactError}
+				extraFields={
+					activityBooking.hasActivities ? (
+						<ActivityMainContactQuestions
+							booking={activityBooking}
+							showErrors={activityError !== null}
+						/>
+					) : undefined
+				}
 				onCancel={editingContact ? () => setEditingContact(false) : undefined}
 				onChange={setContact}
 				onSaveToAccountChange={setSaveToAccount}
 				onSubmit={editingContact ? handleContactUpdate : handleContactSubmit}
 				prefilledFromAccount={editingContact ? false : contactPrefilled}
 				saveToAccount={saveToAccount}
-				submitLabel={editingContact ? "Save contact details" : undefined}
+				submitLabel={editingContact ? saveDetailsLabel : undefined}
 				submitting={editingContact ? savingContact : preparing}
 				value={contact}
 			/>
@@ -1287,18 +1458,26 @@ export function CheckoutController({ seed }: CheckoutControllerProps) {
 
 	const staySummary = (
 		<div className="flex flex-col gap-1.5">
-			{items.map((item) => (
-				<span key={item.id}>
-					{multipleStays ? `${item.title}: ` : ""}
-					{formatStayRangeLong(item.checkIn, item.checkOut)} ·{" "}
-					{nightsLabel(item.nights)} ·{" "}
-					{guestSummaryLabel({
-						adults: item.adults,
-						children: item.children,
-						infants: item.infants,
-					})}
-				</span>
-			))}
+			{items.map((item) => {
+				const summary =
+					item.type === "activity"
+						? `${formatActivityDateLong(item.activityDate)} · ${item.totalParticipants} ${
+								item.totalParticipants === 1 ? "participant" : "participants"
+							}`
+						: `${formatStayRangeLong(item.checkIn, item.checkOut)} · ${nightsLabel(
+								item.nights,
+							)} · ${guestSummaryLabel({
+								adults: item.adults,
+								children: item.children,
+								infants: item.infants,
+							})}`;
+				return (
+					<span key={item.id}>
+						{multipleStays ? `${item.title}: ` : ""}
+						{summary}
+					</span>
+				);
+			})}
 		</div>
 	);
 
@@ -1385,9 +1564,13 @@ export function CheckoutController({ seed }: CheckoutControllerProps) {
 
 	// Single-stay checkout edits its one stay inline (no /cart redirect); the
 	// "Edit cart" link stays for multi-stay, where remove/add still live there.
-	const canInlineEdit = !prepared && phase === "ready" && items.length === 1;
+	const canInlineEdit =
+		!prepared &&
+		phase === "ready" &&
+		items.length === 1 &&
+		stayItems.length === 1;
 	const editStayItem = stayDialogItemId
-		? (items.find((item) => item.id === stayDialogItemId) ?? null)
+		? (stayItems.find((item) => item.id === stayDialogItemId) ?? null)
 		: null;
 	const editStayConstraints = editStayItem
 		? (listingConstraints.get(editStayItem.listingId) ??

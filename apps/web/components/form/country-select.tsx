@@ -1,9 +1,7 @@
 "use client";
 
-import {
-	NativeSelect,
-	NativeSelectOption,
-} from "@workspace/ui/components/native-select";
+import { ResponsiveSelect } from "@workspace/ui/components/responsive-select";
+import { useMemo } from "react";
 import { COUNTRY_OPTIONS } from "@/lib/site/countries";
 
 interface CountrySelectProps {
@@ -19,10 +17,9 @@ interface CountrySelectProps {
 }
 
 /**
- * Country picker built on the shadcn native select so the browser's accessible,
- * mobile-friendly picker is used while keeping the app's styling. Options show a
- * flag emoji plus the localized country name; the value is the ISO-2 code.
- * Shared by billing country, residence and nationality.
+ * Country picker shared by billing country, residence and nationality. Options
+ * show a flag emoji plus the localized country name; the value is the ISO-2
+ * code.
  */
 export function CountrySelect({
 	autoComplete,
@@ -34,22 +31,27 @@ export function CountrySelect({
 	placeholder = "Select a country",
 	value,
 }: CountrySelectProps) {
+	const options = useMemo(
+		() => [
+			{ label: placeholder, value: "" },
+			...COUNTRY_OPTIONS.map((country) => ({
+				label: country.flag ? `${country.flag} ${country.name}` : country.name,
+				value: country.code,
+			})),
+		],
+		[placeholder],
+	);
+
 	return (
-		<NativeSelect
+		<ResponsiveSelect
 			aria-invalid={invalid || undefined}
 			autoComplete={autoComplete}
 			className={className ?? "w-full"}
 			disabled={disabled}
 			id={id}
-			onChange={(event) => onChange(event.target.value)}
+			onValueChange={onChange}
+			options={options}
 			value={value}
-		>
-			<NativeSelectOption value="">{placeholder}</NativeSelectOption>
-			{COUNTRY_OPTIONS.map((country) => (
-				<NativeSelectOption key={country.code} value={country.code}>
-					{country.flag ? `${country.flag} ${country.name}` : country.name}
-				</NativeSelectOption>
-			))}
-		</NativeSelect>
+		/>
 	);
 }

@@ -1,5 +1,6 @@
 import {
 	buildOrderConfirmationEmail as buildBrandedOrderConfirmationEmail,
+	type EmailAttachment,
 	type EmailMessage,
 	getEmailSender,
 	type OrderConfirmationEmailInput,
@@ -10,6 +11,7 @@ import {
 } from "@workspace/core/commerce";
 import type { OrderBillingAddressSnapshot } from "@workspace/db";
 import { commerceService } from "@/lib/api/commerce";
+import { fetchActivityDocumentsByCode } from "@/lib/order/activity";
 import { countryName } from "@/lib/site/countries";
 import { orderHubUrl } from "./order-url";
 
@@ -109,11 +111,32 @@ function formatNights(nights: number): string {
 	return `${nights} ${nights === 1 ? "night" : "nights"}`;
 }
 
+function formatParticipants(participants: number): string {
+	if (participants <= 0) {
+		return "To be confirmed";
+	}
+	return `${participants} ${participants === 1 ? "participant" : "participants"}`;
+}
+
+function formatActivityDate(value: string): string {
+	const date = new Date(`${value}T00:00:00.000Z`);
+	if (Number.isNaN(date.getTime())) {
+		return value;
+	}
+	return new Intl.DateTimeFormat("en-GB", {
+		day: "numeric",
+		month: "short",
+		timeZone: "UTC",
+		weekday: "short",
+		year: "numeric",
+	}).format(date);
+}
+
 /**
  * Maps the durable order facts to the transport-layer email input, formatting
  * money, dates and the payment method for display. Shared by the confirmation
  * and pending-notice emails so both render identical booking details. Every
- * booking on the order becomes one stay block in the email.
+ * accommodation becomes a stay block and every activity an activity block.
  */
 export function toOrderEmailInput(
 	facts: OrderConfirmationFacts,
@@ -122,6 +145,12 @@ export function toOrderEmailInput(
 	const paymentMethod = formatPaymentMethod(facts.paymentMethod);
 
 	return {
+		activities: facts.activities.map((activity) => ({
+			date: formatActivityDate(activity.activityDate),
+			image: activity.imageUrl ?? FALLBACK_IMAGE_URL,
+			participants: formatParticipants(activity.totalParticipants),
+			title: activity.title,
+		})),
 		billingAddress: formatBillingAddress(facts.billingAddress),
 		cardLastFour: paymentMethod.cardLastFour,
 		contactEmail: facts.email,
@@ -160,6 +189,38 @@ export function buildOrderConfirmationEmail(
  * token is activated before sending so an accepted email never carries a dead
  * "Manage reservation" CTA; only its hash is persisted.
  */
+/**
+ * Ticket + invoice PDFs for every confirmed activity on the order, attached to
+ * the confirmation email. Best-effort: a provider hiccup drops the affected
+ * attachment (the guest can always download it from the order hub) rather than
+ * blocking the email.
+ */
+async function activityDocumentAttachments(
+	facts: OrderConfirmationFacts,
+): Promise<EmailAttachment[]> {
+	const attachments: EmailAttachment[] = [];
+	for (const activity of facts.activities) {
+		const code = activity.productConfirmationCode;
+		if (!code) {
+			continue;
+		}
+		const documents = await fetchActivityDocumentsByCode(code);
+		if (documents.ticket) {
+			attachments.push({
+				content: documents.ticket,
+				filename: `ticket-${code}.pdf`,
+			});
+		}
+		if (documents.invoice) {
+			attachments.push({
+				content: documents.invoice,
+				filename: `invoice-${code}.pdf`,
+			});
+		}
+	}
+	return attachments;
+}
+
 export async function sendOrderConfirmationEmail(
 	facts: OrderConfirmationFacts,
 ): Promise<void> {
@@ -170,8 +231,10 @@ export async function sendOrderConfirmationEmail(
 		token,
 	);
 	const manageUrl = orderHubUrl(facts.publicReference, token);
+	const attachments = await activityDocumentAttachments(facts);
 	await getEmailSender().send({
 		to: facts.email,
 		...buildOrderConfirmationEmail(facts, manageUrl),
+		...(attachments.length > 0 ? { attachments } : {}),
 	});
 }

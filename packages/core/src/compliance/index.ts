@@ -18,6 +18,9 @@ export {
 	nextGuestSubmissionDelayMs,
 } from "./guest-submission";
 export {
+	type ActivityQuestionsReminderFacts,
+	type ActivityQuestionsReminderOutcome,
+	type ActivityQuestionsReminderSummary,
 	type GuestComplianceRunOptions,
 	GuestComplianceService,
 	type GuestComplianceServiceOptions,

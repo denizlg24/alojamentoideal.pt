@@ -31,13 +31,20 @@ interface SettingsPageProps {
 	searchParams: Promise<{ error?: string; saved?: string }>;
 }
 
-const SETTING_GROUPS = ["features", "hostify", "bokun", "hostkit"] as const;
+const SETTING_GROUPS = [
+	"features",
+	"hostify",
+	"bokun",
+	"payments",
+	"hostkit",
+] as const;
 
 const GROUP_LABELS = {
 	bokun: "Bokun activities",
 	features: "Enabled features",
 	hostify: "Hostify sync",
 	hostkit: "Hostkit",
+	payments: "Payments",
 } as const;
 
 function SettingField({
