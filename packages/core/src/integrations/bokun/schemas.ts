@@ -237,6 +237,7 @@ export const bokunActivityDetailSchema = z.looseObject({
 	attention: nullableString,
 	agendaItems: z.array(bokunAgendaItemSchema).nullish(),
 	googlePlace: bokunGooglePlaceSchema.nullish(),
+	cancellationPolicy: z.unknown().nullish(),
 });
 
 export const bokunSearchResultItemSchema = z.looseObject({

@@ -9,7 +9,8 @@
  * `activity_experience` rows unrefreshed until their source hash happens to
  * change.
  */
-export const DEFAULT_ACTIVITY_SYNC_VERSION = 1;
+// v2: detail projection gained cancellationPolicy.
+export const DEFAULT_ACTIVITY_SYNC_VERSION = 2;
 export const MAX_ACTIVITY_SYNC_VERSION = 2_147_483_647;
 
 interface ActivitySyncVersionEnvironment {

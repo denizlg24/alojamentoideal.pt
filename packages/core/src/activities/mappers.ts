@@ -1,3 +1,4 @@
+import { parseBokunCancellationPolicy } from "../commerce/cancellation-policy";
 import type {
 	BokunActivityAvailability,
 	BokunActivityDetail,
@@ -276,6 +277,7 @@ export function toActivityDetail(
 		attention: raw.attention ?? null,
 		agenda: (raw.agendaItems ?? []).map(mapAgendaItem),
 		attributes: (raw.activityAttributes ?? []).map(humanizeToken),
+		cancellationPolicy: parseBokunCancellationPolicy(raw.cancellationPolicy),
 	};
 }
 

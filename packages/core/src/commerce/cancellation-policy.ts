@@ -142,6 +142,64 @@ export function activityRefundPercent(
 	return null;
 }
 
+function formatCutoffHours(hours: number): string {
+	if (hours % 24 === 0 && hours >= 24) {
+		const days = hours / 24;
+		return `${days} day${days === 1 ? "" : "s"}`;
+	}
+	return `${hours} hour${hours === 1 ? "" : "s"}`;
+}
+
+/**
+ * Guest-facing lines describing a Bokun cancellation policy. Returns an empty
+ * array when the policy cannot be interpreted so callers show a generic
+ * fallback instead of wrong terms. Copy style: plain sentences, no em dashes.
+ */
+export function describeBokunCancellationPolicy(
+	policy: BokunCancellationPolicySnapshot | null,
+): string[] {
+	if (!policy) {
+		return [];
+	}
+	if (policy.policyType === "NON_REFUNDABLE") {
+		return [
+			"This activity is non-refundable. Cancelled bookings are not eligible for a refund.",
+		];
+	}
+	if (policy.policyType === "FULL_REFUND") {
+		return [
+			"Free cancellation. Cancel any time before the activity starts for a full refund.",
+		];
+	}
+	if (policy.simpleCutoffHours !== null) {
+		return [
+			`Free cancellation until ${formatCutoffHours(policy.simpleCutoffHours)} before the activity starts.`,
+			"After that, the booking is non-refundable.",
+		];
+	}
+	if (policy.penaltyRules.length > 0) {
+		const rules = [...policy.penaltyRules].sort(
+			(a, b) => b.cutoffHours - a.cutoffHours,
+		);
+		const longest = rules[0];
+		if (!longest) {
+			return [];
+		}
+		const lines = [
+			`Free cancellation until ${formatCutoffHours(longest.cutoffHours)} before the activity starts.`,
+		];
+		for (const rule of rules) {
+			lines.push(
+				rule.percentage >= 100
+					? `Within ${formatCutoffHours(rule.cutoffHours)} of the start, the booking is non-refundable.`
+					: `Within ${formatCutoffHours(rule.cutoffHours)} of the start, a ${rule.percentage}% cancellation fee applies.`,
+			);
+		}
+		return lines;
+	}
+	return [];
+}
+
 /**
  * Minor-unit refund suggestion for a policy percentage: exact value at 100%
  * (no rounding drift), otherwise rounded to the nearest cent.
