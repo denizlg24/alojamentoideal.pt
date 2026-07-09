@@ -226,7 +226,9 @@ export function createDraftOrder(
 export interface ActivityBookingSchemaInput {
 	activityDate: string;
 	activityId: string;
+	dropoffPlaceId?: string | null;
 	participants: { count: number; pricingCategoryId: number }[];
+	pickupPlaceId?: string | null;
 	rateId: string | null;
 	startTimeId: string | null;
 }

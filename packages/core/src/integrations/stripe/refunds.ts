@@ -11,6 +11,13 @@ export interface RefundRequest {
 	idempotencyKey: string;
 	paymentIntentId: string;
 	reason?: "duplicate" | "fraudulent" | "requested_by_customer";
+	/**
+	 * Pull the refunded share back from the connected account. Required for
+	 * charges with `transfer_data` (activity orders) or the transferred funds
+	 * stay on Detours; must remain unset for plain platform charges, where
+	 * Stripe rejects the flag. Partial refunds reverse proportionally.
+	 */
+	reverseTransfer?: boolean;
 }
 
 /** Normalized refund facts the compensation path records on the order. */
@@ -46,6 +53,7 @@ export async function createRefund(
 				? { amount: request.amountMinor }
 				: {}),
 			...(request.reason ? { reason: request.reason } : {}),
+			...(request.reverseTransfer ? { reverse_transfer: true } : {}),
 		},
 		{
 			idempotencyKey: request.idempotencyKey,

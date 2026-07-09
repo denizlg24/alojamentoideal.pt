@@ -13,7 +13,9 @@ import { logger } from "@workspace/core/observability";
 export interface ActivityBookingSchemaInput {
 	activityDate: string;
 	activityId: string;
+	dropoffPlaceId?: string | null;
 	participants: { count: number; pricingCategoryId: number }[];
+	pickupPlaceId?: string | null;
 	rateId: string | null;
 	startTimeId: string | null;
 }
@@ -34,6 +36,31 @@ function firstPlaceId(places: unknown, key: string): number | undefined {
 		: typeof id === "string" && /^\d+$/.test(id)
 			? Number(id)
 			: undefined;
+}
+
+function numericPlaceId(value: string | null | undefined): number | undefined {
+	if (value === null || value === undefined) {
+		return undefined;
+	}
+	const trimmed = value.trim();
+	return /^\d+$/.test(trimmed) ? Number(trimmed) : undefined;
+}
+
+function optionPlaceId(
+	selectedPlaceId: string | null | undefined,
+	places: unknown,
+	key: string,
+	selectionType: string | null,
+): number | undefined {
+	const selected = numericPlaceId(selectedPlaceId);
+	if (selected !== undefined) {
+		return selected;
+	}
+	const selection = selectionType?.trim().toUpperCase();
+	if (selection === "OPTIONAL" || selection === "NOT_INCLUDED") {
+		return undefined;
+	}
+	return firstPlaceId(places, key);
 }
 
 function rateSelectionTypes(
@@ -61,11 +88,31 @@ function rateSelectionTypes(
 	};
 }
 
+function buildShoppingCartActivityRequest(
+	input: ActivityBookingSchemaInput,
+	pricingCategoryBookings: { pricingCategoryId: number }[],
+	pickupPlaceId: number | undefined,
+	dropoffPlaceId: number | undefined,
+): Record<string, unknown> {
+	return {
+		activityId: Number(input.activityId),
+		date: input.activityDate,
+		dropoff: dropoffPlaceId !== undefined,
+		pickup: pickupPlaceId !== undefined,
+		pricingCategoryBookings,
+		...(dropoffPlaceId !== undefined ? { dropoffPlaceId } : {}),
+		...(pickupPlaceId !== undefined ? { pickupPlaceId } : {}),
+		...(input.rateId ? { rateId: Number(input.rateId) } : {}),
+		...(input.startTimeId ? { startTimeId: Number(input.startTimeId) } : {}),
+	};
+}
+
 /**
  * Fetches the live Bokun booking-question schema for one activity selection and
- * normalizes it for the checkout UI. Mirrors {@link quoteBokunActivity}: three
- * provider reads (pickup places + activity detail in parallel, then the checkout
- * options seeded with a valid place) folded into a pure normalizer.
+ * normalizes it for the checkout UI. Bokun only expands system pickup/dropoff
+ * questions, such as room and flight details, from a shopping-cart checkout
+ * options response, so this mirrors the legacy flow instead of using the direct
+ * booking-request options endpoint.
  */
 export async function resolveActivityBookingSchema(
 	input: ActivityBookingSchemaInput,
@@ -74,12 +121,12 @@ export async function resolveActivityBookingSchema(
 	const resolvedConfig = config ?? (await getActivityCacheConfigFromSettings());
 	const client = createBokunClientFromEnv();
 
-	const passengers = input.participants.flatMap((participant) =>
+	const pricingCategoryBookings = input.participants.flatMap((participant) =>
 		Array.from({ length: Math.max(0, participant.count) }, () => ({
 			pricingCategoryId: participant.pricingCategoryId,
 		})),
 	);
-	if (passengers.length === 0) {
+	if (pricingCategoryBookings.length === 0) {
 		throw new CommerceError(
 			"invalid_request",
 			"Select at least one participant.",
@@ -98,28 +145,36 @@ export async function resolveActivityBookingSchema(
 			}),
 		]);
 
-		const pickupPlaceId = firstPlaceId(pickupPlaces, "pickupPlaces");
-		const dropoffPlaceId = firstPlaceId(pickupPlaces, "dropoffPlaces");
-
-		const options = await client.v1.checkout.optionsForBookingRequest({
-			activityBookings: [
-				{
-					activityId: Number(input.activityId),
-					date: input.activityDate,
-					passengers,
-					...(dropoffPlaceId !== undefined ? { dropoffPlaceId } : {}),
-					...(pickupPlaceId !== undefined ? { pickupPlaceId } : {}),
-					...(input.rateId ? { rateId: Number(input.rateId) } : {}),
-					...(input.startTimeId
-						? { startTimeId: Number(input.startTimeId) }
-						: {}),
-				},
-			],
-		});
-
 		const selection = rateSelectionTypes(detail, input.rateId);
+		const pickupPlaceId = optionPlaceId(
+			input.pickupPlaceId,
+			pickupPlaces,
+			"pickupPlaces",
+			selection.pickup,
+		);
+		const dropoffPlaceId = optionPlaceId(
+			input.dropoffPlaceId,
+			pickupPlaces,
+			"dropoffPlaces",
+			selection.dropoff,
+		);
+
+		const sessionId = `activity-schema-${crypto.randomUUID()}`;
+		await client.v1.shoppingCart.addActivity(
+			sessionId,
+			buildShoppingCartActivityRequest(
+				input,
+				pricingCategoryBookings,
+				pickupPlaceId,
+				dropoffPlaceId,
+			),
+			{ currency: resolvedConfig.currency, lang: resolvedConfig.lang },
+		);
+		const options = await client.v1.checkout.optionsForShoppingCart(sessionId);
+
 		return normalizeActivityBookingSchema({
 			activityId: input.activityId,
+			customPickupAllowed: record(detail)?.customPickupAllowed === true,
 			dropoffPlaces: pickupPlaces,
 			dropoffSelectionType: selection.dropoff,
 			options,

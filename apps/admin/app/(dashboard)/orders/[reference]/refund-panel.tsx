@@ -12,10 +12,7 @@ import {
 } from "@workspace/ui/components/dialog";
 import { Input } from "@workspace/ui/components/input";
 import { Label } from "@workspace/ui/components/label";
-import {
-	NativeSelect,
-	NativeSelectOption,
-} from "@workspace/ui/components/native-select";
+import { ResponsiveSelect } from "@workspace/ui/components/responsive-select";
 import { useRouter } from "next/navigation";
 import { type FormEvent, useMemo, useState, useTransition } from "react";
 import { toast } from "sonner";
@@ -24,6 +21,10 @@ import { formatMoneyMinor } from "@/lib/format";
 interface RefundAttributionItem {
 	amountMinor: number | null;
 	id: string;
+	/** Cancellation-policy hint for this item; null when not evaluable. */
+	policyLabel: string | null;
+	/** Policy-derived refund suggestion in minor units; advisory only. */
+	policySuggestedAmountMinor: number | null;
 	title: string;
 }
 
@@ -96,6 +97,21 @@ export function RefundPanel({
 
 	const amountMinor = useMemo(() => eurosToMinor(amount), [amount]);
 	const overRefundable = amountMinor !== null && amountMinor > refundableMinor;
+	const attributedItem = useMemo(
+		() => items.find((item) => item.id === orderItemId) ?? null,
+		[items, orderItemId],
+	);
+	const attributionOptions = [
+		{ label: "Whole order", value: "" },
+		...items.map((item) => ({
+			label: `${item.title}${
+				item.amountMinor !== null
+					? ` · ${formatMoneyMinor(item.amountMinor, currency)}`
+					: ""
+			}`,
+			value: item.id,
+		})),
+	];
 
 	function reset() {
 		setAmount("");
@@ -140,9 +156,17 @@ export function RefundPanel({
 				setError(body?.error ?? "Could not issue the refund.");
 				return;
 			}
+			const body = (await response.json().catch(() => null)) as {
+				data?: { transferReversalError?: string };
+			} | null;
 			toast.success(
 				`Refunded ${formatMoneyMinor(amountMinor, currency)} to the guest.`,
 			);
+			if (body?.data?.transferReversalError) {
+				toast.warning(
+					`Detours transfer reversal failed: ${body.data.transferReversalError}. Reverse it manually in Stripe.`,
+				);
+			}
 			setOpen(false);
 			reset();
 			router.refresh();
@@ -210,36 +234,58 @@ export function RefundPanel({
 
 					<div className="space-y-1.5">
 						<Label htmlFor="refund-reason">Reason</Label>
-						<NativeSelect
+						<ResponsiveSelect
+							className="w-full"
 							id="refund-reason"
-							onChange={(event) => setReason(event.target.value)}
+							onValueChange={setReason}
+							options={REASONS}
 							value={reason}
-						>
-							{REASONS.map((option) => (
-								<NativeSelectOption key={option.value} value={option.value}>
-									{option.label}
-								</NativeSelectOption>
-							))}
-						</NativeSelect>
+						/>
 					</div>
 
 					<div className="space-y-1.5">
 						<Label htmlFor="refund-attribution">Attribute to</Label>
-						<NativeSelect
+						<ResponsiveSelect
+							className="w-full"
 							id="refund-attribution"
-							onChange={(event) => setOrderItemId(event.target.value)}
+							onValueChange={setOrderItemId}
+							options={attributionOptions}
 							value={orderItemId}
-						>
-							<NativeSelectOption value="">Whole order</NativeSelectOption>
-							{items.map((item) => (
-								<NativeSelectOption key={item.id} value={item.id}>
-									{item.title}
-									{item.amountMinor !== null
-										? ` · ${formatMoneyMinor(item.amountMinor, currency)}`
-										: ""}
-								</NativeSelectOption>
-							))}
-						</NativeSelect>
+						/>
+						{attributedItem?.policyLabel ? (
+							<div className="flex flex-wrap items-center gap-2 pt-0.5">
+								<p className="text-muted-foreground text-xs">
+									{attributedItem.policyLabel}
+								</p>
+								{attributedItem.policySuggestedAmountMinor !== null &&
+								attributedItem.policySuggestedAmountMinor > 0 ? (
+									<Button
+										onClick={() =>
+											setAmount(
+												minorToEuros(
+													Math.min(
+														attributedItem.policySuggestedAmountMinor ?? 0,
+														refundableMinor,
+													),
+												),
+											)
+										}
+										size="sm"
+										type="button"
+										variant="secondary"
+									>
+										Use{" "}
+										{formatMoneyMinor(
+											Math.min(
+												attributedItem.policySuggestedAmountMinor,
+												refundableMinor,
+											),
+											currency,
+										)}
+									</Button>
+								) : null}
+							</div>
+						) : null}
 					</div>
 
 					<div className="space-y-1.5">

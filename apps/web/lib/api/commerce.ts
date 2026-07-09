@@ -20,6 +20,7 @@ import {
 	HostifyReservationGateway,
 	mapStripePaymentStatus,
 	type OrderAccessContext,
+	OrderRefundService,
 	type ProviderReservationGateway,
 	StubReservationGateway,
 } from "@workspace/core/commerce";
@@ -33,6 +34,7 @@ import {
 	createStripeClientFromEnv,
 	resolvePromotionCode,
 	retrievePaymentIntentSnapshot,
+	reverseChargeTransfer,
 	StripeConfigurationError,
 } from "@workspace/core/integrations/stripe";
 import { getRedis } from "@workspace/core/redis";
@@ -378,6 +380,24 @@ export async function commerceService(): Promise<CommerceService> {
 			}
 			return resolvePromotionCode(stripe, code);
 		},
+	});
+}
+
+/**
+ * Request-scoped service for the refund ledger reconciler cron. Mirrors the
+ * admin app's factory: when Stripe is not configured the reconciler leaves
+ * pending rows untouched instead of failing them.
+ */
+export function orderRefundService(): OrderRefundService {
+	const stripe = optionalStripeClient();
+	return new OrderRefundService({
+		db: getDb(),
+		refundPayment: stripe
+			? (request) => createRefund(stripe, request)
+			: undefined,
+		reverseActivityTransfer: stripe
+			? (request) => reverseChargeTransfer(stripe, request)
+			: undefined,
 	});
 }
 

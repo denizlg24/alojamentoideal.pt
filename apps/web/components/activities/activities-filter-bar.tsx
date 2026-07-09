@@ -16,13 +16,7 @@ import {
 	DialogTitle,
 	DialogTrigger,
 } from "@workspace/ui/components/dialog";
-import {
-	Select,
-	SelectContent,
-	SelectItem,
-	SelectTrigger,
-	SelectValue,
-} from "@workspace/ui/components/select";
+import { ResponsiveSelect } from "@workspace/ui/components/responsive-select";
 import { Separator } from "@workspace/ui/components/separator";
 import { Slider } from "@workspace/ui/components/slider";
 import { cn } from "@workspace/ui/lib/utils";
@@ -226,18 +220,12 @@ export function ActivitiesFilterBar({ facets }: { facets: ActivitiesFacets }) {
 				<span className="hidden text-muted-foreground text-sm sm:inline">
 					Sort
 				</span>
-				<Select value={filters.sort} onValueChange={changeSort}>
-					<SelectTrigger className="w-[180px]">
-						<SelectValue />
-					</SelectTrigger>
-					<SelectContent>
-						{ACTIVITIES_SORTS.map((option) => (
-							<SelectItem key={option.value} value={option.value}>
-								{option.label}
-							</SelectItem>
-						))}
-					</SelectContent>
-				</Select>
+				<ResponsiveSelect
+					className="w-[180px]"
+					onValueChange={(sort) => changeSort(sort as ActivitiesSort)}
+					options={ACTIVITIES_SORTS}
+					value={filters.sort}
+				/>
 			</div>
 
 			<Separator className="w-full" />

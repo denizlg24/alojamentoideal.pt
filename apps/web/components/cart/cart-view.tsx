@@ -310,6 +310,13 @@ export function CartView() {
 	// checkout flow). Skips while an edit is in flight, since that edit's own
 	// reconcile converges the view; keying the route on cart id (not content)
 	// means this never remounts mid-edit.
+	//
+	// With cacheComponents, Next.js hides visited routes inside React
+	// `<Activity>` instead of unmounting them, and hidden components have their
+	// effects torn down — cart changes fired while this view was hidden are
+	// missed. Effects re-run on reveal, so the immediate `onChanged()` call
+	// below replays whatever was missed; the fingerprint check inside
+	// `refreshFromStoredCart` makes it a no-op when nothing changed.
 	useEffect(() => {
 		const onChanged = () => {
 			if (repricingRef.current.size > 0) {
@@ -321,11 +328,14 @@ export function CartView() {
 
 		window.addEventListener(CART_CHANGED_EVENT, onChanged);
 		window.addEventListener("storage", onChanged);
+		if (phase === "ready") {
+			onChanged();
+		}
 		return () => {
 			window.removeEventListener(CART_CHANGED_EVENT, onChanged);
 			window.removeEventListener("storage", onChanged);
 		};
-	}, [refreshFromStoredCart]);
+	}, [refreshFromStoredCart, phase]);
 
 	useEffect(() => {
 		if (repricingItemIds.size > 0 || !needsSkippedChangeReplayRef.current) {

@@ -11,6 +11,7 @@ import {
 	type ActivityBookingDescription,
 	type ActivityBookingDraft,
 	buildActivityDetailInput,
+	CUSTOM_PICKUP_PLACE_ID,
 	describeActivityBooking,
 	emptyActivityDraft,
 	isActivityDetailComplete,
@@ -32,6 +33,11 @@ export interface ActivityBookingEntry {
 	draft: ActivityBookingDraft;
 }
 
+interface ActivityPlaceSelection {
+	dropoffPlaceId: string | null;
+	pickupPlaceId: string | null;
+}
+
 export interface UseActivityBookingDetails {
 	entries: ActivityBookingEntry[];
 	hasActivities: boolean;
@@ -46,7 +52,6 @@ export interface UseActivityBookingDetails {
 	setAnswer: (cartItemId: string, key: string, value: string) => void;
 	setPickupPlace: (cartItemId: string, placeId: string | null) => void;
 	setDropoffPlace: (cartItemId: string, placeId: string | null) => void;
-	setRoomNumber: (cartItemId: string, value: string) => void;
 	retry: (cartItemId: string) => void;
 	/** Draft-order activity details for every ready item (call once complete). */
 	buildActivityDetails: () => DraftOrderActivityDetailInput[];
@@ -92,6 +97,9 @@ export function useActivityBookingDetails(
 	const [drafts, setDrafts] = useState<Map<string, ActivityBookingDraft>>(
 		new Map(),
 	);
+	const [placeSelections, setPlaceSelections] = useState<
+		Map<string, ActivityPlaceSelection>
+	>(new Map());
 	const [retryTokens, setRetryTokens] = useState<Map<string, number>>(
 		new Map(),
 	);
@@ -105,9 +113,16 @@ export function useActivityBookingDetails(
 
 		for (const item of activityItems) {
 			seen.add(item.id);
+			const placeSelection = placeSelections.get(item.id);
+			// A custom pickup fetches the same placeless questions as no selection;
+			// the sentinel is a UI/draft concept and never reaches the provider.
+			const rawPickupPlaceId = placeSelection?.pickupPlaceId ?? null;
+			const pickupPlaceId =
+				rawPickupPlaceId === CUSTOM_PICKUP_PLACE_ID ? null : rawPickupPlaceId;
+			const dropoffPlaceId = placeSelection?.dropoffPlaceId ?? null;
 			const signature = `${selectionSignature(item)}|retry:${
 				retryTokens.get(item.id) ?? 0
-			}`;
+			}|pickup:${pickupPlaceId ?? ""}|dropoff:${dropoffPlaceId ?? ""}`;
 			if (fetchedRef.current.get(item.id) === signature) {
 				continue;
 			}
@@ -123,10 +138,12 @@ export function useActivityBookingDetails(
 				.fetchActivityBookingSchema({
 					activityDate: item.activityDate,
 					activityId: item.activityId,
+					dropoffPlaceId,
 					participants: item.participants.map((participant) => ({
 						count: participant.count,
 						pricingCategoryId: participant.pricingCategoryId,
 					})),
+					pickupPlaceId,
 					rateId: item.rateId,
 					startTimeId: item.startTimeId,
 				})
@@ -163,6 +180,7 @@ export function useActivityBookingDetails(
 		};
 		setSchemas(prune);
 		setDrafts(prune);
+		setPlaceSelections(prune);
 		for (const id of Array.from(fetchedRef.current.keys())) {
 			if (!seen.has(id)) {
 				fetchedRef.current.delete(id);
@@ -172,7 +190,7 @@ export function useActivityBookingDetails(
 		return () => {
 			cancelled = true;
 		};
-	}, [activityItems, retryTokens]);
+	}, [activityItems, placeSelections, retryTokens]);
 
 	const setAnswer = useCallback(
 		(cartItemId: string, key: string, value: string) => {
@@ -189,6 +207,20 @@ export function useActivityBookingDetails(
 
 	const setPickupPlace = useCallback(
 		(cartItemId: string, placeId: string | null) => {
+			fetchedRef.current.delete(cartItemId);
+			setSchemas((prev) =>
+				new Map(prev).set(cartItemId, { status: "loading" }),
+			);
+			setPlaceSelections((prev) => {
+				const current = prev.get(cartItemId) ?? {
+					dropoffPlaceId: null,
+					pickupPlaceId: null,
+				};
+				return new Map(prev).set(cartItemId, {
+					...current,
+					pickupPlaceId: placeId,
+				});
+			});
 			setDrafts((prev) => {
 				const current = prev.get(cartItemId) ?? emptyActivityDraft();
 				return new Map(prev).set(cartItemId, {
@@ -202,6 +234,20 @@ export function useActivityBookingDetails(
 
 	const setDropoffPlace = useCallback(
 		(cartItemId: string, placeId: string | null) => {
+			fetchedRef.current.delete(cartItemId);
+			setSchemas((prev) =>
+				new Map(prev).set(cartItemId, { status: "loading" }),
+			);
+			setPlaceSelections((prev) => {
+				const current = prev.get(cartItemId) ?? {
+					dropoffPlaceId: null,
+					pickupPlaceId: null,
+				};
+				return new Map(prev).set(cartItemId, {
+					...current,
+					dropoffPlaceId: placeId,
+				});
+			});
 			setDrafts((prev) => {
 				const current = prev.get(cartItemId) ?? emptyActivityDraft();
 				return new Map(prev).set(cartItemId, {
@@ -212,13 +258,6 @@ export function useActivityBookingDetails(
 		},
 		[],
 	);
-
-	const setRoomNumber = useCallback((cartItemId: string, value: string) => {
-		setDrafts((prev) => {
-			const current = prev.get(cartItemId) ?? emptyActivityDraft();
-			return new Map(prev).set(cartItemId, { ...current, roomNumber: value });
-		});
-	}, []);
 
 	const retry = useCallback((cartItemId: string) => {
 		// Drop the fetched signature so the effect re-requests on its next run.
@@ -286,6 +325,5 @@ export function useActivityBookingDetails(
 		setAnswer,
 		setDropoffPlace,
 		setPickupPlace,
-		setRoomNumber,
 	};
 }

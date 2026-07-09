@@ -13,6 +13,7 @@ import { SiteFooter } from "@/components/home/site-footer";
 import { SiteHeader } from "@/components/home/site-header";
 import { BookingWidget } from "@/components/listings/detail/booking-widget";
 import { ListingAmenities } from "@/components/listings/detail/listing-amenities";
+import { ListingCancellationPolicy } from "@/components/listings/detail/listing-cancellation-policy";
 import { ListingGallery } from "@/components/listings/detail/listing-gallery";
 import { ListingLocation } from "@/components/listings/detail/listing-location";
 import { ListingReviews } from "@/components/listings/detail/listing-reviews";
@@ -271,6 +272,10 @@ async function ListingContent({
 					<Separator />
 
 					<ListingLocation location={listing.location} />
+
+					<Separator />
+
+					<ListingCancellationPolicy />
 				</div>
 
 				<BookingWidget

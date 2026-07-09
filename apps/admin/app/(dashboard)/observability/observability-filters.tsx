@@ -1,10 +1,7 @@
 "use client";
 
 import { Input } from "@workspace/ui/components/input";
-import {
-	NativeSelect,
-	NativeSelectOption,
-} from "@workspace/ui/components/native-select";
+import { ResponsiveSelect } from "@workspace/ui/components/responsive-select";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { type FormEvent, useTransition } from "react";
 
@@ -74,42 +71,27 @@ export function ObservabilityFilters() {
 				placeholder="Search name, route or provider"
 				type="search"
 			/>
-			<NativeSelect
+			<ResponsiveSelect
 				aria-label="Filter by severity"
 				className="w-full sm:w-auto"
-				defaultValue={searchParams.get("severity") ?? ""}
-				onChange={(event) => apply({ severity: event.target.value })}
-			>
-				{SEVERITY_OPTIONS.map((option) => (
-					<NativeSelectOption key={option.value} value={option.value}>
-						{option.label}
-					</NativeSelectOption>
-				))}
-			</NativeSelect>
-			<NativeSelect
+				onValueChange={(severity) => apply({ severity })}
+				options={SEVERITY_OPTIONS}
+				value={searchParams.get("severity") ?? ""}
+			/>
+			<ResponsiveSelect
 				aria-label="Filter by type"
 				className="w-full sm:w-auto"
-				defaultValue={searchParams.get("type") ?? ""}
-				onChange={(event) => apply({ type: event.target.value })}
-			>
-				{TYPE_OPTIONS.map((option) => (
-					<NativeSelectOption key={option.value} value={option.value}>
-						{option.label}
-					</NativeSelectOption>
-				))}
-			</NativeSelect>
-			<NativeSelect
+				onValueChange={(type) => apply({ type })}
+				options={TYPE_OPTIONS}
+				value={searchParams.get("type") ?? ""}
+			/>
+			<ResponsiveSelect
 				aria-label="Filter by time window"
 				className="w-full sm:w-auto"
-				defaultValue={searchParams.get("window") ?? "7d"}
-				onChange={(event) => apply({ window: event.target.value })}
-			>
-				{WINDOW_OPTIONS.map((option) => (
-					<NativeSelectOption key={option.value} value={option.value}>
-						{option.label}
-					</NativeSelectOption>
-				))}
-			</NativeSelect>
+				onValueChange={(window) => apply({ window })}
+				options={WINDOW_OPTIONS}
+				value={searchParams.get("window") ?? "7d"}
+			/>
 		</form>
 	);
 }

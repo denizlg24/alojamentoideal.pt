@@ -6,6 +6,8 @@
  * DTOs, so all provider drift and optionality is resolved here once.
  */
 
+import type { BokunCancellationPolicySnapshot } from "../commerce/cancellation-policy";
+
 export type ActivityDifficulty =
 	| "very_easy"
 	| "easy"
@@ -99,6 +101,8 @@ export interface ActivityDetail extends ActivitySummary {
 	attention: string | null;
 	agenda: ActivityAgendaItem[];
 	attributes: string[];
+	/** Parsed Bokun cancellation policy; null when absent or unparseable. */
+	cancellationPolicy: BokunCancellationPolicySnapshot | null;
 }
 
 /**

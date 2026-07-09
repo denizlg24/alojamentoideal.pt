@@ -102,7 +102,21 @@ const optionsResponse = {
 								],
 							},
 						],
-						questions: [],
+						questions: [
+							{
+								questionId: "1294533",
+								label: "Do you have any dietary restrictions or allergies?",
+								dataType: "SHORT_TEXT",
+								required: false,
+							},
+							{
+								questionId: "1294534",
+								label:
+									"Do you have any mobility restrictions or health problems?",
+								dataType: "SHORT_TEXT",
+								required: false,
+							},
+						],
 						extras: [],
 					},
 				],
@@ -113,16 +127,50 @@ const optionsResponse = {
 						dataType: "SHORT_TEXT",
 						required: false,
 					},
+					{
+						questionId: "flightNumber",
+						label: "Flight number",
+						dataType: "SHORT_TEXT",
+						required: true,
+					},
+					{
+						questionId: "estimatedArrival",
+						label: "Estimated arrival",
+						dataType: "SHORT_TEXT",
+						dataFormat: "TIME",
+						required: true,
+					},
 				],
-				dropoffQuestions: [],
+				dropoffQuestions: [
+					{
+						questionId: "dropoffNote",
+						label: "Drop-off details",
+						dataType: "LONG_TEXT",
+						required: false,
+					},
+				],
 			},
 		],
 	},
 } satisfies Record<string, unknown>;
 
 const pickupPlaces = {
-	pickupPlaces: [{ id: 14875488, title: "Airbnb", askForRoomNumber: false }],
-	dropoffPlaces: [{ id: 14875488, title: "Airbnb", askForRoomNumber: false }],
+	pickupPlaces: [
+		{
+			askForRoomNumber: false,
+			id: 14875488,
+			title: "Airbnb",
+			type: "ACCOMMODATION",
+		},
+	],
+	dropoffPlaces: [
+		{
+			askForRoomNumber: false,
+			id: 14875488,
+			title: "Airbnb",
+			type: "ACCOMMODATION",
+		},
+	],
 };
 
 function build(overrides: Partial<NormalizeActivityBookingSchemaInput> = {}) {
@@ -170,6 +218,10 @@ describe("normalizeActivityBookingSchema", () => {
 			"lastName",
 			"gender",
 		]);
+		expect(schema.passengers[0]?.questions.map((f) => f.questionId)).toEqual([
+			"1294533",
+			"1294534",
+		]);
 	});
 
 	test("PRESELECTED pickup/dropoff is required and not customer-selectable", () => {
@@ -178,15 +230,40 @@ describe("normalizeActivityBookingSchema", () => {
 		expect(schema.pickup?.required).toBe(true);
 		expect(schema.pickup?.customerSelectable).toBe(false);
 		expect(schema.pickup?.places).toEqual([
-			{ askForRoomNumber: false, id: "14875488", title: "Airbnb" },
+			{
+				askForRoomNumber: false,
+				id: "14875488",
+				title: "Airbnb",
+				type: "ACCOMMODATION",
+			},
+		]);
+		expect(schema.pickup?.questions.map((field) => field.questionId)).toEqual([
+			"roomNumber",
+			"flightNumber",
+			"estimatedArrival",
 		]);
 		expect(schema.pickup?.roomNumberField?.questionId).toBe("roomNumber");
 		expect(schema.dropoff?.required).toBe(true);
+		expect(schema.dropoff?.questions.map((field) => field.questionId)).toEqual([
+			"dropoffNote",
+		]);
 	});
 
 	test("SELECTED_BY_CUSTOMER pickup is customer-selectable", () => {
 		const schema = build({ pickupSelectionType: "SELECTED_BY_CUSTOMER" });
 		expect(schema.pickup?.customerSelectable).toBe(true);
+		expect(schema.pickup?.required).toBe(true);
+	});
+
+	test("OPTIONAL pickup/dropoff is customer-selectable and not required", () => {
+		const schema = build({
+			dropoffSelectionType: "OPTIONAL",
+			pickupSelectionType: "OPTIONAL",
+		});
+		expect(schema.pickup?.customerSelectable).toBe(true);
+		expect(schema.pickup?.required).toBe(false);
+		expect(schema.dropoff?.customerSelectable).toBe(true);
+		expect(schema.dropoff?.required).toBe(false);
 	});
 
 	test("NOT_INCLUDED / absent selection type yields no pickup schema", () => {

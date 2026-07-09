@@ -1,9 +1,8 @@
 "use client";
 
 import { Button } from "@workspace/ui/components/button";
-import { Input } from "@workspace/ui/components/input";
 import { Label } from "@workspace/ui/components/label";
-import { NativeSelect } from "@workspace/ui/components/native-select";
+import { ResponsiveSelect } from "@workspace/ui/components/responsive-select";
 import { Skeleton } from "@workspace/ui/components/skeleton";
 import {
 	type ActivityBookingDescription,
@@ -11,8 +10,11 @@ import {
 	type ActivityPassengerGroup,
 	type ActivityPlacePrompt,
 	type ActivityQuestionEntry,
+	activeDropoffQuestions,
+	activePickupQuestions,
+	CUSTOM_PICKUP_PLACE_ID,
 	isBooleanField,
-	placeAsksRoom,
+	placeDetailsPossible,
 	resolvePlaceId,
 } from "@/lib/activities/booking-details";
 import { ActivityQuestionControl } from "./activity-question-control";
@@ -32,6 +34,15 @@ type ReadyActivityBookingEntry = ActivityBookingEntry & {
 	state: Extract<ActivityBookingEntry["state"], { status: "ready" }>;
 };
 
+function RequiredMark({ required }: { required: boolean }) {
+	return required ? (
+		<span aria-hidden="true" className="text-destructive">
+			{" "}
+			*
+		</span>
+	) : null;
+}
+
 function PlaceControl({
 	cartItemId,
 	prompt,
@@ -48,23 +59,43 @@ function PlaceControl({
 	const selected =
 		prompt.kind === "pickup" ? draft.pickupPlaceId : draft.dropoffPlaceId;
 	const id = `${prompt.kind}-${cartItemId}`;
+	const isPickup = prompt.kind === "pickup";
+	const options = [
+		...(prompt.optional
+			? [
+					{
+						label: isPickup ? "No pickup needed" : "No drop-off needed",
+						value: "",
+					},
+				]
+			: !prompt.customAllowed
+				? [{ label: "Select a location", value: "" }]
+				: []),
+		...(isPickup && prompt.customAllowed
+			? [
+					{
+						label: "I want to specify my own pick-up",
+						value: CUSTOM_PICKUP_PLACE_ID,
+					},
+				]
+			: []),
+		...prompt.places.map((place) => ({ label: place.title, value: place.id })),
+	];
 	return (
 		<div className="flex flex-col gap-1.5">
-			<Label htmlFor={id}>{prompt.label}</Label>
-			<NativeSelect
+			<Label htmlFor={id}>
+				{prompt.label}
+				<RequiredMark required={!prompt.optional} />
+			</Label>
+			<ResponsiveSelect
 				aria-invalid={invalid}
 				className="w-full"
 				id={id}
-				onChange={(event) => onSelect(cartItemId, event.target.value || null)}
-				value={selected ?? ""}
-			>
-				<option value="">Select a location</option>
-				{prompt.places.map((place) => (
-					<option key={place.id} value={place.id}>
-						{place.title}
-					</option>
-				))}
-			</NativeSelect>
+				onValueChange={(value) => onSelect(cartItemId, value || null)}
+				options={options}
+				placeholder="Select a location"
+				value={resolvePlaceId(prompt, selected) ?? ""}
+			/>
 		</div>
 	);
 }
@@ -75,6 +106,9 @@ function answerInvalid(
 	showErrors: boolean,
 ): boolean {
 	if (!showErrors) {
+		return false;
+	}
+	if (!entry.required) {
 		return false;
 	}
 	const value = draft.answers[entry.key] ?? "";
@@ -95,14 +129,15 @@ function isPassengerComplete(
 function activityGuestDetailsNeedInput(
 	description: ActivityBookingDescription,
 ): boolean {
-	const pickupRoomPossible =
-		description.pickup?.places.some((place) => place.askForRoomNumber) ?? false;
+	const pickupQuestionsPossible = placeDetailsPossible(description.pickup);
+	const dropoffQuestionsPossible = placeDetailsPossible(description.dropoff);
 	return (
 		description.activityQuestions.length > 0 ||
 		description.passengers.length > 0 ||
 		(description.pickup?.selectable ?? false) ||
 		(description.dropoff?.selectable ?? false) ||
-		pickupRoomPossible
+		pickupQuestionsPossible ||
+		dropoffQuestionsPossible
 	);
 }
 
@@ -129,9 +164,10 @@ function ItemQuestions({
 	showTitle: boolean;
 }) {
 	const { draft, item } = entry;
-	const { setAnswer, setPickupPlace, setDropoffPlace, setRoomNumber } = booking;
+	const { setAnswer, setPickupPlace, setDropoffPlace } = booking;
 	const pickupId = resolvePlaceId(description.pickup, draft.pickupPlaceId);
-	const asksRoom = placeAsksRoom(description.pickup, pickupId);
+	const pickupQuestions = activePickupQuestions(description, draft);
+	const dropoffQuestions = activeDropoffQuestions(description, draft);
 
 	const renderQuestion = (question: ActivityQuestionEntry) => (
 		<ActivityQuestionControl
@@ -140,6 +176,7 @@ function ItemQuestions({
 			invalid={answerInvalid(question, draft, showErrors)}
 			key={question.key}
 			onChange={(value) => setAnswer(item.id, question.key, value)}
+			required={question.required}
 			value={draft.answers[question.key] ?? ""}
 		/>
 	);
@@ -152,20 +189,17 @@ function ItemQuestions({
 				<PlaceControl
 					cartItemId={item.id}
 					draft={draft}
-					invalid={showErrors && !pickupId}
+					invalid={showErrors && !description.pickup.optional && !pickupId}
 					onSelect={setPickupPlace}
 					prompt={description.pickup}
 				/>
 			)}
-			{asksRoom && (
-				<div className="flex flex-col gap-1.5">
-					<Label htmlFor={`room-${item.id}`}>Room number</Label>
-					<Input
-						aria-invalid={showErrors && draft.roomNumber.trim().length === 0}
-						id={`room-${item.id}`}
-						onChange={(event) => setRoomNumber(item.id, event.target.value)}
-						value={draft.roomNumber}
-					/>
+			{pickupQuestions.length > 0 && (
+				<div className="flex flex-col gap-3">
+					<p className="text-muted-foreground text-xs uppercase tracking-wide">
+						Pickup details
+					</p>
+					{pickupQuestions.map(renderQuestion)}
 				</div>
 			)}
 			{description.dropoff?.selectable && (
@@ -174,11 +208,20 @@ function ItemQuestions({
 					draft={draft}
 					invalid={
 						showErrors &&
+						!description.dropoff.optional &&
 						!resolvePlaceId(description.dropoff, draft.dropoffPlaceId)
 					}
 					onSelect={setDropoffPlace}
 					prompt={description.dropoff}
 				/>
+			)}
+			{dropoffQuestions.length > 0 && (
+				<div className="flex flex-col gap-3">
+					<p className="text-muted-foreground text-xs uppercase tracking-wide">
+						Drop-off details
+					</p>
+					{dropoffQuestions.map(renderQuestion)}
+				</div>
 			)}
 
 			{description.activityQuestions.map(renderQuestion)}
@@ -235,6 +278,7 @@ export function ActivityMainContactQuestions({
 						onChange={(value) =>
 							booking.setAnswer(item.id, question.key, value)
 						}
+						required={question.required}
 						value={draft.answers[question.key] ?? ""}
 					/>
 				);

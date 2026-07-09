@@ -143,6 +143,18 @@ describe("buildBokunActivityCheckoutRequest", () => {
 						participantIndex: 0,
 						questionId: "gender",
 					},
+					{
+						answer: "TP123",
+						group: "pickup",
+						participantIndex: null,
+						questionId: "flightNumber",
+					},
+					{
+						answer: "Main entrance",
+						group: "dropoff",
+						participantIndex: null,
+						questionId: "dropoffNote",
+					},
 				],
 				bokunActivityId: "1248387",
 				dropoffPlaceId: "14875488",
@@ -187,7 +199,11 @@ describe("buildBokunActivityCheckoutRequest", () => {
 		expect(activity?.dropoff).toBe(true);
 		expect(activity?.dropoffPlaceId).toBe(14875488);
 		expect(activity?.pickupAnswers).toEqual([
+			{ questionId: "flightNumber", values: ["TP123"] },
 			{ questionId: "roomNumber", values: ["12"] },
+		]);
+		expect(activity?.dropoffAnswers).toEqual([
+			{ questionId: "dropoffNote", values: ["Main entrance"] },
 		]);
 		expect(activity?.passengers).toEqual([
 			{
@@ -209,6 +225,43 @@ describe("buildBokunActivityCheckoutRequest", () => {
 			{ questionId: "phoneNumber", values: ["+351910000000"] },
 			{ questionId: "language", values: ["en"] },
 			{ questionId: "dateOfBirth", values: ["1990-05-15"] },
+		]);
+	});
+
+	test("lifts a custom pickup description onto Bokun's pickup fields", () => {
+		const result = buildBokunActivityCheckoutRequest({
+			...activityHoldRequest,
+			activity: {
+				...activityHoldRequest.activity,
+				answers: [
+					{
+						answer: "Rua de Cedofeita 100, Porto",
+						group: "pickup",
+						participantIndex: null,
+						questionId: "pickupDescription",
+					},
+					{
+						answer: "TP123",
+						group: "pickup",
+						participantIndex: null,
+						questionId: "flightNumber",
+					},
+				],
+				pickupPlaceId: null,
+			},
+		});
+
+		const directBooking = result.directBooking as Record<string, unknown>;
+		const [activity] = directBooking.activityBookings as Record<
+			string,
+			unknown
+		>[];
+		expect(activity?.pickup).toBe(true);
+		expect(activity?.pickupPlaceId).toBeUndefined();
+		expect(activity?.pickupDescription).toBe("Rua de Cedofeita 100, Porto");
+		// The reserved id is lifted, not echoed as a question answer.
+		expect(activity?.pickupAnswers).toEqual([
+			{ questionId: "flightNumber", values: ["TP123"] },
 		]);
 	});
 

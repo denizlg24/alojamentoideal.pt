@@ -33,6 +33,7 @@ import {
 	createStripeClientFromEnv,
 	resolvePromotionCode,
 	retrievePaymentIntentSnapshot,
+	reverseChargeTransfer,
 	StripeConfigurationError,
 } from "@workspace/core/integrations/stripe";
 import { getRedis } from "@workspace/core/redis";
@@ -191,6 +192,9 @@ export function orderRefundService(): OrderRefundService {
 		db: getDb(),
 		refundPayment: stripe
 			? (request) => createRefund(stripe, request)
+			: undefined,
+		reverseActivityTransfer: stripe
+			? (request) => reverseChargeTransfer(stripe, request)
 			: undefined,
 	});
 }

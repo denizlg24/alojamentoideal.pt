@@ -798,6 +798,12 @@ export function CheckoutController({ seed }: CheckoutControllerProps) {
 
 		window.addEventListener(CART_CHANGED_EVENT, onChanged);
 		window.addEventListener("storage", onChanged);
+		// With cacheComponents, Next.js hides visited routes inside React
+		// `<Activity>`; hidden effects are torn down, so cart changes fired while
+		// this route was hidden never reach the listeners above. Effects re-run on
+		// reveal, so this immediate call replays whatever was missed; the
+		// fingerprint guard inside `onChanged` makes it a no-op otherwise.
+		onChanged();
 		return () => {
 			window.removeEventListener(CART_CHANGED_EVENT, onChanged);
 			window.removeEventListener("storage", onChanged);

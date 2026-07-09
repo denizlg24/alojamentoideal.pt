@@ -94,6 +94,8 @@ export interface HoldReservationResponse {
 export interface PayableOrder {
 	accommodationItemCount: number;
 	activityItemCount: number;
+	/** Minor-unit sum of the activity items; the Detours transfer share. */
+	activityTotalMinor: number;
 	cartId: string | null;
 	/** ISO instant the checkout window closes; null when no deadline is set. */
 	checkoutExpiresAt: string | null;

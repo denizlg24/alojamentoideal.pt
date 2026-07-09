@@ -415,15 +415,29 @@ function buildMainContactDetails(
  * Pickup fields for the activity booking. Bokun rejects a booking whose rate
  * preselects a pickup place unless `pickup:true` and the place id are sent, so a
  * resolved `pickupPlaceId` drives the flag. A pickup place that asks for a room
- * number carries it as a pickup answer.
+ * number carries it as a pickup answer. A guest-specified pickup travels as the
+ * reserved `pickupDescription` answer and is lifted onto Bokun's custom-pickup
+ * wire shape (`pickup:true + pickupDescription`, no place id).
  */
 function pickupFields(
 	activity: BokunActivityBookingInput,
 ): Record<string, unknown> {
-	const pickupAnswers: BokunAnswerDto[] = [
-		...answersForGroup(activity.answers, "pickup"),
-	];
-	if (activity.roomNumber?.trim()) {
+	const groupAnswers = answersForGroup(activity.answers, "pickup");
+	const pickupDescription =
+		groupAnswers
+			.find((answer) => answer.questionId === "pickupDescription")
+			?.values.map((value) => value.trim())
+			.find((value) => value.length > 0) ?? null;
+	const pickupAnswers: BokunAnswerDto[] = groupAnswers.filter(
+		(answer) => answer.questionId !== "pickupDescription",
+	);
+	const suppliedPickupQuestions = new Set(
+		pickupAnswers.map((answer) => answer.questionId),
+	);
+	if (
+		activity.roomNumber?.trim() &&
+		!suppliedPickupQuestions.has("roomNumber")
+	) {
 		pickupAnswers.push({
 			questionId: "roomNumber",
 			values: [activity.roomNumber.trim()],
@@ -435,6 +449,9 @@ function pickupFields(
 			pickupAnswers,
 			pickupPlaceId: Number(activity.pickupPlaceId),
 		};
+	}
+	if (pickupDescription) {
+		return { pickup: true, pickupAnswers, pickupDescription };
 	}
 	return { pickup: false, pickupAnswers };
 }

@@ -1905,6 +1905,12 @@ export const orderRefund = pgTable(
 			.default("pending"),
 		stripeRefundId: text("stripe_refund_id"),
 		stripeRefundIdempotencyKey: text("stripe_refund_idempotency_key").notNull(),
+		// Explicit Detours transfer reversal issued alongside the refund; null for
+		// accommodation-only refunds and refunds recorded before reversals existed.
+		stripeTransferReversalId: text("stripe_transfer_reversal_id"),
+		transferReversalAmountMinor: bigint("transfer_reversal_amount_minor", {
+			mode: "number",
+		}),
 		createdByUserId: text("created_by_user_id").references(() => user.id, {
 			onDelete: "set null",
 		}),

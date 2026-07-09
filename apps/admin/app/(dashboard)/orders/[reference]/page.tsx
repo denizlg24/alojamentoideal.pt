@@ -26,6 +26,7 @@ import {
 } from "@/lib/api/commerce";
 import { invoicingEnabled, invoicingService } from "@/lib/api/invoicing";
 import { formatDate, formatDateTime, formatMoneyMinor } from "@/lib/format";
+import { buildRefundPolicySuggestions } from "@/lib/orders/refund-policy";
 import { ConversationPanel } from "./conversation-panel";
 import { GuestEditDialog } from "./guest-edit-dialog";
 import { InvoicePanel } from "./invoice-panel";
@@ -189,9 +190,21 @@ export default async function OrderDetailPage({
 		0,
 		row.amountPaidMinor - row.amountRefundedMinor,
 	);
+	// Policy suggestions hit Bokun live; only pay that cost when the refund
+	// dialog can actually render.
+	const policySuggestions =
+		row.amountPaidMinor > 0 && refundableMinor > 0
+			? await buildRefundPolicySuggestions(detail)
+			: [];
+	const policySuggestionByItem = new Map(
+		policySuggestions.map((suggestion) => [suggestion.itemId, suggestion]),
+	);
 	const refundItems = detail.items.map((item) => ({
 		amountMinor: item.pricing?.totalMinor ?? null,
 		id: item.id,
+		policyLabel: policySuggestionByItem.get(item.id)?.label ?? null,
+		policySuggestedAmountMinor:
+			policySuggestionByItem.get(item.id)?.suggestedAmountMinor ?? null,
 		title: item.title,
 	}));
 	const itemTitleById = new Map(

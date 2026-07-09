@@ -13,10 +13,7 @@ import {
 } from "@workspace/ui/components/dialog";
 import { Input } from "@workspace/ui/components/input";
 import { Label } from "@workspace/ui/components/label";
-import {
-	NativeSelect,
-	NativeSelectOption,
-} from "@workspace/ui/components/native-select";
+import { ResponsiveSelect } from "@workspace/ui/components/responsive-select";
 import { useRouter } from "next/navigation";
 import { type FormEvent, useState, useTransition } from "react";
 import { toast } from "sonner";
@@ -52,6 +49,9 @@ export function GuestEditDialog({
 	const router = useRouter();
 	const [open, setOpen] = useState(false);
 	const [error, setError] = useState<string | null>(null);
+	const [documentType, setDocumentType] = useState(
+		guest.fields.documentType ?? "",
+	);
 	const [pending, startTransition] = useTransition();
 
 	function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -98,7 +98,9 @@ export function GuestEditDialog({
 		<Dialog
 			onOpenChange={(next) => {
 				setOpen(next);
-				if (!next) {
+				if (next) {
+					setDocumentType(guest.fields.documentType ?? "");
+				} else {
 					setError(null);
 				}
 			}}
@@ -171,17 +173,14 @@ export function GuestEditDialog({
 						</div>
 						<div className="space-y-1.5">
 							<Label htmlFor={`doctype-${guest.id}`}>Document type</Label>
-							<NativeSelect
-								defaultValue={guest.fields.documentType ?? ""}
+							<ResponsiveSelect
+								className="w-full"
 								id={`doctype-${guest.id}`}
 								name="documentType"
-							>
-								{DOCUMENT_TYPES.map((option) => (
-									<NativeSelectOption key={option.value} value={option.value}>
-										{option.label}
-									</NativeSelectOption>
-								))}
-							</NativeSelect>
+								onValueChange={setDocumentType}
+								options={DOCUMENT_TYPES}
+								value={documentType}
+							/>
 						</div>
 						<div className="space-y-1.5">
 							<Label htmlFor={`docnum-${guest.id}`}>Document number</Label>

@@ -1,10 +1,7 @@
 "use client";
 
 import { Input } from "@workspace/ui/components/input";
-import {
-	NativeSelect,
-	NativeSelectOption,
-} from "@workspace/ui/components/native-select";
+import { ResponsiveSelect } from "@workspace/ui/components/responsive-select";
 import { useEffect, useState } from "react";
 import {
 	countryForDialCode,
@@ -13,6 +10,13 @@ import {
 } from "@/lib/site/countries";
 
 const DEFAULT_COUNTRY = "PT";
+
+const PHONE_SELECT_OPTIONS = PHONE_COUNTRY_OPTIONS.map((option) => ({
+	label: option.flag
+		? `${option.flag} +${option.dialCode}`
+		: `+${option.dialCode}`,
+	value: option.code,
+}));
 
 /** Splits an E.164 string into its country and national parts for display. */
 function parsePhone(value: string): {
@@ -67,8 +71,8 @@ interface PhoneInputProps {
 
 /**
  * Phone field with a flag + dialing-code country picker beside a national-number
- * input. Emits a single E.164 string. The country picker reuses the same native
- * select as {@link CountrySelect} for a consistent, mobile-friendly experience.
+ * input. Emits a single E.164 string. The country picker reuses the same
+ * responsive select as {@link CountrySelect}.
  */
 export function PhoneInput({
 	disabled,
@@ -101,21 +105,14 @@ export function PhoneInput({
 
 	return (
 		<div className="flex gap-2">
-			<NativeSelect
+			<ResponsiveSelect
 				aria-label="Country dialing code"
 				className="w-28 shrink-0"
 				disabled={disabled}
-				onChange={(event) => update(event.target.value, national)}
+				onValueChange={(nextCountry) => update(nextCountry, national)}
+				options={PHONE_SELECT_OPTIONS}
 				value={country}
-			>
-				{PHONE_COUNTRY_OPTIONS.map((option) => (
-					<NativeSelectOption key={option.code} value={option.code}>
-						{option.flag
-							? `${option.flag} +${option.dialCode}`
-							: `+${option.dialCode}`}
-					</NativeSelectOption>
-				))}
-			</NativeSelect>
+			/>
 			<Input
 				aria-invalid={invalid || undefined}
 				autoComplete="tel-national"
