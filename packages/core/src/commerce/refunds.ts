@@ -259,21 +259,7 @@ export class OrderRefundService {
 			);
 		}
 
-		const [activityTotals] = await this.#db
-			.select({
-				totalMinor:
-					sql<number>`coalesce(sum(${orderItemTable.totalMinor}), 0)`.mapWith(
-						Number,
-					),
-			})
-			.from(orderItemTable)
-			.where(
-				and(
-					eq(orderItemTable.orderId, order.id),
-					eq(orderItemTable.type, "activity"),
-				),
-			);
-		const activityTotalMinor = activityTotals?.totalMinor ?? 0;
+		const activityTotalMinor = await this.#getActivityTotalMinor(order.id);
 
 		const refundableBefore = order.amountPaidMinor - order.amountRefundedMinor;
 		if (input.amountMinor > refundableBefore) {
@@ -682,12 +668,8 @@ export class OrderRefundService {
 	 * Detours, from the order's current item mix (same attribution rules as
 	 * `refundOrder`).
 	 */
-	async #owedReversalAmountMinor(row: {
-		amountMinor: number;
-		orderId: string;
-		orderItemId: string | null;
-		orderTotalMinor: number;
-	}): Promise<number> {
+	/** Sum of activity item totals on an order, for reversal attribution. */
+	async #getActivityTotalMinor(orderId: string): Promise<number> {
 		const [activityTotals] = await this.#db
 			.select({
 				totalMinor:
@@ -698,10 +680,20 @@ export class OrderRefundService {
 			.from(orderItemTable)
 			.where(
 				and(
-					eq(orderItemTable.orderId, row.orderId),
+					eq(orderItemTable.orderId, orderId),
 					eq(orderItemTable.type, "activity"),
 				),
 			);
+		return activityTotals?.totalMinor ?? 0;
+	}
+
+	async #owedReversalAmountMinor(row: {
+		amountMinor: number;
+		orderId: string;
+		orderItemId: string | null;
+		orderTotalMinor: number;
+	}): Promise<number> {
+		const activityTotalMinor = await this.#getActivityTotalMinor(row.orderId);
 		let attributedItemType: "accommodation" | "activity" | null = null;
 		if (row.orderItemId) {
 			const [item] = await this.#db
@@ -715,7 +707,7 @@ export class OrderRefundService {
 					: null;
 		}
 		return activityReversalAmountMinor({
-			activityTotalMinor: activityTotals?.totalMinor ?? 0,
+			activityTotalMinor,
 			attributedItemType,
 			orderTotalMinor: row.orderTotalMinor,
 			refundMinor: row.amountMinor,

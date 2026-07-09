@@ -21,7 +21,7 @@ function inputTypeFor(dataFormat: string | null): string {
 	}
 }
 
-function RequiredMark({ required }: { required: boolean }) {
+export function RequiredMark({ required }: { required: boolean }) {
 	return required ? (
 		<span aria-hidden="true" className="text-destructive">
 			{" "}

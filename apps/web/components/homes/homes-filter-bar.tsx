@@ -857,6 +857,7 @@ export function HomesFilterBar({
 				<div className="flex items-center gap-2">
 					<span className="text-muted-foreground text-sm">Sort by</span>
 					<ResponsiveSelect
+						aria-label="Sort by"
 						className={cn("min-w-40")}
 						onValueChange={(sort) => apply({ ...visibleFilters, sort })}
 						options={sortOptions}

@@ -23,6 +23,8 @@ export type PaymentSettlementRetriever = (
 	paymentIntentId: string,
 ) => Promise<PaymentIntentSettlementSnapshot | null>;
 
+const STRIPE_SETTLEMENT_CONCURRENCY = 8;
+
 function createStripeSettlementRetriever(): PaymentSettlementRetriever | null {
 	try {
 		const stripe = createStripeClientFromEnv();
@@ -107,22 +109,32 @@ async function loadStripeSettlements(
 		PaymentIntentSettlementSnapshot | null
 	>();
 	const failedPaymentIntentIds = new Set<string>();
-	await Promise.all(
-		paymentIntentIds.map(async (paymentIntentId) => {
-			try {
-				settlementsByPaymentIntent.set(
-					paymentIntentId,
-					await retriever(paymentIntentId),
-				);
-			} catch (error) {
-				console.error("Failed to load Stripe settlement data", {
-					error: error instanceof Error ? error.message : String(error),
-					paymentIntentId,
-				});
-				failedPaymentIntentIds.add(paymentIntentId);
+	// Bounded concurrency so large date ranges stay under Stripe's rate limits.
+	const queue = [...paymentIntentIds];
+	const workers = Array.from(
+		{ length: Math.min(STRIPE_SETTLEMENT_CONCURRENCY, queue.length) },
+		async () => {
+			for (
+				let paymentIntentId = queue.shift();
+				paymentIntentId !== undefined;
+				paymentIntentId = queue.shift()
+			) {
+				try {
+					settlementsByPaymentIntent.set(
+						paymentIntentId,
+						await retriever(paymentIntentId),
+					);
+				} catch (error) {
+					console.error("Failed to load Stripe settlement data", {
+						error: error instanceof Error ? error.message : String(error),
+						paymentIntentId,
+					});
+					failedPaymentIntentIds.add(paymentIntentId);
+				}
 			}
-		}),
+		},
 	);
+	await Promise.all(workers);
 
 	return {
 		failedPaymentIntentIds,

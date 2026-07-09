@@ -17,7 +17,10 @@ import {
 	placeDetailsPossible,
 	resolvePlaceId,
 } from "@/lib/activities/booking-details";
-import { ActivityQuestionControl } from "./activity-question-control";
+import {
+	ActivityQuestionControl,
+	RequiredMark,
+} from "./activity-question-control";
 import { PassengerStepCarousel } from "./passenger-step-carousel";
 import type {
 	ActivityBookingEntry,
@@ -33,15 +36,6 @@ interface ActivityQuestionsFormProps {
 type ReadyActivityBookingEntry = ActivityBookingEntry & {
 	state: Extract<ActivityBookingEntry["state"], { status: "ready" }>;
 };
-
-function RequiredMark({ required }: { required: boolean }) {
-	return required ? (
-		<span aria-hidden="true" className="text-destructive">
-			{" "}
-			*
-		</span>
-	) : null;
-}
 
 function PlaceControl({
 	cartItemId,

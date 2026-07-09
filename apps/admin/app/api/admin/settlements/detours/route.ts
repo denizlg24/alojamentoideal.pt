@@ -51,10 +51,8 @@ export const GET = withAdminRoute(
 		}
 
 		const pdf = detoursSettlementReportToPdf(report);
-		const body = new ArrayBuffer(pdf.byteLength);
-		new Uint8Array(body).set(pdf);
 
-		return new Response(body, {
+		return new Response(pdf, {
 			headers: {
 				"Cache-Control": "private, no-store",
 				"Content-Disposition": `attachment; filename="${filename(

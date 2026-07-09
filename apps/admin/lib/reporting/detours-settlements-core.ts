@@ -512,6 +512,10 @@ export function detoursSettlementReportToCsv(
 	return `${lines.join("\r\n")}\r\n`;
 }
 
+// The hand-rolled PDF uses the built-in Helvetica font, which only covers
+// ASCII here. NFKD splits accented letters into base + combining mark, so
+// stripping non-ASCII transliterates ("São" -> "Sao") rather than deleting
+// whole characters. CSV exports keep the original UTF-8 text.
 function pdfSafeText(value: string): string {
 	return value
 		.normalize("NFKD")
@@ -624,7 +628,7 @@ function contentStreamForPage(lines: readonly string[]): string {
 
 export function detoursSettlementReportToPdf(
 	report: DetoursSettlementReport,
-): Uint8Array {
+): Uint8Array<ArrayBuffer> {
 	const pages = paginate(pdfLinesForReport(report));
 	const fontObjectId = 3;
 	const objects = new Map<number, string>();

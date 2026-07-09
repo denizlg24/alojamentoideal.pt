@@ -1,6 +1,7 @@
 "use client";
 
 import { ResponsiveSelect } from "@workspace/ui/components/responsive-select";
+import { useMemo } from "react";
 import { COUNTRY_OPTIONS } from "@/lib/site/countries";
 
 interface CountrySelectProps {
@@ -30,6 +31,17 @@ export function CountrySelect({
 	placeholder = "Select a country",
 	value,
 }: CountrySelectProps) {
+	const options = useMemo(
+		() => [
+			{ label: placeholder, value: "" },
+			...COUNTRY_OPTIONS.map((country) => ({
+				label: country.flag ? `${country.flag} ${country.name}` : country.name,
+				value: country.code,
+			})),
+		],
+		[placeholder],
+	);
+
 	return (
 		<ResponsiveSelect
 			aria-invalid={invalid || undefined}
@@ -38,15 +50,7 @@ export function CountrySelect({
 			disabled={disabled}
 			id={id}
 			onValueChange={onChange}
-			options={[
-				{ label: placeholder, value: "" },
-				...COUNTRY_OPTIONS.map((country) => ({
-					label: country.flag
-						? `${country.flag} ${country.name}`
-						: country.name,
-					value: country.code,
-				})),
-			]}
+			options={options}
 			value={value}
 		/>
 	);

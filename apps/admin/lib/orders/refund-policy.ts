@@ -127,15 +127,31 @@ async function activitySuggestion(
 		};
 	}
 
-	const policy = parseBokunCancellationPolicy(rawDetail.cancellationPolicy);
-	const percent = activityRefundPercent(policy, {
-		at: now,
-		startAt: activityStartAt(
-			item.activityDate,
-			item.activity.startTimeId,
-			rawDetail,
-		),
-	});
+	let policy: ReturnType<typeof parseBokunCancellationPolicy>;
+	let percent: number | null;
+	try {
+		policy = parseBokunCancellationPolicy(rawDetail.cancellationPolicy);
+		percent = activityRefundPercent(policy, {
+			at: now,
+			startAt: activityStartAt(
+				item.activityDate,
+				item.activity.startTimeId,
+				rawDetail,
+			),
+		});
+	} catch (error) {
+		logger.warn("Failed to evaluate Bokun cancellation policy", {
+			activityId: item.activity.bokunActivityId,
+			error: error instanceof Error ? error.message : String(error),
+			itemId: item.id,
+		});
+		return {
+			itemId: item.id,
+			label: "Bokun policy unavailable; review manually",
+			percent: null,
+			suggestedAmountMinor: null,
+		};
+	}
 	if (percent === null) {
 		return {
 			itemId: item.id,
