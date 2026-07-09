@@ -51,6 +51,8 @@ export interface ActivityPassengerGroup {
 }
 
 export interface ActivityPlacePrompt {
+	/** The guest may describe their own pickup as free text (pickup only). */
+	customAllowed: boolean;
 	kind: "pickup" | "dropoff";
 	label: string;
 	/** The guest may decline the service; a null place id is a valid choice. */
@@ -82,6 +84,14 @@ export interface ActivityBookingDraft {
 	pickupPlaceId: string | null;
 	roomNumber: string;
 }
+
+/**
+ * Sentinel place id for "I want to specify my own pick-up" (legacy parity).
+ * The guest skips the operator's places and describes their own pickup through
+ * the provider's placeless pickup questions; the reservation goes out with
+ * `pickup: false`, no place id and those answers. Never sent as a place id.
+ */
+export const CUSTOM_PICKUP_PLACE_ID = "custom";
 
 export function emptyActivityDraft(): ActivityBookingDraft {
 	return {
@@ -134,9 +144,18 @@ function placePrompt(
 	}
 	// Bokun can mark pickup as PRESELECTED while still returning multiple valid
 	// pickup places. The legacy app treats that as a guest choice.
-	const selectable = optional || schema.places.length > 1;
+	const hasPlaceChoice = optional || schema.places.length > 1;
+	const selectable = hasPlaceChoice || schema.customAllowed;
+	// A PRESELECTED single place stays the default even when custom pickup is
+	// allowed (the guest may switch to their own); rates where the guest chooses
+	// (SELECTED_BY_CUSTOMER) have no place default and fall back to custom.
+	const autoPlaceId =
+		hasPlaceChoice || (schema.customerSelectable && schema.customAllowed)
+			? null
+			: (schema.places[0]?.id ?? null);
 	return {
-		autoPlaceId: selectable ? null : (schema.places[0]?.id ?? null),
+		autoPlaceId,
+		customAllowed: schema.customAllowed,
 		kind,
 		label: kind === "pickup" ? "Pickup location" : "Drop-off location",
 		optional,
@@ -175,6 +194,22 @@ const FALLBACK_ESTIMATED_ARRIVAL_FIELD = {
 	label: "Estimated arrival",
 	options: [],
 	questionId: "estimatedArrival",
+	required: true,
+	selectFromOptions: false,
+	selectMultiple: false,
+} satisfies ActivityQuestionField;
+
+/**
+ * The one question a custom pickup asks. Its answer travels as a pickup-group
+ * answer under the reserved `pickupDescription` id, which the reservation
+ * builder lifts onto Bokun's `pickup:true + pickupDescription` wire fields.
+ */
+const CUSTOM_PICKUP_DESCRIPTION_FIELD = {
+	dataFormat: null,
+	dataType: "SHORT_TEXT",
+	label: "Where should we pick you up?",
+	options: [],
+	questionId: "pickupDescription",
 	required: true,
 	selectFromOptions: false,
 	selectMultiple: false,
@@ -301,7 +336,14 @@ export function resolvePlaceId(
 	if (!prompt) {
 		return null;
 	}
-	return chosen ?? prompt.autoPlaceId;
+	if (chosen ?? prompt.autoPlaceId) {
+		return chosen ?? prompt.autoPlaceId;
+	}
+	// A required pickup with no place default falls back to the guest specifying
+	// their own (legacy parity); optional prompts default to declining.
+	return prompt.customAllowed && !prompt.optional
+		? CUSTOM_PICKUP_PLACE_ID
+		: null;
 }
 
 export function placeAsksRoom(
@@ -323,6 +365,16 @@ function placeQuestionEntries(
 ): ActivityQuestionEntry[] {
 	if (!prompt || !placeId) {
 		return [];
+	}
+	if (placeId === CUSTOM_PICKUP_PLACE_ID) {
+		// The guest describes their own pickup; no operator place, so place-bound
+		// fields like the room number are dropped along with the system fields.
+		return [
+			toEntry(prompt.kind, null, CUSTOM_PICKUP_DESCRIPTION_FIELD),
+			...prompt.questions
+				.filter((field) => field.questionId !== "roomNumber")
+				.map((field) => toEntry(prompt.kind, null, field)),
+		];
 	}
 	const place = prompt.places.find((candidate) => candidate.id === placeId);
 	if (!place) {
@@ -461,7 +513,12 @@ export function buildActivityDetailInput(
 			questionId: entry.questionId,
 		}));
 
-	const pickupPlaceId = resolvePlaceId(desc.pickup, draft.pickupPlaceId);
+	const resolvedPickupId = resolvePlaceId(desc.pickup, draft.pickupPlaceId);
+	// A custom pickup sends no place id; the guest's location rides as the
+	// reserved `pickupDescription` answer and becomes `pickup:true +
+	// pickupDescription` on the Bokun reserve.
+	const pickupPlaceId =
+		resolvedPickupId === CUSTOM_PICKUP_PLACE_ID ? null : resolvedPickupId;
 	const dropoffPlaceId = resolvePlaceId(desc.dropoff, draft.dropoffPlaceId);
 	const roomNumberAnswer = activePickupQuestions(desc, draft)
 		.map((entry) =>

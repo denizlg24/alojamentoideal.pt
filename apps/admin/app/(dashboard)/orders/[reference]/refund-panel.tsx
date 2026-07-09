@@ -12,10 +12,7 @@ import {
 } from "@workspace/ui/components/dialog";
 import { Input } from "@workspace/ui/components/input";
 import { Label } from "@workspace/ui/components/label";
-import {
-	NativeSelect,
-	NativeSelectOption,
-} from "@workspace/ui/components/native-select";
+import { ResponsiveSelect } from "@workspace/ui/components/responsive-select";
 import { useRouter } from "next/navigation";
 import { type FormEvent, useMemo, useState, useTransition } from "react";
 import { toast } from "sonner";
@@ -104,6 +101,17 @@ export function RefundPanel({
 		() => items.find((item) => item.id === orderItemId) ?? null,
 		[items, orderItemId],
 	);
+	const attributionOptions = [
+		{ label: "Whole order", value: "" },
+		...items.map((item) => ({
+			label: `${item.title}${
+				item.amountMinor !== null
+					? ` · ${formatMoneyMinor(item.amountMinor, currency)}`
+					: ""
+			}`,
+			value: item.id,
+		})),
+	];
 
 	function reset() {
 		setAmount("");
@@ -226,36 +234,24 @@ export function RefundPanel({
 
 					<div className="space-y-1.5">
 						<Label htmlFor="refund-reason">Reason</Label>
-						<NativeSelect
+						<ResponsiveSelect
+							className="w-full"
 							id="refund-reason"
-							onChange={(event) => setReason(event.target.value)}
+							onValueChange={setReason}
+							options={REASONS}
 							value={reason}
-						>
-							{REASONS.map((option) => (
-								<NativeSelectOption key={option.value} value={option.value}>
-									{option.label}
-								</NativeSelectOption>
-							))}
-						</NativeSelect>
+						/>
 					</div>
 
 					<div className="space-y-1.5">
 						<Label htmlFor="refund-attribution">Attribute to</Label>
-						<NativeSelect
+						<ResponsiveSelect
+							className="w-full"
 							id="refund-attribution"
-							onChange={(event) => setOrderItemId(event.target.value)}
+							onValueChange={setOrderItemId}
+							options={attributionOptions}
 							value={orderItemId}
-						>
-							<NativeSelectOption value="">Whole order</NativeSelectOption>
-							{items.map((item) => (
-								<NativeSelectOption key={item.id} value={item.id}>
-									{item.title}
-									{item.amountMinor !== null
-										? ` · ${formatMoneyMinor(item.amountMinor, currency)}`
-										: ""}
-								</NativeSelectOption>
-							))}
-						</NativeSelect>
+						/>
 						{attributedItem?.policyLabel ? (
 							<div className="flex flex-wrap items-center gap-2 pt-0.5">
 								<p className="text-muted-foreground text-xs">

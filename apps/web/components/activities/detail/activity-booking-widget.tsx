@@ -24,13 +24,7 @@ import {
 	DrawerTitle,
 	DrawerTrigger,
 } from "@workspace/ui/components/drawer";
-import {
-	Select,
-	SelectContent,
-	SelectItem,
-	SelectTrigger,
-	SelectValue,
-} from "@workspace/ui/components/select";
+import { ResponsiveSelect } from "@workspace/ui/components/responsive-select";
 import { Separator } from "@workspace/ui/components/separator";
 import { cn } from "@workspace/ui/lib/utils";
 import { addDays, format, startOfDay } from "date-fns";
@@ -461,21 +455,16 @@ export function ActivityBookingWidget({
 		return (
 			<section className="flex flex-col gap-2">
 				<span className="font-medium text-sm">Language</span>
-				<Select
-					value={language ?? undefined}
+				<ResponsiveSelect
+					className="w-full"
 					onValueChange={(value) => setLanguage(value)}
-				>
-					<SelectTrigger className="w-full">
-						<SelectValue placeholder="Select a language" />
-					</SelectTrigger>
-					<SelectContent>
-						{activity.languages.map((code) => (
-							<SelectItem key={code} value={code}>
-								{formatLanguage(code)}
-							</SelectItem>
-						))}
-					</SelectContent>
-				</Select>
+					options={activity.languages.map((code) => ({
+						label: formatLanguage(code),
+						value: code,
+					}))}
+					placeholder="Select a language"
+					value={language ?? ""}
+				/>
 			</section>
 		);
 	};

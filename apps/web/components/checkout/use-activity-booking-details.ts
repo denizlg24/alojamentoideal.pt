@@ -11,6 +11,7 @@ import {
 	type ActivityBookingDescription,
 	type ActivityBookingDraft,
 	buildActivityDetailInput,
+	CUSTOM_PICKUP_PLACE_ID,
 	describeActivityBooking,
 	emptyActivityDraft,
 	isActivityDetailComplete,
@@ -113,7 +114,11 @@ export function useActivityBookingDetails(
 		for (const item of activityItems) {
 			seen.add(item.id);
 			const placeSelection = placeSelections.get(item.id);
-			const pickupPlaceId = placeSelection?.pickupPlaceId ?? null;
+			// A custom pickup fetches the same placeless questions as no selection;
+			// the sentinel is a UI/draft concept and never reaches the provider.
+			const rawPickupPlaceId = placeSelection?.pickupPlaceId ?? null;
+			const pickupPlaceId =
+				rawPickupPlaceId === CUSTOM_PICKUP_PLACE_ID ? null : rawPickupPlaceId;
 			const dropoffPlaceId = placeSelection?.dropoffPlaceId ?? null;
 			const signature = `${selectionSignature(item)}|retry:${
 				retryTokens.get(item.id) ?? 0

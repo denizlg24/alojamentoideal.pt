@@ -8,9 +8,11 @@ import {
 	activeDropoffQuestions,
 	activePickupQuestions,
 	buildActivityDetailInput,
+	CUSTOM_PICKUP_PLACE_ID,
 	describeActivityBooking,
 	emptyActivityDraft,
 	isActivityDetailComplete,
+	resolvePlaceId,
 } from "./booking-details";
 
 function field(
@@ -180,6 +182,7 @@ describe("describeActivityBooking", () => {
 			item([{ count: 1, label: "Adult", pricingCategoryId: 1 }]),
 			schema({
 				pickup: {
+					customAllowed: false,
 					customerSelectable: false,
 					places: [
 						{
@@ -209,6 +212,7 @@ describe("describeActivityBooking", () => {
 			item([{ count: 1, label: "Adult", pricingCategoryId: 1 }]),
 			schema({
 				pickup: {
+					customAllowed: false,
 					customerSelectable: false,
 					places: [
 						{
@@ -234,6 +238,7 @@ describe("describeActivityBooking", () => {
 			item([{ count: 1, label: "Adult", pricingCategoryId: 1 }]),
 			schema({
 				pickup: {
+					customAllowed: false,
 					customerSelectable: false,
 					places: [
 						{
@@ -262,6 +267,7 @@ describe("describeActivityBooking", () => {
 			item([{ count: 1, label: "Adult", pricingCategoryId: 1 }]),
 			schema({
 				dropoff: {
+					customAllowed: false,
 					customerSelectable: false,
 					places: [
 						{
@@ -276,6 +282,7 @@ describe("describeActivityBooking", () => {
 					roomNumberField: null,
 				},
 				pickup: {
+					customAllowed: false,
 					customerSelectable: false,
 					places: [
 						{
@@ -312,6 +319,7 @@ describe("isActivityDetailComplete", () => {
 		schema({
 			activityQuestions: [field({ questionId: "dietary" })],
 			pickup: {
+				customAllowed: false,
 				customerSelectable: true,
 				places: [
 					{
@@ -361,6 +369,162 @@ describe("isActivityDetailComplete", () => {
 	});
 });
 
+describe("custom pickup (I want to specify my own pick-up)", () => {
+	const desc = describeActivityBooking(
+		item([{ count: 1, label: "Adult", pricingCategoryId: 1 }]),
+		schema({
+			pickup: {
+				customAllowed: true,
+				customerSelectable: true,
+				places: [
+					{ askForRoomNumber: true, id: "10", title: "Hotel A", type: null },
+					{ askForRoomNumber: false, id: "11", title: "Hotel B", type: null },
+				],
+				questions: [field({ questionId: "roomNumber", required: false })],
+				required: true,
+				roomNumberField: null,
+			},
+		}),
+	);
+
+	test("a required selectable pickup defaults to custom, like the legacy checkout", () => {
+		expect(resolvePlaceId(desc.pickup, null)).toBe(CUSTOM_PICKUP_PLACE_ID);
+	});
+
+	test("custom asks where to pick the guest up instead of place-bound fields", () => {
+		const questions = activePickupQuestions(desc, emptyActivityDraft());
+		expect(questions.map((entry) => entry.questionId)).toEqual([
+			"pickupDescription",
+		]);
+		expect(questions[0]?.required).toBe(true);
+		expect(questions[0]?.field.label).toBe("Where should we pick you up?");
+	});
+
+	test("completeness is gated by the pickup description, not a place choice", () => {
+		expect(isActivityDetailComplete(desc, emptyActivityDraft())).toBe(false);
+
+		const descriptionKey =
+			activePickupQuestions(desc, emptyActivityDraft())[0]?.key ?? "";
+		expect(
+			isActivityDetailComplete(desc, {
+				...emptyActivityDraft(),
+				answers: { [descriptionKey]: "Rua de Cedofeita 100, Porto" },
+			}),
+		).toBe(true);
+	});
+
+	test("custom books without a place id, carrying the description answer", () => {
+		const descriptionKey =
+			activePickupQuestions(desc, emptyActivityDraft())[0]?.key ?? "";
+		const result = buildActivityDetailInput("cart-item-1", desc, {
+			...emptyActivityDraft(),
+			answers: { [descriptionKey]: "Rua de Cedofeita 100, Porto" },
+			pickupPlaceId: CUSTOM_PICKUP_PLACE_ID,
+		});
+		expect(result.pickupPlaceId).toBe(null);
+		expect(result.roomNumber).toBe(null);
+		expect(result.answers).toEqual([
+			{
+				answer: "Rua de Cedofeita 100, Porto",
+				group: "pickup",
+				participantIndex: null,
+				questionId: "pickupDescription",
+			},
+		]);
+	});
+
+	test("choosing a listed place overrides the custom default", () => {
+		const draft = { ...emptyActivityDraft(), pickupPlaceId: "11" };
+		expect(resolvePlaceId(desc.pickup, draft.pickupPlaceId)).toBe("11");
+		expect(
+			buildActivityDetailInput("cart-item-1", desc, draft).pickupPlaceId,
+		).toBe("11");
+	});
+
+	test("a preselected single place stays the default even when custom is allowed", () => {
+		const preselected = describeActivityBooking(
+			item([{ count: 1, label: "Adult", pricingCategoryId: 1 }]),
+			schema({
+				pickup: {
+					customAllowed: true,
+					customerSelectable: false,
+					places: [
+						{ askForRoomNumber: false, id: "10", title: "Depot", type: null },
+					],
+					questions: [],
+					required: true,
+					roomNumberField: null,
+				},
+			}),
+		);
+		expect(preselected.pickup?.selectable).toBe(true);
+		expect(resolvePlaceId(preselected.pickup, null)).toBe("10");
+	});
+
+	test("without customPickupAllowed a required pickup still demands a place", () => {
+		const noCustom = describeActivityBooking(
+			item([{ count: 1, label: "Adult", pricingCategoryId: 1 }]),
+			schema({
+				pickup: {
+					customAllowed: false,
+					customerSelectable: true,
+					places: [
+						{ askForRoomNumber: false, id: "10", title: "Hotel A", type: null },
+						{ askForRoomNumber: false, id: "11", title: "Hotel B", type: null },
+					],
+					questions: [],
+					required: true,
+					roomNumberField: null,
+				},
+			}),
+		);
+		expect(resolvePlaceId(noCustom.pickup, null)).toBe(null);
+		expect(isActivityDetailComplete(noCustom, emptyActivityDraft())).toBe(
+			false,
+		);
+	});
+
+	test("optional pickups still default to declining, and dropoffs never default to custom", () => {
+		const optionalPickup = describeActivityBooking(
+			item([{ count: 1, label: "Adult", pricingCategoryId: 1 }]),
+			schema({
+				pickup: {
+					customAllowed: true,
+					customerSelectable: true,
+					places: [
+						{ askForRoomNumber: false, id: "10", title: "Hotel A", type: null },
+					],
+					questions: [],
+					required: false,
+					roomNumberField: null,
+				},
+			}),
+		);
+		expect(resolvePlaceId(optionalPickup.pickup, null)).toBe(null);
+
+		const requiredDropoff = describeActivityBooking(
+			item([{ count: 1, label: "Adult", pricingCategoryId: 1 }]),
+			schema({
+				dropoff: {
+					customAllowed: false,
+					customerSelectable: true,
+					places: [
+						{ askForRoomNumber: false, id: "20", title: "Stop A", type: null },
+						{ askForRoomNumber: false, id: "21", title: "Stop B", type: null },
+					],
+					questions: [],
+					required: true,
+					roomNumberField: null,
+				},
+			}),
+		);
+		expect(resolvePlaceId(requiredDropoff.dropoff, null)).toBe(null);
+		expect(
+			isActivityDetailComplete(requiredDropoff, emptyActivityDraft()),
+		).toBe(false);
+	});
+});
+
 describe("buildActivityDetailInput", () => {
 	test("maps answers to their groups and carries a preselected pickup place", () => {
 		const desc = describeActivityBooking(
@@ -377,6 +541,7 @@ describe("buildActivityDetailInput", () => {
 					},
 				],
 				pickup: {
+					customAllowed: false,
 					customerSelectable: false,
 					places: [
 						{
@@ -476,6 +641,7 @@ describe("buildActivityDetailInput", () => {
 			item([{ count: 1, label: "Adult", pricingCategoryId: 1 }]),
 			schema({
 				dropoff: {
+					customAllowed: false,
 					customerSelectable: false,
 					places: [
 						{
@@ -490,6 +656,7 @@ describe("buildActivityDetailInput", () => {
 					roomNumberField: null,
 				},
 				pickup: {
+					customAllowed: false,
 					customerSelectable: false,
 					places: [
 						{

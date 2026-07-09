@@ -174,6 +174,7 @@ export async function resolveActivityBookingSchema(
 
 		return normalizeActivityBookingSchema({
 			activityId: input.activityId,
+			customPickupAllowed: record(detail)?.customPickupAllowed === true,
 			dropoffPlaces: pickupPlaces,
 			dropoffSelectionType: selection.dropoff,
 			options,

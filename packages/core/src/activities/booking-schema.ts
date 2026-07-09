@@ -60,6 +60,12 @@ export interface ActivityPlaceOption {
 }
 
 export interface ActivityPickupSchema {
+	/**
+	 * `Activity.customPickupAllowed`: the guest may describe their own pickup as
+	 * free text, booked as `pickup:true + pickupDescription`. Pickup only;
+	 * always false for dropoff.
+	 */
+	customAllowed: boolean;
 	/** The guest chooses a place (SELECTED_BY_CUSTOMER) vs a fixed one. */
 	customerSelectable: boolean;
 	places: ActivityPlaceOption[];
@@ -82,6 +88,8 @@ export interface ActivityBookingSchema {
 
 export interface NormalizeActivityBookingSchemaInput {
 	activityId: string;
+	/** `Activity.customPickupAllowed` from the activity detail. */
+	customPickupAllowed?: boolean;
 	dropoffPlaces?: unknown;
 	dropoffSelectionType?: string | null;
 	/** Raw Bokun checkout options response. */
@@ -134,11 +142,13 @@ function buildPlaceSchema(
 	places: ActivityPlaceOption[],
 	questions: ActivityQuestionField[],
 	roomNumberField: ActivityQuestionField | null,
+	customAllowed: boolean,
 ): ActivityPickupSchema | null {
 	if (selectionType === null) {
 		return null;
 	}
 	return {
+		customAllowed,
 		customerSelectable:
 			selectionType === "SELECTED_BY_CUSTOMER" || selectionType === "OPTIONAL",
 		places,
@@ -194,6 +204,7 @@ export function normalizeActivityBookingSchema(
 			parsePlaces(input.dropoffPlaces, "dropoffPlaces"),
 			dropoffQuestions,
 			null,
+			false,
 		),
 		mainContactFields: parseQuestions(questions?.mainContactDetails),
 		passengers,
@@ -202,6 +213,7 @@ export function normalizeActivityBookingSchema(
 			parsePlaces(input.pickupPlaces, "pickupPlaces"),
 			pickupQuestions,
 			pickupRoomNumber,
+			input.customPickupAllowed === true,
 		),
 	};
 }

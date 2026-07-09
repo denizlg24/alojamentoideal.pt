@@ -23,10 +23,7 @@ import {
 } from "@workspace/ui/components/dialog";
 import { Input } from "@workspace/ui/components/input";
 import { Label } from "@workspace/ui/components/label";
-import {
-	NativeSelect,
-	NativeSelectOption,
-} from "@workspace/ui/components/native-select";
+import { ResponsiveSelect } from "@workspace/ui/components/responsive-select";
 import { Plus, Trash2 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
@@ -43,6 +40,11 @@ const LINE_TYPES = [
 	{ label: "Service", value: "S" },
 	{ label: "Product", value: "P" },
 	{ label: "Tax", value: "I" },
+] as const;
+
+const INVOICE_TYPES = [
+	{ label: "FR", value: "FR" },
+	{ label: "FT", value: "FT" },
 ] as const;
 
 /**
@@ -279,17 +281,14 @@ export function InvoicePanel({
 					>
 						Type
 					</Label>
-					<NativeSelect
-						className="h-8 w-24"
+					<ResponsiveSelect
+						className="w-24"
 						id={`invoice-type-${draft.orderItemId}`}
-						onChange={(event) =>
-							setInvoiceType(event.target.value as "FR" | "FT")
-						}
+						onValueChange={(value) => setInvoiceType(value as "FR" | "FT")}
+						options={INVOICE_TYPES}
+						size="sm"
 						value={invoiceType}
-					>
-						<NativeSelectOption value="FR">FR</NativeSelectOption>
-						<NativeSelectOption value="FT">FT</NativeSelectOption>
-					</NativeSelect>
+					/>
 				</div>
 			</div>
 
@@ -497,24 +496,17 @@ export function InvoicePanel({
 										</Combobox>
 									</td>
 									<td className="py-1 pr-2">
-										<NativeSelect
-											className="h-8 w-24"
-											onChange={(event) =>
+										<ResponsiveSelect
+											className="w-24"
+											onValueChange={(value) =>
 												updateLine(index, {
-													type: event.target.value as "I" | "P" | "S",
+													type: value as "I" | "P" | "S",
 												})
 											}
+											options={LINE_TYPES}
+											size="sm"
 											value={line.type}
-										>
-											{LINE_TYPES.map((option) => (
-												<NativeSelectOption
-													key={option.value}
-													value={option.value}
-												>
-													{option.label}
-												</NativeSelectOption>
-											))}
-										</NativeSelect>
+										/>
 									</td>
 									<td className="py-1 pr-2">
 										<Input

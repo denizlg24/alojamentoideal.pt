@@ -2,7 +2,7 @@
 
 import { Button } from "@workspace/ui/components/button";
 import { Label } from "@workspace/ui/components/label";
-import { NativeSelect } from "@workspace/ui/components/native-select";
+import { ResponsiveSelect } from "@workspace/ui/components/responsive-select";
 import { Skeleton } from "@workspace/ui/components/skeleton";
 import {
 	type ActivityBookingDescription,
@@ -12,6 +12,7 @@ import {
 	type ActivityQuestionEntry,
 	activeDropoffQuestions,
 	activePickupQuestions,
+	CUSTOM_PICKUP_PLACE_ID,
 	isBooleanField,
 	placeDetailsPossible,
 	resolvePlaceId,
@@ -58,32 +59,43 @@ function PlaceControl({
 	const selected =
 		prompt.kind === "pickup" ? draft.pickupPlaceId : draft.dropoffPlaceId;
 	const id = `${prompt.kind}-${cartItemId}`;
+	const isPickup = prompt.kind === "pickup";
+	const options = [
+		...(prompt.optional
+			? [
+					{
+						label: isPickup ? "No pickup needed" : "No drop-off needed",
+						value: "",
+					},
+				]
+			: !prompt.customAllowed
+				? [{ label: "Select a location", value: "" }]
+				: []),
+		...(isPickup && prompt.customAllowed
+			? [
+					{
+						label: "I want to specify my own pick-up",
+						value: CUSTOM_PICKUP_PLACE_ID,
+					},
+				]
+			: []),
+		...prompt.places.map((place) => ({ label: place.title, value: place.id })),
+	];
 	return (
 		<div className="flex flex-col gap-1.5">
 			<Label htmlFor={id}>
 				{prompt.label}
 				<RequiredMark required={!prompt.optional} />
 			</Label>
-			<NativeSelect
+			<ResponsiveSelect
 				aria-invalid={invalid}
 				className="w-full"
 				id={id}
-				onChange={(event) => onSelect(cartItemId, event.target.value || null)}
-				value={selected ?? ""}
-			>
-				<option value="">
-					{prompt.optional
-						? prompt.kind === "pickup"
-							? "No pickup needed"
-							: "No drop-off needed"
-						: "Select a location"}
-				</option>
-				{prompt.places.map((place) => (
-					<option key={place.id} value={place.id}>
-						{place.title}
-					</option>
-				))}
-			</NativeSelect>
+				onValueChange={(value) => onSelect(cartItemId, value || null)}
+				options={options}
+				placeholder="Select a location"
+				value={resolvePlaceId(prompt, selected) ?? ""}
+			/>
 		</div>
 	);
 }

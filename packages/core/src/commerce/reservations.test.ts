@@ -228,6 +228,43 @@ describe("buildBokunActivityCheckoutRequest", () => {
 		]);
 	});
 
+	test("lifts a custom pickup description onto Bokun's pickup fields", () => {
+		const result = buildBokunActivityCheckoutRequest({
+			...activityHoldRequest,
+			activity: {
+				...activityHoldRequest.activity,
+				answers: [
+					{
+						answer: "Rua de Cedofeita 100, Porto",
+						group: "pickup",
+						participantIndex: null,
+						questionId: "pickupDescription",
+					},
+					{
+						answer: "TP123",
+						group: "pickup",
+						participantIndex: null,
+						questionId: "flightNumber",
+					},
+				],
+				pickupPlaceId: null,
+			},
+		});
+
+		const directBooking = result.directBooking as Record<string, unknown>;
+		const [activity] = directBooking.activityBookings as Record<
+			string,
+			unknown
+		>[];
+		expect(activity?.pickup).toBe(true);
+		expect(activity?.pickupPlaceId).toBeUndefined();
+		expect(activity?.pickupDescription).toBe("Rua de Cedofeita 100, Porto");
+		// The reserved id is lifted, not echoed as a question answer.
+		expect(activity?.pickupAnswers).toEqual([
+			{ questionId: "flightNumber", values: ["TP123"] },
+		]);
+	});
+
 	test("falls back to first passenger language and date of birth for main contact", () => {
 		const result = buildBokunActivityCheckoutRequest({
 			activity: {

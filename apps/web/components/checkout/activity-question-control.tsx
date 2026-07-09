@@ -4,7 +4,7 @@ import type { ActivityQuestionField } from "@workspace/core/activities";
 import { Checkbox } from "@workspace/ui/components/checkbox";
 import { Input } from "@workspace/ui/components/input";
 import { Label } from "@workspace/ui/components/label";
-import { NativeSelect } from "@workspace/ui/components/native-select";
+import { ResponsiveSelect } from "@workspace/ui/components/responsive-select";
 import { Textarea } from "@workspace/ui/components/textarea";
 import { isBooleanField } from "@/lib/activities/booking-details";
 
@@ -93,20 +93,20 @@ export function ActivityQuestionControl({
 		return (
 			<div className="flex flex-col gap-1.5">
 				<QuestionLabel field={field} id={id} required={isRequired} />
-				<NativeSelect
+				<ResponsiveSelect
 					aria-invalid={invalid}
 					className="w-full"
 					id={id}
-					onChange={(event) => onChange(event.target.value)}
+					onValueChange={onChange}
+					options={[
+						{ label: "Select an option", value: "" },
+						...field.options.map((option) => ({
+							label: option.label,
+							value: option.value,
+						})),
+					]}
 					value={value}
-				>
-					<option value="">Select an option</option>
-					{field.options.map((option) => (
-						<option key={option.value} value={option.value}>
-							{option.label}
-						</option>
-					))}
-				</NativeSelect>
+				/>
 			</div>
 		);
 	}
