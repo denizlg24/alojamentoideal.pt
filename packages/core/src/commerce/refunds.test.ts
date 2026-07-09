@@ -1,6 +1,7 @@
 import { describe, expect, it } from "bun:test";
 import {
 	activityReversalAmountMinor,
+	isPermanentStripeError,
 	REFUND_PRESET_PERCENTS,
 	refundPresetAmountMinor,
 	stripeRefundReason,
@@ -110,5 +111,35 @@ describe("stripeRefundReason", () => {
 
 	it("maps our 'other' reason to an omitted Stripe reason", () => {
 		expect(stripeRefundReason("other")).toBeUndefined();
+	});
+});
+
+describe("isPermanentStripeError", () => {
+	it("classifies Stripe 4xx error types as permanent", () => {
+		for (const type of [
+			"StripeInvalidRequestError",
+			"StripeCardError",
+			"StripeAuthenticationError",
+			"StripePermissionError",
+			"StripeIdempotencyError",
+		]) {
+			expect(isPermanentStripeError({ type })).toBe(true);
+		}
+	});
+
+	it("treats connection, rate limit and Stripe 5xx errors as transient", () => {
+		expect(isPermanentStripeError({ type: "StripeConnectionError" })).toBe(
+			false,
+		);
+		expect(isPermanentStripeError({ type: "StripeRateLimitError" })).toBe(
+			false,
+		);
+		expect(isPermanentStripeError({ type: "StripeAPIError" })).toBe(false);
+	});
+
+	it("treats non-Stripe errors as transient", () => {
+		expect(isPermanentStripeError(new Error("socket hang up"))).toBe(false);
+		expect(isPermanentStripeError(null)).toBe(false);
+		expect(isPermanentStripeError("boom")).toBe(false);
 	});
 });
