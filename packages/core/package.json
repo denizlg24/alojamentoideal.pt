@@ -64,6 +64,10 @@
 			"types": "./src/observability/index.ts",
 			"default": "./src/observability/index.ts"
 		},
+		"./owner": {
+			"types": "./src/owner/index.ts",
+			"default": "./src/owner/index.ts"
+		},
 		"./settings": {
 			"types": "./src/settings/index.ts",
 			"default": "./src/settings/index.ts"

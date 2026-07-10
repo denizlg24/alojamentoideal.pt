@@ -15,7 +15,13 @@ export interface RuntimeSettingDefinition {
 	defaultValue: AppSettingValue;
 	description: string;
 	envName?: string;
-	group: "bokun" | "features" | "hostify" | "hostkit" | "payments";
+	group:
+		| "bokun"
+		| "communications"
+		| "features"
+		| "hostify"
+		| "hostkit"
+		| "payments";
 	key: string;
 	label: string;
 	max?: number;
@@ -24,6 +30,15 @@ export interface RuntimeSettingDefinition {
 }
 
 export const runtimeSettingDefinitions = [
+	{
+		defaultValue: "geral@alojamentoideal.pt",
+		description:
+			"Inbox that receives new property-owner enquiries from the public website.",
+		group: "communications",
+		key: "communications.ownerContactEmail",
+		label: "Property-owner enquiry inbox",
+		type: "string",
+	},
 	{
 		defaultValue: true,
 		description: "Create live Hostify reservations during checkout.",

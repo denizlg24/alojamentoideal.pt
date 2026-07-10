@@ -131,6 +131,12 @@ export function validateRuntimeSettingValue(
 				);
 			}
 		}
+		if (key === "communications.ownerContactEmail") {
+			if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed)) {
+				throw new Error(`${definition.label} must be a valid email address`);
+			}
+			return trimmed.toLowerCase();
+		}
 		if (key === "bokun.activityLang" && trimmed) {
 			if (!/^[A-Za-z]{2,3}(?:[-_][A-Za-z]{2,4})?$/.test(trimmed)) {
 				throw new Error(`${definition.label} must be a language code`);
@@ -213,7 +219,7 @@ async function loadRuntimeSettings(db: Database): Promise<RuntimeSettings> {
 			const envFallback = validateRuntimeSettingValue(
 				key,
 				coerceEnvValue(
-					envValue(definition.envName),
+					envValue("envName" in definition ? definition.envName : undefined),
 					definition.defaultValue,
 					definition.type,
 				),
