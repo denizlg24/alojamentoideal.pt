@@ -4,7 +4,7 @@ This is the recommended build order for Alojamento Ideal as an end-to-end app.
 The goal is to move from backend foundations to a usable customer booking flow,
 then into operations, automation, and polish.
 
-## Status (as of 2026-07-02)
+## Status (as of 2026-07-10)
 
 Legend: ✅ done · 🟡 in progress / partial · ⬜ not started
 
@@ -17,25 +17,61 @@ Legend: ✅ done · 🟡 in progress / partial · ⬜ not started
 | 4 | Payment Foundation | ✅ | Stripe PaymentIntent created from the server-side order total (never client-submitted), one idempotent intent per draft order, retry-safe card failures, `payment_intent.succeeded` / `payment_failed` webhook handling, a Stripe refund helper, and reconciliation from live PaymentIntent state when a webhook never arrives. One-round-trip payment prep (`/api/checkout/prepare-payment`) with the provider hold placed immediately before Stripe confirmation. |
 | 5 | Provider Reservation Saga | ✅ | Reserve-first saga shipped: a Hostify hold is placed before any charge, confirmed on payment success (with a re-read verifying the accept actually settled — an accepted echo on a still-pending reservation no longer confirms), compensated (auto full refund) on permanent confirm failure / amount mismatch, reconciler cron (`/api/cron/commerce/reservations`) as durability authority, bounded retry/backoff, provider-keyed gateway, idempotent reconciliation email. Remaining debt: DB-integration saga tests and registering the cron in the external scheduler (see Open debt). |
 | 6 | Customer Order Experience | ✅ | Order hub at `/order/[reference]` (overview, stay details, guests, messages) with role-scoped access (owner vs member), booking-access tokens, member invites/revoke/resend, and realtime updates. Completion page surfaces held → pending → confirmed → refunded states. Confirmation, pending-confirmation, "could not confirm / refunded", amount-mismatch, and invite emails fire from durable saga state via Maizzle-branded templates. |
-| 7 | Admin Operations | ⬜ | Order/recovery dashboard, sync health. |
-| 8 | Guest Registration and Compliance | 🟡 | Per-booking guest roster with encrypted identity data, Stripe Identity verification (or account-identity reuse), residency capture, and guest invite flows shipped as part of the order hub. Hostkit/SIBA submission shipped (2026-07-03): typed Hostkit client, durable `guest_submission_jobs` processed by `/api/cron/commerce/guest-submissions` (validateSIBA always; sendSIBA behind `HOSTKIT_SIBA_SEND_ENABLED`). Remaining: retention/purge rules, admin visibility of failed jobs (M7). |
-| 9 | Activities and Mixed Cart | ⬜ | Bokun browse/quote/reserve + mixed-cart allocation. The multi-item cart UX ships accommodation-only first; Bokun items slot into the same cart/order model later. |
-| 10 | Fiscal Documents, Messaging, Post-Stay | 🟡 | Guest↔host messaging shipped: per-booking conversations bridged to Hostify inbox (send/retry/reconcile cron + realtime UI in the order hub). Invoice/credit-note issuance via Hostkit implemented (2026-07-03) as admin-only endpoints recorded in `order_invoices`, deliberately unwired from UI/payment and gated behind `HOSTKIT_INVOICING_ENABLED`. Post-stay reconciliation not started. |
+| 7 | Admin Operations | ✅ | `apps/admin` (own Better Auth mount, root-admin seed at build, admin/owner role access): orders list + order detail with saga accept/cancel, per-reservation Hostify management, manual partial refunds with attribution (incl. Detours transfer reversals), semi-manual invoicing + credit notes, guest roster edits, and admin live chat (Hostify-bridged + internal conversations). Reconciliations overview (stuck orders, refunds, guest-submission jobs with resubmission), sync status table + manual resync, runtime settings, observability page, users page, and the Detours settlement report. |
+| 8 | Guest Registration and Compliance | 🟡 | Per-booking guest roster with encrypted identity data, Stripe Identity verification (or account-identity reuse), residency capture, and guest invite flows shipped as part of the order hub. Hostkit/SIBA submission shipped (2026-07-03): typed Hostkit client, durable `guest_submission_jobs` processed by `/api/cron/commerce/guest-submissions` (validateSIBA always; sendSIBA behind `HOSTKIT_SIBA_SEND_ENABLED`). Failed jobs are visible and resubmittable from the admin reconciliations page. Remaining: retention/purge rules and the `sendSIBA` business sign-off. |
+| 9 | Activities and Mixed Cart | ✅ | `/activities` browse + detail + gallery from the Bokun cache (daily self-gated sync via `/api/cron/bokun/activities`, `revalidateTag` on change), single-day booking widget with live pricing, add-to-cart and single-activity checkout (pickup/dropoff + Bokun booking questions collected before payment, `RESERVE_FOR_EXTERNAL_PAYMENT` hold), mixed stay+activity carts with Stripe `transfer_data.amount` money split and `reverse_transfer` refunds, order-hub activity page (live Bokun reads, question edits, PDF tickets), and cancellation policies surfaced on home + activity pages. |
+| 10 | Fiscal Documents, Messaging, Post-Stay | 🟡 | Guest↔host messaging shipped: per-booking conversations bridged to Hostify inbox (send/retry/reconcile cron + realtime UI in the order hub), plus provider-`internal` conversations and the admin live-chat counterpart. Invoice/credit-note issuance via Hostkit now has its admin UI (semi-manual issuance, product combobox, credit notes) recorded in `order_invoices`, still gated behind `HOSTKIT_INVOICING_ENABLED`. Post-stay: refund reconciler cron (`/api/cron/commerce/refunds`) and the Detours settlement report shipped; broader post-stay reconciliation not started. |
 | 11 | Analytics and Optimization | 🟡 | Per-request analytics events persisted to PostgreSQL and errors to Sentry. Durable-state booking events (`reservation_provisioned`, `order_confirmed`, `order_compensated`) emitted from the saga; the broader commercial funnel (search → view → quote → checkout → payment) is still partial. |
 
-Current focus: Hostkit guest verification (SIBA) and the admin invoicing
-endpoints shipped on `feat/hostkit-guest-verification-invoicing`; see the
-iteration notes below. Next up are the release blockers (cron registration —
-now including `/api/cron/commerce/guest-submissions` — and DB-integration saga
-tests), the Hostify reservation webhook, and the admin dashboard (M7), which
-also gives the invoicing endpoints and failed submission jobs their UI.
-Activities/mixed-cart (M9) stay deferred.
+Current focus: with M7 (admin operations) and M9 (activities + mixed cart)
+merged, the remaining work is release readiness, not features. The launch
+blockers and the minimum production feature set are tracked in
+`docs/production-viability.md`; the headline items are external cron
+registration (all eight routes in `docs/sync-routes.md`), the missing legal
+and content pages, SIBA send sign-off, and the invoicing enablement decision.
+In-flight branch `fix/admin-refunds-cart-responsiveness` hardens admin refunds
+(reservation cancel on refund) and the cart's local-first rendering.
 
 ## Technical Notes and Debt
 
 Running list of known shortcuts and follow-ups noticed during implementation.
 Keep this honest: when a debt item is paid, move the detail into the relevant
 milestone and delete it here.
+
+### Done in the activities + admin-operations iterations (2026-07-03 → 2026-07-10)
+
+- ✅ **M9 Bokun activities.** `/activities` list, detail and gallery pages served
+  from a DB-backed Bokun cache (PR #41): configured activity id list, daily
+  self-gated sync behind `/api/cron/bokun/activities` (interval/lease/staleness
+  env-tunable, `revalidateTag` per changed activity), and a single-day booking
+  widget with live pricing.
+- ✅ **M9 activity checkout.** Single-activity checkout (PR #44): pickup/dropoff
+  places and Bokun booking questions collected before payment, activity holds
+  via `RESERVE_FOR_EXTERNAL_PAYMENT`, and the order hub gained a live activity
+  page (Bokun re-reads, question edits, PDF ticket downloads).
+- ✅ **M9 mixed carts.** Stay + activity carts purchase in one payment (PR #45):
+  Stripe `transfer_data.amount` splits activity money to the connected account,
+  refunds use `reverse_transfer`, and cancellation policies render on home and
+  activity pages.
+- ✅ **M7 admin app.** `apps/admin` (port 3001) with its own Better Auth mount
+  and root-admin seeding: orders list/detail with saga accept/cancel,
+  per-reservation Hostify management, manual partial refunds with attribution
+  and Detours transfer reversals, semi-manual invoicing + credit notes UI over
+  the previously dark endpoints, guest roster edits, admin live chat (Hostify +
+  internal conversations), reconciliations overview (stuck orders, refunds,
+  guest-submission jobs with resubmission), sync status table with manual
+  resync, runtime settings, observability, and users pages, plus the Detours
+  settlement report.
+- ✅ **Refund durability.** Manual refunds ride a ledger (`order_refunds`) with
+  reserved amounts and stored Stripe idempotency keys; the new
+  `/api/cron/commerce/refunds` reconciler resumes crashed `pending` rows and
+  retries owed transfer reversals.
+- ✅ **Optimistic cart + availability fixes.** Optimistic `/cart` and checkout
+  edits with race guards (PR #42), Hostify calendar v2 stay rules, and the
+  local-first cart snapshot work now in review on
+  `fix/admin-refunds-cart-responsiveness` (including the idempotency-key fix
+  that made re-adding a removed item work, with the repo's first DB-backed
+  integration test pinning the add → remove → re-add contract).
 
 ### Done in the Hostkit guest-verification + invoicing iteration (2026-07-03)
 
@@ -237,27 +273,34 @@ milestone and delete it here.
 
 ### Open debt
 
-- ⬜ **Reconciler cron registration.** `vercel.json` intentionally has no `crons`
-  block; `/api/cron/commerce/reservations` must be registered in the external
-  scheduler (`Authorization: Bearer $CRON_SECRET`, ~5-minute cadence, alert on
-  `pending` older than `checkoutExpiresAt + grace`) before release. The same
-  applies to `/api/cron/commerce/guest-submissions` (15-30 min cadence) — the
-  sweep is the only trigger for SIBA submission. See `docs/sync-routes.md`.
+- ⬜ **Cron registration.** `vercel.json` intentionally has no `crons` block;
+  all eight routes in `docs/sync-routes.md` must be registered in the external
+  scheduler before release. The hard blockers are
+  `/api/cron/commerce/reservations` (~5-minute cadence, alert on `pending`
+  older than `checkoutExpiresAt + grace`), `/api/cron/commerce/refunds`
+  (10-15 min; resumes crashed refunds and owed transfer reversals), and
+  `/api/cron/commerce/guest-submissions` (15-30 min; the sweep is the only
+  trigger for SIBA submission). `/api/cron/bokun/activities` keeps the
+  activities catalog alive (hourly ping, self-gated to a daily sync).
 - ⬜ **SIBA auto-filing sign-off.** Jobs stop after `validateSIBA`; flipping
   `HOSTKIT_SIBA_SEND_ENABLED=true` makes them file the bulletin (`sendSIBA`).
   Needs an explicit business decision, plus `HOSTKIT_API_KEYS` provisioned per
   property in production.
-- ⬜ **Invoicing endpoints are dark.** Implemented + tested at the mapper level
-  but gated by `HOSTKIT_INVOICING_ENABLED` and wired to no UI. Before
-  enabling: verify the certified product ids (AL/TMT/CF/SAL/EXTRAS) match the
-  production Hostkit invoicing account, confirm Hostkit accepts negative
-  discount lines, and decide the issuance moment (manual via M7 dashboard vs
-  automatic post-confirmation). Guest data retention/purge rules still pending
-  (`purge_after` is stored but nothing purges yet).
+- ⬜ **Invoicing enablement decision.** The admin UI over the invoicing
+  endpoints shipped with M7, but issuance stays gated by
+  `HOSTKIT_INVOICING_ENABLED`. Before enabling: verify the certified product
+  ids (AL/TMT/CF/SAL/EXTRAS) match the production Hostkit invoicing account,
+  confirm Hostkit accepts negative discount lines, and decide the issuance
+  moment (manual via the dashboard vs automatic post-confirmation). Guest data
+  retention/purge rules still pending (`purge_after` is stored but nothing
+  purges yet).
 - ⬜ **DB-integration saga tests.** Only the gateway / mapper / refund seams are
   unit-tested. The hold→confirm happy path, payment-fail, compensation,
   abandoned-hold expiry, webhook-missed cron resolve, idempotent re-delivery, and
-  double-book guard need a DB harness, which the repo does not have yet.
+  double-book guard still need coverage. A working pattern now exists:
+  `packages/core/src/commerce/cart-items.integration.test.ts` runs the real
+  `CommerceService` against the migrated dev/CI Postgres with injected quote
+  mocks and skips itself when the database is unreachable.
 - ⬜ **Saga minor gaps.** Zero-total orders place no hold; `fees[]` /
   `security_price` are not mapped (no persisted Hostify `fee_id`); no distinct
   `order_paid` funnel event.
@@ -440,18 +483,16 @@ Outcome: product decisions are based on measured behavior, not guesses.
 
 ## Recommended Immediate Sequence
 
-The single-stay booking path (catalog -> live quote -> checkout -> payment ->
-Hostify confirmation -> order hub) is live end to end. Next concrete tasks:
+The full purchase path (catalog -> live quote -> mixed stay/activity cart ->
+one payment -> provider confirmation -> order hub) and the admin operations
+console are live end to end. What remains is release readiness, tracked in
+detail in `docs/production-viability.md`:
 
-1. Release blockers: register the reservation + conversation +
-   guest-submission crons in the external scheduler, provision
-   `HOSTKIT_API_KEYS`, and build a DB-integration harness for the saga and
-   guest-submission tests.
+1. Launch blockers: register all eight crons in the external scheduler, ship
+   the legal/content pages (terms, privacy, cookie consent, contact/help),
+   provision production env (`HOSTKIT_API_KEYS`, Stripe live keys, email
+   domain auth), and land the SIBA send + invoicing enablement decisions.
 2. Hostify reservation webhook -> targeted cache invalidation for out-of-band
-   (OTA) bookings.
-3. Admin order/recovery dashboard (M7) — also the UI for the dark invoicing
-   endpoints and failed guest-submission jobs.
-4. Bokun activities + mixed cart (M9), reusing the multi-item cart/order model.
-
-Keep Bokun, invoices, and advanced admin tools out of the cart iteration so the
-first multi-booking purchase path stays narrow and stable.
+   (OTA) bookings, or a tighter near-term availability refresh cadence.
+3. DB-integration saga tests on the new integration-test pattern.
+4. Localization (pt first) and the remaining IA pages (About, FAQ, /owner).
