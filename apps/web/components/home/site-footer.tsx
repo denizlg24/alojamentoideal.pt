@@ -27,10 +27,13 @@ const FOOTER_COLUMNS = [
 ] as const;
 
 const LEGAL_LINKS = [
+	{ href: "/legal/company-information", label: "Company information" },
 	{ href: "/legal/privacy", label: "Privacy Policy" },
 	{ href: "/legal/terms", label: "Terms & Conditions" },
+	{ href: "/legal/cancellation-and-refunds", label: "Cancellations & refunds" },
 	{ href: "/legal/data-protection", label: "Data Protection" },
 	{ href: "/legal/cookies", label: "Cookie Policy" },
+	{ href: "/legal/complaints", label: "Complaints" },
 ] as const;
 
 const CURRENT_YEAR = new Date().getFullYear();
