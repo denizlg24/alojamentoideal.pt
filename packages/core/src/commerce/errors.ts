@@ -39,7 +39,10 @@ export type CommerceErrorCode =
 	| "refund_amount_exceeds_refundable"
 	| "refund_amount_invalid"
 	| "refund_failed"
+	| "refund_precondition_failed"
 	| "refund_unavailable"
+	| "reservation_cancel_failed"
+	| "reservation_gateway_unavailable"
 	| "reservation_unavailable"
 	| "too_many_guests";
 

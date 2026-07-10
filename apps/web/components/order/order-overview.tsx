@@ -215,6 +215,25 @@ function paymentStatusLabel(detail: OrderDetail): string {
 	}
 }
 
+function itemStatusLabel(
+	status: NonNullable<
+		OrderDetail["items"][number]["providerBooking"]
+	>["status"],
+): string {
+	switch (status) {
+		case "cancelled":
+			return "Cancelled";
+		case "completed":
+			return "Completed";
+		case "confirmed":
+			return "Confirmed";
+		case "failed":
+			return "Could not confirm";
+		default:
+			return "Pending";
+	}
+}
+
 function stringPart(value: unknown): string | null {
 	return typeof value === "string" && value.trim().length > 0
 		? value.trim()
@@ -272,6 +291,12 @@ export function OrderOverview({ detail }: { detail: OrderDetail }) {
 						<div className="py-2 first:pt-0" key={item.id}>
 							<p className="font-medium text-sm">{item.title}</p>
 							<div className="mt-1">
+								{item.providerBooking && (
+									<Field
+										label="Status"
+										value={itemStatusLabel(item.providerBooking.status)}
+									/>
+								)}
 								{item.checkIn && item.checkOut && (
 									<Field
 										label="Dates"

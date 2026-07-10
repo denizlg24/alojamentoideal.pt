@@ -1,6 +1,8 @@
 import { describe, expect, it } from "bun:test";
+import { CommerceError } from "./errors";
 import {
 	activityReversalAmountMinor,
+	isPermanentReservationCancelError,
 	isPermanentStripeError,
 	REFUND_PRESET_PERCENTS,
 	refundPresetAmountMinor,
@@ -141,5 +143,34 @@ describe("isPermanentStripeError", () => {
 		expect(isPermanentStripeError(new Error("socket hang up"))).toBe(false);
 		expect(isPermanentStripeError(null)).toBe(false);
 		expect(isPermanentStripeError("boom")).toBe(false);
+	});
+});
+
+describe("isPermanentReservationCancelError", () => {
+	it("classifies non-503 commerce errors as permanent", () => {
+		for (const [code, status] of [
+			["order_not_found", 404],
+			["item_not_found", 422],
+			["reservation_cancel_failed", 502],
+		] as const) {
+			expect(
+				isPermanentReservationCancelError(
+					new CommerceError(code, "boom", status),
+				),
+			).toBe(true);
+		}
+	});
+
+	it("treats 503 commerce errors as transient", () => {
+		expect(
+			isPermanentReservationCancelError(
+				new CommerceError("reservation_cancel_failed", "retry later", 503),
+			),
+		).toBe(false);
+	});
+
+	it("treats unknown errors as transient", () => {
+		expect(isPermanentReservationCancelError(new Error("socket"))).toBe(false);
+		expect(isPermanentReservationCancelError(null)).toBe(false);
 	});
 });

@@ -38,6 +38,7 @@ export function StayCalendar({
 	return (
 		<div className="flex flex-col gap-1">
 			<Calendar
+				className="w-full! bg-transparent"
 				mode="range"
 				showOutsideDays={false}
 				numberOfMonths={numberOfMonths}

@@ -527,7 +527,11 @@ function BookingWidgetInner({
 						/>
 						<DrawerTrigger asChild>
 							<Button size="lg" disabled={availabilityLoading}>
-								Reserve
+								{quote.status === "ready"
+									? "Reserve"
+									: quote.status === "loading"
+										? "Loading"
+										: "Add dates"}
 							</Button>
 						</DrawerTrigger>
 					</div>
@@ -552,7 +556,9 @@ function BookingWidgetInner({
 												</span>
 											</span>
 										</AccordionTrigger>
-										<AccordionContent>{renderDates()}</AccordionContent>
+										<AccordionContent className="mb-8!">
+											{renderDates()}
+										</AccordionContent>
 									</AccordionItem>
 									<AccordionItem value="guests">
 										<AccordionTrigger>

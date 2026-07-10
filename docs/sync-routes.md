@@ -1,7 +1,7 @@
 # Sync routes
 
 These routes are operational endpoints that should be called by a scheduler to
-keep Hostify-derived data fresh in the web app.
+keep provider-derived data fresh and commerce state durable in the web app.
 
 Production base URL: `https://alojamentoideal.pt`
 
@@ -31,6 +31,8 @@ external scheduler that already calls the Hostify syncs.
 | `/api/cron/commerce/reservations` | Confirms paid provider holds, sends pending-confirmation nudges, retries finalization emails, compensates/refunds failed confirmations, and releases abandoned checkout holds. | Every 5 minutes. This is a release blocker for reserve-first checkout. | Sends confirmation, pending and compensation emails through the route's email handlers. Keep this on the same external scheduler as the Hostify crons. |
 | `/api/cron/commerce/conversations` | Provisions order conversations for confirmed Hostify bookings and imports inbox messages into the local projection. | Every 1 to 5 minutes. | Publishes realtime updates when Pusher is configured; otherwise keeps the polling read model fresh. Keep this on the same external scheduler as the Hostify crons. |
 | `/api/cron/commerce/guest-submissions` | Sweeps confirmed bookings with a complete guest roster into `guest_submission_jobs`, syncs each roster to Hostkit (removeAllGuests, addGuest per guest, validateSIBA; sendSIBA only when `HOSTKIT_SIBA_SEND_ENABLED=true`), and sends guest-info reminder emails for incomplete rosters. | Every 15 to 30 minutes. | Hostkit retries ride reservation-ingestion lag ("Unknown reservation code" retries on a 5m-6h ladder). Guest-info reminders use reverse backoff, halving the remaining time to check-in after each successful email with 4h and 14d bounds. Listings without a `HOSTKIT_API_KEYS` entry park their jobs on a 6h cadence without consuming attempts. |
+| `/api/cron/commerce/refunds` | Reconciles the manual refund ledger: resumes `pending` refund rows left by a crash between the amount reservation, the Stripe call, and the ledger update, and retries Detours transfer reversals that failed after their refund succeeded. | Every 10 to 15 minutes. | Only touches `pending` rows older than 10 minutes, which keeps it clear of a normal in-flight admin refund; an unusually slow admin request can still overlap one run. Safe to rerun and safe under that overlap: every Stripe call reuses the row's stored idempotency key, and the reservation cancel path is guarded by a per-booking mutation lock. |
+| `/api/cron/bokun/activities` | Polls the configured Bokun activity list into the local activities cache. | Ping hourly; the route self-gates to one real sync per `BOKUN_ACTIVITY_SYNC_INTERVAL_HOURS` (default 24h) and answers `skipped` in between. | Revalidates the activities list tag and each changed activity detail tag. A failed run schedules a retry within minutes instead of waiting a full interval; a sync lease (default 10 min) prevents overlapping runs. |
 
 ## Example pings
 
@@ -58,6 +60,14 @@ curl -fsS \
 curl -fsS \
   -H "Authorization: Bearer $CRON_SECRET" \
   https://alojamentoideal.pt/api/cron/commerce/guest-submissions
+
+curl -fsS \
+  -H "Authorization: Bearer $CRON_SECRET" \
+  https://alojamentoideal.pt/api/cron/commerce/refunds
+
+curl -fsS \
+  -H "Authorization: Bearer $CRON_SECRET" \
+  https://alojamentoideal.pt/api/cron/bokun/activities
 ```
 
 ## Notes
@@ -72,6 +82,12 @@ curl -fsS \
   processes Hostkit/SIBA jobs (including re-enqueueing when a roster changes
   after a successful submission), so registering this route is what turns the
   M8 compliance half on.
+- Refund reconciliation is likewise the only recovery path for a refund that
+  crashed mid-flight or a transfer reversal that failed after its refund; the
+  admin UI creates the ledger rows, the cron finishes stuck ones.
+- The Bokun activities sync stores its own sync state and interval; the
+  scheduler cadence only bounds how quickly a due sync is picked up, so an
+  hourly ping is cheap and keeps failure retries prompt.
 - Review and pricing syncs intentionally skip while the listing sync state is not
   `complete`. After a fresh database reset, keep pinging `/api/cron/hostify/listings`
   until it completes before expecting review or pricing data to fill in.

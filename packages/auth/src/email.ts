@@ -643,6 +643,37 @@ export interface OrderCompensationEmailInput {
 	browseUrl: string;
 }
 
+export interface OrderRefundEmailInput {
+	/** Formatted refund amount, e.g. "€64.00". */
+	amount: string;
+	greeting: string;
+	/** Present when this refund also cancelled one reservation. */
+	itemTitle?: string;
+	orderNumber: string;
+}
+
+/** Builds the receipt sent for an operator-issued partial or full refund. */
+export function buildOrderRefundEmail(
+	input: OrderRefundEmailInput,
+): EmailMessage {
+	const subject = `Refund issued for booking ${safeSubjectPart(input.orderNumber)}`;
+	const reservationLine = input.itemTitle
+		? `We have also cancelled your reservation for ${input.itemTitle}.`
+		: "Your existing reservations remain unchanged.";
+	const text = [
+		input.greeting,
+		"",
+		`We have issued a refund of ${input.amount} for booking ${input.orderNumber}.`,
+		reservationLine,
+		"The refund is returning to your original payment method and can take a few business days to appear, depending on your bank.",
+		"",
+		"If you have any questions, reply to this email and our team will help.",
+		"",
+		`The ${APP_NAME} team`,
+	].join("\n");
+	return { html: plainCompensationHtml(text), subject, text };
+}
+
 function compensationPlaceholders(
 	input: OrderCompensationEmailInput,
 	transform: (value: string) => string,

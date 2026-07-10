@@ -8,9 +8,9 @@ import { useEffect, useState } from "react";
 import {
 	CART_CHANGED_EVENT,
 	type CartChangedDetail,
-	loadStoredCart,
 	readCachedItemCount,
 	readStoredCartId,
+	refreshStoredCart,
 } from "@/lib/checkout/cart-store";
 
 /**
@@ -35,8 +35,8 @@ export function CartButton({ opaque }: { opaque: boolean }) {
 		window.addEventListener("storage", onStorage);
 
 		if (readStoredCartId()) {
-			// Revalidates the badge; loadStoredCart broadcasts the fresh count.
-			void loadStoredCart();
+			// Revalidates the badge without making server reads the render source.
+			void refreshStoredCart();
 		}
 
 		return () => {
