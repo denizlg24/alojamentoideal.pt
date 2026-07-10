@@ -165,9 +165,20 @@ export function isPermanentStripeError(error: unknown): boolean {
 	);
 }
 
+/**
+ * Whether a reservation-cancel failure is permanent for the refund ledger.
+ * `CommerceService.cancelOrderItemReservation` maps transient provider
+ * failures, gateway unavailability and mutation-lock contention to 503;
+ * every other status (404/422/502) cannot succeed on a blind retry. Unknown
+ * errors count as transient so the reconciler keeps retrying them.
+ */
+export function isPermanentReservationCancelError(error: unknown): boolean {
+	return error instanceof CommerceError && error.status !== 503;
+}
+
 /** Outcome counts for one `reconcileRefunds` run, returned to the cron. */
 export interface RefundReconciliationSummary {
-	/** Pending rows whose Stripe refund failed permanently; reservation rolled back. */
+	/** Pending rows whose cancel or Stripe refund failed permanently; reservation rolled back. */
 	failedRefunds: number;
 	/** Pending rows completed end to end (refund and, when owed, reversal). */
 	resumedRefunds: number;
@@ -202,7 +213,9 @@ const RECONCILE_BATCH_SIZE = 25;
  * Over-refund safety: the order aggregate is reserved atomically (a guarded
  * `amount_refunded += n WHERE amount_refunded + n <= amount_paid`) before the
  * Stripe call, so two concurrent refunds can never exceed the captured amount.
- * A Stripe failure rolls the reservation back and parks the ledger row failed.
+ * Permanent failures roll the reservation back and park the ledger row failed;
+ * transient cancel or Stripe failures leave the row pending for the
+ * reconciler to resume.
  */
 export class OrderRefundService {
 	readonly #db: Database;
@@ -364,30 +377,42 @@ export class OrderRefundService {
 			try {
 				await this.#cancelAttributedItem(order.id, orderItemId);
 			} catch (error) {
-				await this.#db.transaction(async (tx) => {
-					await tx
-						.update(orderTable)
-						.set({
-							amountRefundedMinor: sql`${orderTable.amountRefundedMinor} - ${input.amountMinor}`,
-							updatedAt: this.#now(),
-						})
-						.where(eq(orderTable.id, order.id));
-					await tx
+				if (isPermanentReservationCancelError(error)) {
+					await this.#db.transaction(async (tx) => {
+						await tx
+							.update(orderTable)
+							.set({
+								amountRefundedMinor: sql`${orderTable.amountRefundedMinor} - ${input.amountMinor}`,
+								updatedAt: this.#now(),
+							})
+							.where(eq(orderTable.id, order.id));
+						await tx
+							.update(orderRefundTable)
+							.set({
+								lastErrorMessage: describeRefundError(error),
+								status: "failed",
+								updatedAt: this.#now(),
+							})
+							.where(eq(orderRefundTable.id, initializedRecordId));
+					});
+				} else {
+					// Transient cancel failure: keep the amount reserved and the row
+					// pending so the reconciler retries the cancel and the refund.
+					await this.#db
 						.update(orderRefundTable)
 						.set({
 							lastErrorMessage: describeRefundError(error),
-							status: "failed",
 							updatedAt: this.#now(),
 						})
 						.where(eq(orderRefundTable.id, initializedRecordId));
-				});
+				}
 				if (error instanceof CommerceError) {
 					throw error;
 				}
 				throw new CommerceError(
 					"refund_precondition_failed",
 					`The refund was not issued because its reservation update failed: ${describeRefundError(error)}`,
-					502,
+					503,
 				);
 			}
 		}
@@ -401,21 +426,34 @@ export class OrderRefundService {
 				reason: stripeRefundReason(input.reason),
 			});
 		} catch (error) {
-			await this.#db
-				.update(orderTable)
-				.set({
-					amountRefundedMinor: sql`${orderTable.amountRefundedMinor} - ${input.amountMinor}`,
-					updatedAt: this.#now(),
-				})
-				.where(eq(orderTable.id, order.id));
-			await this.#db
-				.update(orderRefundTable)
-				.set({
-					lastErrorMessage: describeRefundError(error),
-					status: "failed",
-					updatedAt: this.#now(),
-				})
-				.where(eq(orderRefundTable.id, recordId));
+			if (orderItemId && !isPermanentStripeError(error)) {
+				// The attributed reservation is already cancelled; keep the row
+				// pending so the reconciler resumes the Stripe refund instead of
+				// stranding a cancelled item with no refund.
+				await this.#db
+					.update(orderRefundTable)
+					.set({
+						lastErrorMessage: describeRefundError(error),
+						updatedAt: this.#now(),
+					})
+					.where(eq(orderRefundTable.id, recordId));
+			} else {
+				await this.#db
+					.update(orderTable)
+					.set({
+						amountRefundedMinor: sql`${orderTable.amountRefundedMinor} - ${input.amountMinor}`,
+						updatedAt: this.#now(),
+					})
+					.where(eq(orderTable.id, order.id));
+				await this.#db
+					.update(orderRefundTable)
+					.set({
+						lastErrorMessage: describeRefundError(error),
+						status: "failed",
+						updatedAt: this.#now(),
+					})
+					.where(eq(orderRefundTable.id, recordId));
+			}
 			if (error instanceof CommerceError) {
 				throw error;
 			}
@@ -551,8 +589,42 @@ export class OrderRefundService {
 			if (row.orderItemId) {
 				try {
 					await this.#cancelAttributedItem(row.orderId, row.orderItemId);
-				} catch {
-					summary.stillPending += 1;
+				} catch (error) {
+					if (!isPermanentReservationCancelError(error)) {
+						summary.stillPending += 1;
+						continue;
+					}
+					const failedAt = this.#now();
+					await this.#db.transaction(async (tx) => {
+						await tx
+							.update(orderTable)
+							.set({
+								amountRefundedMinor: sql`${orderTable.amountRefundedMinor} - ${row.amountMinor}`,
+								updatedAt: failedAt,
+							})
+							.where(eq(orderTable.id, row.orderId));
+						await tx
+							.update(orderRefundTable)
+							.set({
+								lastErrorMessage: describeRefundError(error),
+								status: "failed",
+								updatedAt: failedAt,
+							})
+							.where(eq(orderRefundTable.id, row.id));
+					});
+					trackEvent({
+						metadata: {
+							amountMinor: row.amountMinor,
+							error: describeRefundError(error),
+							orderId: row.orderId,
+							refundRecordId: row.id,
+						},
+						name: "order_refund_reconcile_failed",
+						provider: "stripe",
+						severity: "error",
+						type: "integration",
+					});
+					summary.failedRefunds += 1;
 					continue;
 				}
 			}

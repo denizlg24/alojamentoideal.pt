@@ -1366,8 +1366,8 @@ export class BokunReservationGateway implements ProviderReservationGateway {
 				raw: toRecord(response),
 			};
 		} catch (error) {
-			const verified = await this.#verifyBookingReleased(args.reservationId);
-			if (verified?.kind === "ok") {
+			const verified = await this.#verifyBookingCancelled(args.reservationId);
+			if (verified) {
 				return verified;
 			}
 			return toBokunMutationFailure(error);
@@ -1428,6 +1428,42 @@ export class BokunReservationGateway implements ProviderReservationGateway {
 					code: "cancel_not_settled",
 					kind: "transient",
 					message: `Bokun booking ${confirmationCode} is still ${status}; abort must be retried.`,
+				};
+			}
+			return null;
+		} catch {
+			return null;
+		}
+	}
+
+	/**
+	 * Post-failure verification for `cancelReservation`. Unlike the abort path,
+	 * a booking still confirmed does not mean the operation is impossible: it
+	 * means the cancel has not landed yet, so every non-terminal status maps to
+	 * a retryable failure instead of a permanent one.
+	 */
+	async #verifyBookingCancelled(
+		confirmationCode: string,
+	): Promise<SettledMutateResult | null> {
+		try {
+			const response = (await this.#client.v1.booking.getByConfirmationCode(
+				confirmationCode,
+				{},
+				this.#context,
+			)) as Record<string, unknown>;
+			const status = bookingStatus(response);
+			if (status && BOKUN_TERMINAL_STATUSES.has(status)) {
+				return { kind: "ok", providerStatus: status, raw: response };
+			}
+			if (
+				status &&
+				(BOKUN_CONFIRMED_STATUSES.has(status) ||
+					BOKUN_HOLD_STATUSES.has(status))
+			) {
+				return {
+					code: "cancel_not_settled",
+					kind: "transient",
+					message: `Bokun booking ${confirmationCode} is still ${status}; the cancellation must be retried.`,
 				};
 			}
 			return null;

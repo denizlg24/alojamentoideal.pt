@@ -6391,52 +6391,118 @@ export class CommerceService {
 			);
 		}
 
-		let providerStatus = "cancelled";
-		let raw: Record<string, unknown> = {};
-		if (booking.providerReservationId) {
-			const result = await gateway.cancelReservation({
-				reason,
-				reservationId: booking.providerReservationId,
-				transactionId: booking.providerTransactionId,
-			});
-			if (result.kind !== "ok") {
-				await this.#recordBookingAttempt(booking, result.code, result.message);
-				throw new CommerceError(
-					"reservation_cancel_failed",
-					`The provider reservation could not be cancelled: ${result.message}`,
-					result.kind === "transient" ? 503 : 502,
+		// The provider call and the terminal write run under the same advisory
+		// lock the saga mutations use, so a concurrent refund/reconciler run on
+		// this booking waits or backs off instead of double-cancelling. Failure
+		// results are returned (not thrown) so the attempt record commits.
+		const txResult = await this.#db.transaction(
+			async (
+				tx,
+			): Promise<
+				| { kind: "already_cancelled" | "cancelled" }
+				| { kind: "booking_missing" }
+				| { kind: "cancel_failed"; message: string; transient: boolean }
+				| { kind: "lock_unavailable" }
+			> => {
+				const locked = await this.#tryBookingMutationLock(
+					tx,
+					"reservation_cancel",
+					booking.providerBookingId,
 				);
-			}
-			providerStatus = result.providerStatus ?? providerStatus;
-			raw = result.raw;
-		}
+				if (!locked) {
+					return { kind: "lock_unavailable" };
+				}
+				const current = await this.#loadBookingMutationState(
+					booking.providerBookingId,
+					tx,
+				);
+				if (!current) {
+					return { kind: "booking_missing" };
+				}
+				if (current.normalizedStatus === "cancelled") {
+					return { kind: "already_cancelled" };
+				}
 
-		const now = new Date();
-		await this.#db.transaction(async (tx) => {
-			await tx
-				.update(providerBookingTable)
-				.set({
-					lastErrorCode: null,
-					lastErrorMessage: null,
-					needsRecovery: false,
-					nextAttemptAt: now,
-					normalizedStatus: "cancelled",
-					providerStatus,
-					providerUpdatedAt: now,
-					rawOperationalPayload: raw,
-					updatedAt: now,
-				})
-				.where(eq(providerBookingTable.id, booking.providerBookingId));
-			await tx
-				.update(orderItemTable)
-				.set({ status: "cancelled", updatedAt: now })
-				.where(
-					and(
-						eq(orderItemTable.id, booking.orderItemId),
-						eq(orderItemTable.orderId, orderId),
-					),
-				);
-		});
+				let providerStatus = "cancelled";
+				let raw: Record<string, unknown> = {};
+				if (current.providerReservationId) {
+					const result = await gateway.cancelReservation({
+						reason,
+						reservationId: current.providerReservationId,
+						transactionId: current.providerTransactionId,
+					});
+					if (result.kind !== "ok") {
+						await this.#recordBookingAttempt(
+							{ ...booking, ...current },
+							result.code,
+							result.message,
+							tx,
+						);
+						return {
+							kind: "cancel_failed",
+							message: result.message,
+							transient: result.kind === "transient",
+						};
+					}
+					providerStatus = result.providerStatus ?? providerStatus;
+					raw = result.raw;
+				}
+
+				const now = new Date();
+				await tx
+					.update(providerBookingTable)
+					.set({
+						lastErrorCode: null,
+						lastErrorMessage: null,
+						needsRecovery: false,
+						nextAttemptAt: now,
+						normalizedStatus: "cancelled",
+						providerStatus,
+						providerUpdatedAt: now,
+						rawOperationalPayload: raw,
+						updatedAt: now,
+					})
+					.where(eq(providerBookingTable.id, booking.providerBookingId));
+				await tx
+					.update(orderItemTable)
+					.set({ status: "cancelled", updatedAt: now })
+					.where(
+						and(
+							eq(orderItemTable.id, booking.orderItemId),
+							eq(orderItemTable.orderId, orderId),
+						),
+					);
+				return { kind: "cancelled" };
+			},
+		);
+
+		if (txResult.kind === "lock_unavailable") {
+			throw new CommerceError(
+				"reservation_cancel_failed",
+				"Another operation is mutating this reservation; retry shortly.",
+				503,
+			);
+		}
+		if (txResult.kind === "booking_missing") {
+			throw new CommerceError(
+				"item_not_found",
+				"The attributed reservation is not part of this order.",
+				422,
+			);
+		}
+		if (txResult.kind === "cancel_failed") {
+			throw new CommerceError(
+				"reservation_cancel_failed",
+				`The provider reservation could not be cancelled: ${txResult.message}`,
+				txResult.transient ? 503 : 502,
+			);
+		}
+		if (txResult.kind === "already_cancelled") {
+			return {
+				bookingId: booking.providerBookingId,
+				outcome: "already_cancelled",
+			};
+		}
 
 		trackEvent({
 			metadata: {

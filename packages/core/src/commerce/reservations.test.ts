@@ -1096,4 +1096,85 @@ describe("BokunReservationGateway.cancelReservation", () => {
 		]);
 		expect(calls.cancel).toHaveLength(0);
 	});
+
+	test("falls back to the booking-level cancel without a transaction id", async () => {
+		const { calls, client } = fakeBokunClient({});
+		const gateway = new BokunReservationGateway({ client });
+
+		const result = await gateway.cancelReservation({
+			reason: "admin_item_refund",
+			reservationId: "BOOK-1",
+			transactionId: null,
+		});
+
+		expect(result.kind).toBe("ok");
+		expect(calls.cancel).toEqual([
+			{ body: { notify: false, refund: false }, code: "BOOK-1" },
+		]);
+		expect(calls.cancelProductBooking).toHaveLength(0);
+	});
+
+	test("maps an unsuccessful cancel response to a permanent failure", async () => {
+		const { client } = fakeBokunClient({
+			cancelProductBooking: () => ({ success: false }),
+		});
+		const gateway = new BokunReservationGateway({ client });
+
+		const result = await gateway.cancelReservation({
+			reason: "admin_item_refund",
+			reservationId: "BOOK-1",
+			transactionId: "ACT-1",
+		});
+
+		expect(result.kind).toBe("permanent");
+		if (result.kind !== "permanent") return;
+		expect(result.code).toBe("cancel_failed");
+	});
+
+	test("treats a thrown cancel as ok when the booking verifies as cancelled", async () => {
+		const { calls, client } = fakeBokunClient({
+			cancelProductBooking: () => {
+				throw new BokunApiError("conflict", 409);
+			},
+			getByConfirmationCode: () => ({
+				confirmationCode: "BOOK-1",
+				status: "CANCELLED",
+			}),
+		});
+		const gateway = new BokunReservationGateway({ client });
+
+		const result = await gateway.cancelReservation({
+			reason: "admin_item_refund",
+			reservationId: "BOOK-1",
+			transactionId: "ACT-1",
+		});
+
+		expect(result.kind).toBe("ok");
+		if (result.kind !== "ok") return;
+		expect(result.providerStatus).toBe("CANCELLED");
+		expect(calls.getByConfirmationCode[0]?.code).toBe("BOOK-1");
+	});
+
+	test("keeps retrying when the cancel throws and the booking is still confirmed", async () => {
+		const { client } = fakeBokunClient({
+			cancelProductBooking: () => {
+				throw new BokunApiError("conflict", 409);
+			},
+			getByConfirmationCode: () => ({
+				confirmationCode: "BOOK-1",
+				status: "CONFIRMED",
+			}),
+		});
+		const gateway = new BokunReservationGateway({ client });
+
+		const result = await gateway.cancelReservation({
+			reason: "admin_item_refund",
+			reservationId: "BOOK-1",
+			transactionId: "ACT-1",
+		});
+
+		expect(result.kind).toBe("transient");
+		if (result.kind !== "transient") return;
+		expect(result.code).toBe("cancel_not_settled");
+	});
 });
