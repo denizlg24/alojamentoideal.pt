@@ -41,9 +41,7 @@ import {
 import {
 	type ActivityKeyInput,
 	activityCartItemClientMutationId,
-	activityCartItemIdempotencyKey,
 	cartItemClientMutationId,
-	cartItemIdempotencyKey,
 	randomIdempotencyKey,
 	type StayKeyInput,
 } from "@/lib/checkout/idempotency";
@@ -195,7 +193,7 @@ async function addCartItemFromExisting(
 				activityId: activity.activityId,
 				answers: activity.answers ?? [],
 				clientMutationId: activityCartItemClientMutationId(activity),
-				idempotencyKey: activityCartItemIdempotencyKey(activity),
+				idempotencyKey: randomIdempotencyKey("cart-item-add"),
 				participants: activity.participants,
 				rateId: activity.rateId ?? null,
 				startTimeId: activity.startTimeId ?? null,
@@ -213,7 +211,7 @@ async function addCartItemFromExisting(
 			children: stay.children,
 			clientMutationId: cartItemClientMutationId(stay),
 			guests: stay.guests,
-			idempotencyKey: cartItemIdempotencyKey(stay),
+			idempotencyKey: randomIdempotencyKey("cart-item-add"),
 			infants: stay.infants,
 			listingId: stay.listingId,
 		})
@@ -659,7 +657,7 @@ export function CheckoutController({ seed }: CheckoutControllerProps) {
 								children: seedStay.children,
 								clientMutationId: cartItemClientMutationId(seedStay),
 								guests: seedStay.guests,
-								idempotencyKey: cartItemIdempotencyKey(seedStay),
+								idempotencyKey: randomIdempotencyKey("cart-item-add"),
 								infants: seedStay.infants,
 								listingId: seedStay.listingId,
 							})

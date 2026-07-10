@@ -887,6 +887,8 @@ describe("HostifyReservationGateway.findExistingHold", () => {
 
 interface BokunCalls {
 	abortReserved: { code: string }[];
+	cancel: { body: unknown; code: string }[];
+	cancelProductBooking: { body: unknown; code: string }[];
 	confirmReserved: { body: unknown; code: string }[];
 	getByConfirmationCode: { code: string }[];
 	submit: { body: unknown; query: unknown }[];
@@ -894,12 +896,16 @@ interface BokunCalls {
 
 function fakeBokunClient(overrides: {
 	abortReserved?: () => unknown;
+	cancel?: () => unknown;
+	cancelProductBooking?: () => unknown;
 	confirmReserved?: () => unknown;
 	getByConfirmationCode?: () => unknown;
 	submit?: () => unknown;
 }): { calls: BokunCalls; client: BokunClient } {
 	const calls: BokunCalls = {
 		abortReserved: [],
+		cancel: [],
+		cancelProductBooking: [],
 		confirmReserved: [],
 		getByConfirmationCode: [],
 		submit: [],
@@ -910,6 +916,14 @@ function fakeBokunClient(overrides: {
 				abortReserved: async (code: string) => {
 					calls.abortReserved.push({ code });
 					return overrides.abortReserved?.() ?? { message: "aborted" };
+				},
+				cancel: async (code: string, body: unknown) => {
+					calls.cancel.push({ body, code });
+					return overrides.cancel?.() ?? { success: true };
+				},
+				cancelProductBooking: async (code: string, body: unknown) => {
+					calls.cancelProductBooking.push({ body, code });
+					return overrides.cancelProductBooking?.() ?? { success: true };
 				},
 				getByConfirmationCode: async (code: string) => {
 					calls.getByConfirmationCode.push({ code });
@@ -1062,5 +1076,24 @@ describe("BokunReservationGateway.cancelHold", () => {
 		expect(result.kind).toBe("transient");
 		if (result.kind !== "transient") return;
 		expect(result.code).toBe("cancel_not_settled");
+	});
+});
+
+describe("BokunReservationGateway.cancelReservation", () => {
+	test("cancels the attributed activity product without asking Bokun to refund", async () => {
+		const { calls, client } = fakeBokunClient({});
+		const gateway = new BokunReservationGateway({ client });
+
+		const result = await gateway.cancelReservation({
+			reason: "admin_item_refund",
+			reservationId: "BOOK-1",
+			transactionId: "ACT-1",
+		});
+
+		expect(result.kind).toBe("ok");
+		expect(calls.cancelProductBooking).toEqual([
+			{ body: { notify: false, refund: false }, code: "ACT-1" },
+		]);
+		expect(calls.cancel).toHaveLength(0);
 	});
 });

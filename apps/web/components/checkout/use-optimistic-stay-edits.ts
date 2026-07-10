@@ -27,11 +27,14 @@ interface UseOptimisticStayEditsArgs {
 	cart: CartDto | null;
 	setCart: Dispatch<SetStateAction<CartDto | null>>;
 	/** Reconciles the authoritative server cart (sets cart, failures, badge). */
-	applyValidated: (validated: CartValidationResponse) => void;
+	applyValidated: (
+		validated: CartValidationResponse,
+		options?: { force?: boolean },
+	) => unknown;
 	onError: (message: string) => void;
 	/**
-	 * Repricing ids live in the view so it can skeleton affected prices; the hook
-	 * owns them through this setter as the single source of pending edits.
+	 * Repricing ids live in the view so it can block checkout until validation;
+	 * the hook owns them through this setter as the single source of pending edits.
 	 */
 	setRepricingItemIds: Dispatch<SetStateAction<Set<string>>>;
 	/**
@@ -81,8 +84,8 @@ function clearRepricing(
 /**
  * Optimistic engine for stay edits on a cart. Each edit patches the local cart
  * immediately (so the dialog can close without waiting on the network) and marks
- * the item as repricing, so the view skeletons its price and the totals until
- * the server re-quote lands. A per-item generation guard drops stale responses
+ * the item as repricing until the server re-quote lands. A per-item generation
+ * guard drops stale responses
  * when a newer edit for the same item is in flight, and any failed edit re-reads
  * the server cart to roll the optimistic patch back to the truth.
  */
@@ -133,32 +136,28 @@ export function useOptimisticStayEdits({
 			onError(toCheckoutError(error).message);
 			// Roll the optimistic patch back to the server truth.
 			try {
-				applyValidated(await api.validateCart(cartId));
+				applyValidated(await api.validateCart(cartId), { force: true });
 			} catch {
 				setCart(rollbackCart);
+				onOptimisticCart?.(rollbackCart);
 			}
 			clearRepricing(setRepricingItemIds, itemId);
 		}
 	};
 
 	const patchItem = (
+		current: CartDto,
 		itemId: string,
 		patch: (item: CartItemDto) => CartItemDto,
-	): void => {
-		setCart((current) => {
-			if (!current) {
-				return current;
-			}
-			return {
-				...current,
-				items: current.items.map((item) =>
-					item.id === itemId && item.type === "accommodation"
-						? patch(item)
-						: item,
-				),
-			};
-		});
-		withRepricing(setRepricingItemIds, itemId);
+	): CartDto => {
+		return {
+			...current,
+			items: current.items.map((item) =>
+				item.id === itemId && item.type === "accommodation"
+					? patch(item)
+					: item,
+			),
+		};
 	};
 
 	const patchStay: OptimisticStayEdits["patchStay"] = (itemId, next) => {
@@ -167,7 +166,7 @@ export function useOptimisticStayEdits({
 			return;
 		}
 		const guests = capacityForGuests(next.adults, next.children);
-		patchItem(itemId, (item) => ({
+		const optimisticCart = patchItem(rollbackCart, itemId, (item) => ({
 			...item,
 			adults: next.adults,
 			checkIn: next.checkIn,
@@ -177,6 +176,9 @@ export function useOptimisticStayEdits({
 			infants: next.infants,
 			nights: nightsBetween(next.checkIn, next.checkOut),
 		}));
+		withRepricing(setRepricingItemIds, itemId);
+		setCart(optimisticCart);
+		onOptimisticCart?.(optimisticCart);
 		void commit(itemId, rollbackCart, (cartId) =>
 			api.updateCartItem(cartId, itemId, {
 				adults: next.adults,
@@ -195,12 +197,26 @@ export function useOptimisticStayEdits({
 		if (!rollbackCart) {
 			return;
 		}
-		// Keep the item id in the repricing set so the totals skeleton while the
-		// server re-quotes the remaining stays, even though this card is gone.
+		// Keep the item id pending while the server re-quotes the remaining stays,
+		// even though this card is already gone locally.
 		withRepricing(setRepricingItemIds, itemId);
+		const removedItem = rollbackCart.items.find((item) => item.id === itemId);
 		const optimisticCart: CartDto = {
 			...rollbackCart,
+			itemCount: Math.max(0, rollbackCart.itemCount - 1),
 			items: rollbackCart.items.filter((item) => item.id !== itemId),
+			subtotalMinor: Math.max(
+				0,
+				rollbackCart.subtotalMinor - (removedItem?.subtotalMinor ?? 0),
+			),
+			taxMinor: Math.max(
+				0,
+				rollbackCart.taxMinor - (removedItem?.taxMinor ?? 0),
+			),
+			totalMinor: Math.max(
+				0,
+				rollbackCart.totalMinor - (removedItem?.totalMinor ?? 0),
+			),
 		};
 		setCart(optimisticCart);
 		// Drop the header badge immediately rather than waiting on the server.

@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
 	buildActivityQuestionsReminderEmail,
 	buildOrderConfirmationEmail,
+	buildOrderRefundEmail,
 	type OrderConfirmationEmailInput,
 } from "./email";
 
@@ -76,6 +77,33 @@ describe("buildOrderConfirmationEmail", () => {
 		expect(message.text.includes("Your 2 bookings are confirmed.")).toBe(true);
 		expect(message.text.includes("Casa Azul")).toBe(true);
 		expect(message.text.includes("Sunset Kayak Tour")).toBe(true);
+	});
+});
+
+describe("buildOrderRefundEmail", () => {
+	test("names a cancelled attributed reservation", () => {
+		const message = buildOrderRefundEmail({
+			amount: "€64.00",
+			greeting: "Hi Ana,",
+			itemTitle: "Douro Valley Walk",
+			orderNumber: "AI-123",
+		});
+
+		expect(message.subject).toBe("Refund issued for booking AI-123");
+		expect(message.text.includes("refund of €64.00")).toBe(true);
+		expect(
+			message.text.includes("cancelled your reservation for Douro Valley Walk"),
+		).toBe(true);
+	});
+
+	test("does not claim an unattributed refund cancelled a reservation", () => {
+		const message = buildOrderRefundEmail({
+			amount: "€20.00",
+			greeting: "Hi there,",
+			orderNumber: "AI-456",
+		});
+
+		expect(message.text.includes("reservations remain unchanged")).toBe(true);
 	});
 });
 

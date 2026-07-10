@@ -168,10 +168,11 @@ export function EditStayDialog({
 									</span>
 								</span>
 							</AccordionTrigger>
-							<AccordionContent className="h-auto">
-								<div className="flex justify-center">
+							<AccordionContent className="h-auto mb-4!">
+								<div className="flex justify-center rounded-xl border p-2">
 									<ListingCalendar
 										availableDates={availableDates}
+										className="w-full! bg-transparent"
 										ctaDates={ctaDates}
 										ctdDates={ctdDates}
 										numberOfMonths={1}

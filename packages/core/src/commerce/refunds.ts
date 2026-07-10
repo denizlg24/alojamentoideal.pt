@@ -17,6 +17,12 @@ import { trackEvent } from "../observability";
 import { CommerceError } from "./errors";
 
 export interface OrderRefundServiceOptions {
+	/** Cancels an attributed provider reservation before money is moved. */
+	cancelOrderItemReservation?: (
+		orderId: string,
+		orderItemId: string,
+		reason: string,
+	) => Promise<void>;
 	db: Database;
 	now?: () => Date;
 	/** Issues the Stripe refund; absent when Stripe is not configured. */
@@ -36,7 +42,7 @@ export interface RefundOrderInput {
 	/** Free-text operator note, retained on the ledger row. */
 	note?: string | null;
 	orderId: string;
-	/** Optional reservation the refund is attributed to (reporting only). */
+	/** Optional reservation the refund is attributed to and cancels. */
 	orderItemId?: string | null;
 	reason: OrderRefundReason;
 	/** Better Auth user id of the operator issuing the refund. */
@@ -189,9 +195,9 @@ const RECONCILE_BATCH_SIZE = 25;
 /**
  * Operator-issued manual refunds against an order's Stripe PaymentIntent.
  * Distinct from `CommerceService.compensateOrder` (the automatic full refund +
- * cancel on saga failure): this path moves money only, never touching order
- * status or provider holds, and supports repeated partial refunds recorded in
- * the `order_refunds` ledger.
+ * cancel on saga failure): this path supports repeated partial refunds recorded
+ * in the `order_refunds` ledger. Item-attributed refunds first cancel that one
+ * provider reservation; whole-order refunds leave reservations unchanged.
  *
  * Over-refund safety: the order aggregate is reserved atomically (a guarded
  * `amount_refunded += n WHERE amount_refunded + n <= amount_paid`) before the
@@ -200,11 +206,13 @@ const RECONCILE_BATCH_SIZE = 25;
  */
 export class OrderRefundService {
 	readonly #db: Database;
+	readonly #cancelOrderItemReservation: OrderRefundServiceOptions["cancelOrderItemReservation"];
 	readonly #now: () => Date;
 	readonly #refundPayment: OrderRefundServiceOptions["refundPayment"];
 	readonly #reverseActivityTransfer: OrderRefundServiceOptions["reverseActivityTransfer"];
 
 	constructor(options: OrderRefundServiceOptions) {
+		this.#cancelOrderItemReservation = options.cancelOrderItemReservation;
 		this.#db = options.db;
 		this.#now = options.now ?? (() => new Date());
 		this.#refundPayment = options.refundPayment;
@@ -349,6 +357,39 @@ export class OrderRefundService {
 				"Failed to initialize the refund process.",
 				500,
 			);
+		}
+		const initializedRecordId = recordId;
+
+		if (orderItemId) {
+			try {
+				await this.#cancelAttributedItem(order.id, orderItemId);
+			} catch (error) {
+				await this.#db.transaction(async (tx) => {
+					await tx
+						.update(orderTable)
+						.set({
+							amountRefundedMinor: sql`${orderTable.amountRefundedMinor} - ${input.amountMinor}`,
+							updatedAt: this.#now(),
+						})
+						.where(eq(orderTable.id, order.id));
+					await tx
+						.update(orderRefundTable)
+						.set({
+							lastErrorMessage: describeRefundError(error),
+							status: "failed",
+							updatedAt: this.#now(),
+						})
+						.where(eq(orderRefundTable.id, initializedRecordId));
+				});
+				if (error instanceof CommerceError) {
+					throw error;
+				}
+				throw new CommerceError(
+					"refund_precondition_failed",
+					`The refund was not issued because its reservation update failed: ${describeRefundError(error)}`,
+					502,
+				);
+			}
 		}
 
 		let refund: RefundResult;
@@ -506,6 +547,14 @@ export class OrderRefundService {
 			if (!refundPayment || !row.stripePaymentIntentId) {
 				summary.stillPending += 1;
 				continue;
+			}
+			if (row.orderItemId) {
+				try {
+					await this.#cancelAttributedItem(row.orderId, row.orderItemId);
+				} catch {
+					summary.stillPending += 1;
+					continue;
+				}
 			}
 			let refund: RefundResult;
 			try {
@@ -752,5 +801,23 @@ export class OrderRefundService {
 			});
 		}
 		return { reversal, ...(error ? { error } : {}) };
+	}
+
+	async #cancelAttributedItem(
+		orderId: string,
+		orderItemId: string,
+	): Promise<void> {
+		if (!this.#cancelOrderItemReservation) {
+			throw new CommerceError(
+				"reservation_gateway_unavailable",
+				"The attributed reservation cannot be cancelled right now.",
+				503,
+			);
+		}
+		await this.#cancelOrderItemReservation(
+			orderId,
+			orderItemId,
+			"admin_item_refund",
+		);
 	}
 }

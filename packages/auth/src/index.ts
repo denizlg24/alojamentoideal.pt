@@ -14,6 +14,7 @@ export {
 	buildOrderGuestReminderEmail,
 	buildOrderInviteEmail,
 	buildOrderPendingConfirmationEmail,
+	buildOrderRefundEmail,
 	type EmailAttachment,
 	type EmailMessage,
 	type EmailSender,
@@ -23,6 +24,7 @@ export {
 	type OrderConfirmationEmailInput,
 	type OrderGuestReminderEmailInput,
 	type OrderInviteEmailInput,
+	type OrderRefundEmailInput,
 	type OutboundEmail,
 } from "./email";
 export { type CreateAuthOptions, createAuth } from "./runtime";

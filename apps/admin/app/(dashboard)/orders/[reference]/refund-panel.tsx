@@ -77,8 +77,8 @@ function minorToEuros(minor: number): string {
 /**
  * Operator-facing manual refund control. Presets are a percentage of the
  * amount still refundable; the amount stays fully editable. Attribution to a
- * single reservation is reporting-only — the money always moves against the
- * order's one PaymentIntent.
+ * single reservation also cancels that reservation at its provider; the money
+ * always moves against the order's one PaymentIntent.
  */
 export function RefundPanel({
 	currency,
@@ -157,7 +157,7 @@ export function RefundPanel({
 				return;
 			}
 			const body = (await response.json().catch(() => null)) as {
-				data?: { transferReversalError?: string };
+				data?: { emailError?: string; transferReversalError?: string };
 			} | null;
 			toast.success(
 				`Refunded ${formatMoneyMinor(amountMinor, currency)} to the guest.`,
@@ -165,6 +165,11 @@ export function RefundPanel({
 			if (body?.data?.transferReversalError) {
 				toast.warning(
 					`Detours transfer reversal failed: ${body.data.transferReversalError}. Reverse it manually in Stripe.`,
+				);
+			}
+			if (body?.data?.emailError) {
+				toast.warning(
+					"The refund succeeded, but the guest email could not be sent. Contact the guest manually.",
 				);
 			}
 			setOpen(false);
@@ -188,13 +193,13 @@ export function RefundPanel({
 					Issue refund
 				</Button>
 			</DialogTrigger>
-			<DialogContent className="max-w-md">
+			<DialogContent className="min-w-0 max-w-md overflow-x-hidden">
 				<DialogHeader>
 					<DialogTitle>Issue a refund</DialogTitle>
 					<DialogDescription>
 						{formatMoneyMinor(refundableMinor, currency)} still refundable on
-						this order. Refunds move money only; they do not cancel the
-						reservation.
+						this order. Attributing the refund to an item also cancels that
+						reservation with its provider.
 					</DialogDescription>
 				</DialogHeader>
 				<form className="space-y-4" onSubmit={handleSubmit}>
@@ -235,7 +240,8 @@ export function RefundPanel({
 					<div className="space-y-1.5">
 						<Label htmlFor="refund-reason">Reason</Label>
 						<ResponsiveSelect
-							className="w-full"
+							className="w-full min-w-0"
+							contentClassName="max-w-[calc(100vw-2rem)] [&_[data-slot=select-item]]:whitespace-normal [&_[data-slot=select-item]]:break-words"
 							id="refund-reason"
 							onValueChange={setReason}
 							options={REASONS}
@@ -246,7 +252,8 @@ export function RefundPanel({
 					<div className="space-y-1.5">
 						<Label htmlFor="refund-attribution">Attribute to</Label>
 						<ResponsiveSelect
-							className="w-full"
+							className="w-full min-w-0 max-w-[400px]"
+							contentClassName="max-w-full! truncate"
 							id="refund-attribution"
 							onValueChange={setOrderItemId}
 							options={attributionOptions}

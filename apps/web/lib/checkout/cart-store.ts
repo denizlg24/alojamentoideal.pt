@@ -5,9 +5,8 @@ import { toCheckoutError } from "./errors";
 import {
 	type ActivityKeyInput,
 	activityCartItemClientMutationId,
-	activityCartItemIdempotencyKey,
 	cartItemClientMutationId,
-	cartItemIdempotencyKey,
+	randomIdempotencyKey,
 	type StayKeyInput,
 } from "./idempotency";
 
@@ -27,6 +26,9 @@ export const CART_ID_STORAGE_KEY = "ai_cart_id";
  * instantly on load and sync across tabs via the `storage` event.
  */
 const CART_COUNT_STORAGE_KEY = "ai_cart_count";
+
+/** Full draft-cart snapshot used for instant pre-checkout rendering. */
+const CART_SNAPSHOT_STORAGE_KEY = "ai_cart_snapshot";
 
 /**
  * localStorage cache of a fingerprint of the cart's active contents. The
@@ -51,6 +53,8 @@ export interface CartChangedDetail {
 
 interface LoadStoredCartOptions {
 	notify?: boolean;
+	/** Skip the local snapshot and force an authoritative server read. */
+	server?: boolean;
 }
 
 function hasWindow(): boolean {
@@ -142,9 +146,37 @@ export function clearStoredCart(): void {
 	}
 	window.localStorage.removeItem(CART_ID_STORAGE_KEY);
 	window.sessionStorage.removeItem(CHECKOUT_CART_STORAGE_KEY);
+	window.localStorage.removeItem(CART_SNAPSHOT_STORAGE_KEY);
 	writeCachedItemCount(0);
 	writeCachedFingerprint(EMPTY_CART_FINGERPRINT);
 	dispatchCartChanged(0);
+}
+
+/** Reads the last locally committed draft cart without performing network I/O. */
+export function readCachedCart(): CartDto | null {
+	if (!hasWindow()) {
+		return null;
+	}
+	const raw = window.localStorage.getItem(CART_SNAPSHOT_STORAGE_KEY);
+	if (!raw) {
+		return null;
+	}
+	try {
+		const cart = JSON.parse(raw) as Partial<CartDto>;
+		if (
+			typeof cart.id !== "string" ||
+			cart.id !== readStoredCartId() ||
+			cart.status !== "draft" ||
+			!Array.isArray(cart.items)
+		) {
+			window.localStorage.removeItem(CART_SNAPSHOT_STORAGE_KEY);
+			return null;
+		}
+		return cart as CartDto;
+	} catch {
+		window.localStorage.removeItem(CART_SNAPSHOT_STORAGE_KEY);
+		return null;
+	}
 }
 
 export function readCachedItemCount(): number {
@@ -209,6 +241,17 @@ function dispatchCartChanged(itemCount: number): void {
 /** Records the cart's current state and tells the header badge about it. */
 export function notifyCartChanged(cart: CartDto | null): void {
 	const count = activeItemCount(cart);
+	if (hasWindow()) {
+		if (cart?.status === "draft") {
+			window.localStorage.setItem(
+				CART_SNAPSHOT_STORAGE_KEY,
+				// The cookie remains the access credential. Persist display data only.
+				JSON.stringify({ ...cart, cartToken: "" }),
+			);
+		} else {
+			window.localStorage.removeItem(CART_SNAPSHOT_STORAGE_KEY);
+		}
+	}
 	writeCachedItemCount(count);
 	writeCachedFingerprint(cartContentFingerprint(cart));
 	dispatchCartChanged(count);
@@ -227,6 +270,15 @@ export async function loadStoredCart(
 		return null;
 	}
 	const shouldNotify = options.notify ?? true;
+	if (!options.server) {
+		const cached = readCachedCart();
+		if (cached) {
+			if (shouldNotify) {
+				notifyCartChanged(cached);
+			}
+			return cached;
+		}
+	}
 	try {
 		const { cart } = await api.getCart(storedId);
 		if (cart.status !== "draft") {
@@ -239,11 +291,22 @@ export async function loadStoredCart(
 		return cart;
 	} catch (error) {
 		const err = toCheckoutError(error);
-		if (err.code === "cart_expired" || err.code === "cart_not_found") {
+		if (
+			err.code === "cart_expired" ||
+			err.code === "cart_not_found" ||
+			err.code === "order_access_denied"
+		) {
 			clearStoredCart();
 		}
 		return null;
 	}
+}
+
+/** Forces a server read while keeping cache-first reads as the default. */
+export function refreshStoredCart(
+	options: Omit<LoadStoredCartOptions, "server"> = {},
+): Promise<CartDto | null> {
+	return loadStoredCart({ ...options, server: true });
 }
 
 /** Returns the shared draft cart, creating one when none is usable. */
@@ -258,24 +321,47 @@ export async function ensureCart(): Promise<CartDto> {
 	return cart;
 }
 
+async function mutateWithUsableCart<T>(
+	mutation: (cart: CartDto) => Promise<T>,
+): Promise<T> {
+	const cart = await ensureCart();
+	try {
+		return await mutation(cart);
+	} catch (error) {
+		const checkoutError = toCheckoutError(error);
+		if (
+			checkoutError.code !== "cart_expired" &&
+			checkoutError.code !== "cart_not_found" &&
+			checkoutError.code !== "order_access_denied"
+		) {
+			throw error;
+		}
+		clearStoredCart();
+		return mutation(await ensureCart());
+	}
+}
+
 /**
- * Adds one stay to the shared cart. The deterministic idempotency key and
- * client mutation id mean re-adding the exact same stay dedupes server-side
- * instead of stacking a duplicate item.
+ * Adds one stay to the shared cart. The deterministic client mutation id means
+ * re-adding the exact same stay upserts the existing item server-side instead
+ * of stacking a duplicate. The idempotency key is random per gesture: a
+ * content-derived key would replay the original add's stored response on a
+ * re-add after removal, so the item would never leave the removed state.
  */
 export async function addStayToCart(stay: StayKeyInput): Promise<CartDto> {
-	const cart = await ensureCart();
-	const mutation = await api.addCartItem(cart.id, {
-		adults: stay.adults,
-		checkIn: stay.checkIn,
-		checkOut: stay.checkOut,
-		children: stay.children,
-		clientMutationId: cartItemClientMutationId(stay),
-		guests: stay.guests,
-		idempotencyKey: cartItemIdempotencyKey(stay),
-		infants: stay.infants,
-		listingId: stay.listingId,
-	});
+	const mutation = await mutateWithUsableCart((cart) =>
+		api.addCartItem(cart.id, {
+			adults: stay.adults,
+			checkIn: stay.checkIn,
+			checkOut: stay.checkOut,
+			children: stay.children,
+			clientMutationId: cartItemClientMutationId(stay),
+			guests: stay.guests,
+			idempotencyKey: randomIdempotencyKey("cart-item-add"),
+			infants: stay.infants,
+			listingId: stay.listingId,
+		}),
+	);
 	notifyCartChanged(mutation.cart);
 	return mutation.cart;
 }
@@ -283,18 +369,19 @@ export async function addStayToCart(stay: StayKeyInput): Promise<CartDto> {
 export async function addActivityToCart(
 	activity: ActivityKeyInput,
 ): Promise<CartDto> {
-	const cart = await ensureCart();
-	const mutation = await api.addCartItem(cart.id, {
-		activityDate: activity.activityDate,
-		activityId: activity.activityId,
-		answers: activity.answers ?? [],
-		clientMutationId: activityCartItemClientMutationId(activity),
-		idempotencyKey: activityCartItemIdempotencyKey(activity),
-		participants: activity.participants,
-		rateId: activity.rateId ?? null,
-		startTimeId: activity.startTimeId ?? null,
-		type: "activity",
-	});
+	const mutation = await mutateWithUsableCart((cart) =>
+		api.addCartItem(cart.id, {
+			activityDate: activity.activityDate,
+			activityId: activity.activityId,
+			answers: activity.answers ?? [],
+			clientMutationId: activityCartItemClientMutationId(activity),
+			idempotencyKey: randomIdempotencyKey("cart-item-add"),
+			participants: activity.participants,
+			rateId: activity.rateId ?? null,
+			startTimeId: activity.startTimeId ?? null,
+			type: "activity",
+		}),
+	);
 	notifyCartChanged(mutation.cart);
 	return mutation.cart;
 }

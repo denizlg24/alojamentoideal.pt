@@ -6349,6 +6349,112 @@ export class CommerceService {
 	}
 
 	/**
+	 * Cancels one paid order item at its provider without changing the lifecycle
+	 * of sibling items or the parent order. This is the reservation leg used by
+	 * operator item-attributed refunds.
+	 */
+	async cancelOrderItemReservation(
+		orderId: string,
+		orderItemId: string,
+		reason: string,
+	): Promise<{
+		bookingId: string;
+		outcome: "already_cancelled" | "cancelled";
+	}> {
+		const context = await this.#loadSagaContext(orderId);
+		if (!context) {
+			throw new CommerceError("order_not_found", "Order not found.", 404);
+		}
+		const booking = context.bookings.find(
+			(candidate) => candidate.orderItemId === orderItemId,
+		);
+		if (!booking) {
+			throw new CommerceError(
+				"item_not_found",
+				"The attributed reservation is not part of this order.",
+				422,
+			);
+		}
+		if (booking.normalizedStatus === "cancelled") {
+			return {
+				bookingId: booking.providerBookingId,
+				outcome: "already_cancelled",
+			};
+		}
+
+		const gateway = this.#reservationGatewayFor(booking.provider);
+		if (!gateway) {
+			throw new CommerceError(
+				"reservation_gateway_unavailable",
+				`The ${booking.provider} reservation provider is not configured.`,
+				503,
+			);
+		}
+
+		let providerStatus = "cancelled";
+		let raw: Record<string, unknown> = {};
+		if (booking.providerReservationId) {
+			const result = await gateway.cancelReservation({
+				reason,
+				reservationId: booking.providerReservationId,
+				transactionId: booking.providerTransactionId,
+			});
+			if (result.kind !== "ok") {
+				await this.#recordBookingAttempt(booking, result.code, result.message);
+				throw new CommerceError(
+					"reservation_cancel_failed",
+					`The provider reservation could not be cancelled: ${result.message}`,
+					result.kind === "transient" ? 503 : 502,
+				);
+			}
+			providerStatus = result.providerStatus ?? providerStatus;
+			raw = result.raw;
+		}
+
+		const now = new Date();
+		await this.#db.transaction(async (tx) => {
+			await tx
+				.update(providerBookingTable)
+				.set({
+					lastErrorCode: null,
+					lastErrorMessage: null,
+					needsRecovery: false,
+					nextAttemptAt: now,
+					normalizedStatus: "cancelled",
+					providerStatus,
+					providerUpdatedAt: now,
+					rawOperationalPayload: raw,
+					updatedAt: now,
+				})
+				.where(eq(providerBookingTable.id, booking.providerBookingId));
+			await tx
+				.update(orderItemTable)
+				.set({ status: "cancelled", updatedAt: now })
+				.where(
+					and(
+						eq(orderItemTable.id, booking.orderItemId),
+						eq(orderItemTable.orderId, orderId),
+					),
+				);
+		});
+
+		trackEvent({
+			metadata: {
+				orderId,
+				orderItemId,
+				providerBookingId: booking.providerBookingId,
+				reason,
+			},
+			name: "order_item_reservation_cancelled",
+			provider: booking.provider,
+			severity: "info",
+			type: "integration",
+		});
+
+		return { bookingId: booking.providerBookingId, outcome: "cancelled" };
+	}
+
+	/**
 	 * Compensates a charged order whose booking could not be confirmed: a full
 	 * refund of the captured amount, order -> `cancelled`, and every hold
 	 * released. Config-gated (D4): when auto-refund is disabled (or no refunder /

@@ -30,9 +30,10 @@ import {
 	CART_CHANGED_EVENT,
 	cartContentFingerprint,
 	clearStoredCart,
-	loadStoredCart,
 	notifyCartChanged,
+	readCachedCart,
 	readStoredCartFingerprint,
+	refreshStoredCart,
 } from "@/lib/checkout/cart-store";
 import { toCheckoutError } from "@/lib/checkout/errors";
 import {
@@ -145,13 +146,9 @@ function CartItemCard({
 							})}
 						</p>
 					)}
-					{repricing ? (
-						<Skeleton className="mt-auto h-5 w-24" />
-					) : (
-						<p className="mt-auto font-semibold text-sm">
-							{formatMinor(item.totalMinor, item.currency)}
-						</p>
-					)}
+					<p aria-busy={repricing} className="mt-auto font-semibold text-sm">
+						{formatMinor(item.totalMinor, item.currency)}
+					</p>
 				</div>
 			</div>
 
@@ -186,9 +183,9 @@ function CartItemCard({
 /**
  * The `/cart` page body: lists every stay in the shared cart with per-item
  * edit/remove, revalidates prices on load, and hands off to the cart-driven
- * `/checkout`. Edits are optimistic: dates/guests change instantly and the
- * affected prices skeleton while the server re-quotes. Items whose dates went
- * stale are flagged inline and block checkout until fixed or removed.
+ * `/checkout`. Edits are local-first: dates, guests, items and cached totals
+ * change instantly while the server re-quotes. Items whose dates went stale are
+ * flagged inline and block checkout until fixed or removed.
  */
 export function CartView() {
 	const [phase, setPhase] = useState<"loading" | "ready">("loading");
@@ -215,24 +212,58 @@ export function CartView() {
 		stayItems.map((item) => item.listingId),
 	);
 
-	const applyValidation = useCallback((validated: CartValidationResponse) => {
-		lastAppliedFingerprintRef.current = cartContentFingerprint(validated.cart);
-		setCart(validated.cart);
-		notifyCartChanged(validated.cart);
-		setFailures(
-			new Map(
-				validated.failures.map((failure) => [failure.itemId, failure.message]),
-			),
-		);
-	}, []);
+	const applyValidation = useCallback(
+		(
+			validated: CartValidationResponse,
+			options: { force?: boolean } = {},
+		): boolean => {
+			if (
+				!options.force &&
+				cartContentFingerprint(validated.cart) !== readStoredCartFingerprint()
+			) {
+				return false;
+			}
+			lastAppliedFingerprintRef.current = cartContentFingerprint(
+				validated.cart,
+			);
+			setCart(validated.cart);
+			notifyCartChanged(validated.cart);
+			setFailures(
+				new Map(
+					validated.failures.map((failure) => [
+						failure.itemId,
+						failure.message,
+					]),
+				),
+			);
+			return true;
+		},
+		[],
+	);
 
 	const refreshFromStoredCart = useCallback(() => {
 		const fingerprint = readStoredCartFingerprint();
 		if (fingerprint === lastAppliedFingerprintRef.current) {
 			return;
 		}
+		const cached = readCachedCart();
+		lastAppliedFingerprintRef.current = cartContentFingerprint(cached);
+		setCart(cached);
+		if (!cached || activeItems(cached).length === 0) {
+			setFailures(new Map());
+			return;
+		}
 		void (async () => {
-			const loaded = await loadStoredCart({ notify: false });
+			const loaded = await refreshStoredCart({ notify: false });
+			if (!loaded && !readCachedCart()) {
+				lastAppliedFingerprintRef.current = cartContentFingerprint(null);
+				setCart(null);
+				setFailures(new Map());
+				return;
+			}
+			if (readStoredCartFingerprint() !== fingerprint) {
+				return;
+			}
 			if (!loaded || activeItems(loaded).length === 0) {
 				lastAppliedFingerprintRef.current = cartContentFingerprint(loaded);
 				setCart(loaded);
@@ -242,6 +273,9 @@ export function CartView() {
 			try {
 				applyValidation(await api.validateCart(loaded.id));
 			} catch {
+				if (readStoredCartFingerprint() !== fingerprint) {
+					return;
+				}
 				lastAppliedFingerprintRef.current = cartContentFingerprint(loaded);
 				setCart(loaded);
 			}
@@ -280,8 +314,24 @@ export function CartView() {
 			if (handoff) {
 				setRecovery(handoff);
 			}
-			const loaded = await loadStoredCart();
+			const cached = readCachedCart();
+			if (cached) {
+				lastAppliedFingerprintRef.current = cartContentFingerprint(cached);
+				setCart(cached);
+				setPhase("ready");
+			}
+			const requestFingerprint = readStoredCartFingerprint();
+			const loaded = await refreshStoredCart({ notify: false });
+			if (!loaded && !readCachedCart()) {
+				lastAppliedFingerprintRef.current = cartContentFingerprint(null);
+				setCart(null);
+				setPhase("ready");
+				return;
+			}
 			if (!loaded || activeItems(loaded).length === 0) {
+				if (readStoredCartFingerprint() !== requestFingerprint) {
+					return;
+				}
 				lastAppliedFingerprintRef.current = cartContentFingerprint(loaded);
 				setCart(loaded);
 				setPhase("ready");
@@ -295,6 +345,9 @@ export function CartView() {
 					clearStoredCart();
 					setCart(null);
 				} else {
+					if (readStoredCartFingerprint() !== requestFingerprint) {
+						return;
+					}
 					lastAppliedFingerprintRef.current = cartContentFingerprint(loaded);
 					setCart(loaded);
 					setNotice(err.message);
@@ -411,45 +464,31 @@ export function CartView() {
 				<div className="rounded-2xl border bg-card p-5 shadow-sm">
 					<h2 className="font-heading font-semibold text-lg">Summary</h2>
 					<Separator className="my-4" />
-					{isRepricing ? (
-						<div className="flex flex-col gap-3">
-							<div className="flex items-center justify-between">
-								<Skeleton className="h-4 w-24" />
-								<Skeleton className="h-4 w-16" />
-							</div>
-							<Separator className="my-1" />
-							<div className="flex items-center justify-between">
-								<Skeleton className="h-5 w-16" />
-								<Skeleton className="h-5 w-20" />
-							</div>
+					<div aria-busy={isRepricing} className="flex flex-col gap-2 text-sm">
+						<div className="flex items-center justify-between text-muted-foreground">
+							<span>
+								{items.length} {items.length === 1 ? "item" : "items"}
+							</span>
+							<span>{formatMinor(cart.subtotalMinor, cart.currency)}</span>
 						</div>
-					) : (
-						<div className="flex flex-col gap-2 text-sm">
+						{cart.taxMinor > 0 && (
 							<div className="flex items-center justify-between text-muted-foreground">
-								<span>
-									{items.length} {items.length === 1 ? "item" : "items"}
-								</span>
-								<span>{formatMinor(cart.subtotalMinor, cart.currency)}</span>
+								<span>Taxes</span>
+								<span>{formatMinor(cart.taxMinor, cart.currency)}</span>
 							</div>
-							{cart.taxMinor > 0 && (
-								<div className="flex items-center justify-between text-muted-foreground">
-									<span>Taxes</span>
-									<span>{formatMinor(cart.taxMinor, cart.currency)}</span>
-								</div>
-							)}
-							{cart.discountMinor > 0 && (
-								<div className="flex items-center justify-between text-emerald-700 dark:text-emerald-400">
-									<span>Discount</span>
-									<span>-{formatMinor(cart.discountMinor, cart.currency)}</span>
-								</div>
-							)}
-							<Separator className="my-1" />
-							<div className="flex items-center justify-between font-semibold text-base">
-								<span>Total</span>
-								<span>{formatMinor(cart.totalMinor, cart.currency)}</span>
+						)}
+						{cart.discountMinor > 0 && (
+							<div className="flex items-center justify-between text-emerald-700 dark:text-emerald-400">
+								<span>Discount</span>
+								<span>-{formatMinor(cart.discountMinor, cart.currency)}</span>
 							</div>
+						)}
+						<Separator className="my-1" />
+						<div className="flex items-center justify-between font-semibold text-base">
+							<span>Total</span>
+							<span>{formatMinor(cart.totalMinor, cart.currency)}</span>
 						</div>
-					)}
+					</div>
 
 					{hasFailures && (
 						<p className="mt-3 text-amber-700 text-sm dark:text-amber-300">

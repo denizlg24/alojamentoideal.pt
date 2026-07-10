@@ -1,10 +1,13 @@
 import { z } from "zod";
 import { readJson, withAdminRoute } from "@/lib/api/admin-route";
 import {
+	adminOrderAccess,
 	commerceErrorResponse,
+	commerceService,
 	loadAdminOrder,
 	orderRefundService,
 } from "@/lib/api/commerce";
+import { sendOrderRefundEmail } from "@/lib/email/order-refund";
 
 interface AdminOrderRefundsRouteContext {
 	params: Promise<{ reference: string }>;
@@ -21,10 +24,9 @@ const refundSchema = z.object({
 
 /**
  * Admin-only: issue a manual (partial or full) Stripe refund against an order.
- * Money-only — the order status and provider holds are untouched; cancelling a
- * reservation is a separate action. Repeated refunds accumulate in the
- * `order_refunds` ledger, guarded so the total never exceeds the captured
- * amount.
+ * When attributed to one item, that reservation is cancelled at its provider
+ * before Stripe is called. Repeated refunds accumulate in the `order_refunds`
+ * ledger, guarded so the total never exceeds the captured amount.
  */
 export const POST = withAdminRoute<AdminOrderRefundsRouteContext>(
 	{ name: "admin.orders.refunds.create", rateLimit: { bucket: "mutation" } },
@@ -51,6 +53,18 @@ export const POST = withAdminRoute<AdminOrderRefundsRouteContext>(
 		}
 
 		try {
+			const service = await commerceService();
+			const detail = await service.readOrderDetail(adminOrderAccess(row));
+			const attributedItem = parsed.data.orderItemId
+				? (detail.items.find((item) => item.id === parsed.data.orderItemId) ??
+					null)
+				: null;
+			if (parsed.data.orderItemId && !attributedItem) {
+				return Response.json(
+					{ error: "The attributed reservation is not part of this order." },
+					{ status: 422 },
+				);
+			}
 			const result = await orderRefundService().refundOrder({
 				actorUserId: admin.id,
 				amountMinor: parsed.data.amountMinor,
@@ -59,7 +73,32 @@ export const POST = withAdminRoute<AdminOrderRefundsRouteContext>(
 				orderItemId: parsed.data.orderItemId ?? null,
 				reason: parsed.data.reason,
 			});
-			return Response.json({ data: result, success: true });
+
+			let emailError: string | undefined;
+			if (detail.contact) {
+				try {
+					await sendOrderRefundEmail({
+						amountMinor: parsed.data.amountMinor,
+						currency: result.refund.currency,
+						email: detail.contact.email,
+						...(attributedItem ? { itemTitle: attributedItem.title } : {}),
+						name: detail.contact.name,
+						publicReference: row.publicReference,
+					});
+				} catch (error) {
+					emailError =
+						error instanceof Error ? error.message : "Unknown email error";
+					console.error("Refund succeeded but guest email failed", {
+						error: emailError,
+						orderId: row.id,
+						refundId: result.refund.id,
+					});
+				}
+			}
+			return Response.json({
+				data: { ...result, ...(emailError ? { emailError } : {}) },
+				success: true,
+			});
 		} catch (error) {
 			const handled = commerceErrorResponse(error);
 			if (handled) {

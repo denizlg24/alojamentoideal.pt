@@ -591,6 +591,8 @@ export interface FindHoldQuery {
  */
 export interface ProviderReservationGateway {
 	cancelHold(args: CancelHoldArgs): Promise<SettledMutateResult>;
+	/** Cancels a settled reservation after payment, for operator item refunds. */
+	cancelReservation(args: CancelHoldArgs): Promise<SettledMutateResult>;
 	confirmHold(args: ConfirmHoldArgs): Promise<MutateHoldResult>;
 	findExistingHold(query: FindHoldQuery): Promise<PlacedHold | null>;
 	placeHold(request: ProviderHoldRequest): Promise<PlaceHoldResult>;
@@ -954,6 +956,10 @@ export class HostifyReservationGateway implements ProviderReservationGateway {
 			}
 			return toMutationFailure(error);
 		}
+	}
+
+	async cancelReservation(args: CancelHoldArgs): Promise<SettledMutateResult> {
+		return this.cancelHold(args);
 	}
 
 	/**
@@ -1331,6 +1337,43 @@ export class BokunReservationGateway implements ProviderReservationGateway {
 		}
 	}
 
+	async cancelReservation(args: CancelHoldArgs): Promise<SettledMutateResult> {
+		try {
+			const body = { notify: false, refund: false };
+			const response = (
+				args.transactionId
+					? await this.#client.v1.booking.cancelProductBooking(
+							args.transactionId,
+							body,
+							this.#context,
+						)
+					: await this.#client.v1.booking.cancel(
+							args.reservationId,
+							body,
+							this.#context,
+						)
+			) as Record<string, unknown>;
+			if (response.success === false) {
+				return {
+					code: "cancel_failed",
+					kind: "permanent",
+					message: "Bokun did not cancel the activity booking.",
+				};
+			}
+			return {
+				kind: "ok",
+				providerStatus: "CANCELLED",
+				raw: toRecord(response),
+			};
+		} catch (error) {
+			const verified = await this.#verifyBookingReleased(args.reservationId);
+			if (verified?.kind === "ok") {
+				return verified;
+			}
+			return toBokunMutationFailure(error);
+		}
+	}
+
 	async #verifyBookingStatus(
 		confirmationCode: string,
 	): Promise<MutateHoldResult | null> {
@@ -1469,6 +1512,14 @@ export class StubReservationGateway implements ProviderReservationGateway {
 	}
 
 	async cancelHold(_args: CancelHoldArgs): Promise<SettledMutateResult> {
+		return {
+			kind: "ok",
+			providerStatus: "cancelled_by_host",
+			raw: { stub: true },
+		};
+	}
+
+	async cancelReservation(_args: CancelHoldArgs): Promise<SettledMutateResult> {
 		return {
 			kind: "ok",
 			providerStatus: "cancelled_by_host",

@@ -391,6 +391,13 @@ export async function commerceService(): Promise<CommerceService> {
 export function orderRefundService(): OrderRefundService {
 	const stripe = optionalStripeClient();
 	return new OrderRefundService({
+		cancelOrderItemReservation: async (orderId, orderItemId, reason) => {
+			await (await commerceService()).cancelOrderItemReservation(
+				orderId,
+				orderItemId,
+				reason,
+			);
+		},
 		db: getDb(),
 		refundPayment: stripe
 			? (request) => createRefund(stripe, request)
