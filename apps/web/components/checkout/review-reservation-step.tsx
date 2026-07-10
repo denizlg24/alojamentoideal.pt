@@ -3,6 +3,7 @@
 import { Checkbox } from "@workspace/ui/components/checkbox";
 import { Label } from "@workspace/ui/components/label";
 import { Separator } from "@workspace/ui/components/separator";
+import Link from "next/link";
 import type { ReactNode } from "react";
 import { CheckoutAlert } from "./checkout-alert";
 import { CheckoutStepCard, type StepCardState } from "./checkout-step-card";
@@ -82,8 +83,19 @@ export function ReviewReservationStep({
 						className="font-normal text-sm leading-snug"
 						htmlFor="checkout-terms"
 					>
-						I agree to the booking terms and the cancellation policy for{" "}
-						{multipleStays ? "these stays" : "this stay"} with Alojamento Ideal.
+						I agree to the{" "}
+						<Link className="underline underline-offset-2" href="/legal/terms">
+							Terms & Conditions
+						</Link>{" "}
+						and the{" "}
+						<Link
+							className="underline underline-offset-2"
+							href="/legal/cancellation-and-refunds"
+						>
+							cancellation and refund policy
+						</Link>{" "}
+						for {multipleStays ? "these stays" : "this stay"} with Alojamento
+						Ideal.
 					</Label>
 				</div>
 
