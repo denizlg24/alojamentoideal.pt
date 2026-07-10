@@ -66,6 +66,7 @@ export {
 	orderItemCharge,
 	orderMember,
 	orderRefund,
+	propertyOwnerContact,
 	providerBooking,
 	providerSyncRun,
 	providerSyncState,

@@ -16,6 +16,7 @@ const STATIC_ROUTES: ReadonlyArray<{
 	{ changeFrequency: "daily", path: "/", priority: 1 },
 	{ changeFrequency: "daily", path: "/homes", priority: 0.9 },
 	{ changeFrequency: "monthly", path: "/about", priority: 0.6 },
+	{ changeFrequency: "monthly", path: "/owner", priority: 0.6 },
 	...LEGAL_PAGE_ORDER.map((slug) => ({
 		changeFrequency: "yearly" as const,
 		path: `/legal/${slug}`,

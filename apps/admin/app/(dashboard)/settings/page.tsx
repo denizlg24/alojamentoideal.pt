@@ -32,6 +32,7 @@ interface SettingsPageProps {
 }
 
 const SETTING_GROUPS = [
+	"communications",
 	"features",
 	"hostify",
 	"bokun",
@@ -41,6 +42,7 @@ const SETTING_GROUPS = [
 
 const GROUP_LABELS = {
 	bokun: "Bokun activities",
+	communications: "Communications",
 	features: "Enabled features",
 	hostify: "Hostify sync",
 	hostkit: "Hostkit",

@@ -494,6 +494,40 @@ export const appSetting = pgTable("app_settings", {
 	updatedAt: timestampWithTimezone("updated_at").notNull().defaultNow(),
 });
 
+/**
+ * Public property-owner enquiries. These are kept independently from email
+ * delivery so a temporary mail-provider failure never loses a lead.
+ */
+export const propertyOwnerContact = pgTable(
+	"property_owner_contacts",
+	{
+		id: text("id").primaryKey(),
+		fullName: text("full_name").notNull(),
+		email: text("email").notNull(),
+		phoneNumber: text("phone_number").notNull(),
+		propertyAddress: text("property_address").notNull(),
+		propertyLocation: text("property_location").notNull(),
+		propertyCount: integer("property_count").notNull(),
+		bedroomCount: integer("bedroom_count").notNull(),
+		notificationSentAt: timestampWithTimezone("notification_sent_at"),
+		notificationError: text("notification_error"),
+		createdAt: timestampWithTimezone("created_at").notNull().defaultNow(),
+		updatedAt: timestampWithTimezone("updated_at").notNull().defaultNow(),
+	},
+	(table) => [
+		index("property_owner_contacts_created_at_idx").on(table.createdAt),
+		index("property_owner_contacts_email_idx").on(table.email),
+		check(
+			"property_owner_contacts_property_count_check",
+			sql`${table.propertyCount} >= 1`,
+		),
+		check(
+			"property_owner_contacts_bedroom_count_check",
+			sql`${table.bedroomCount} >= 0`,
+		),
+	],
+);
+
 export const listingHostkitCredential = pgTable(
 	"listing_hostkit_credentials",
 	{
@@ -1980,6 +2014,7 @@ export const schema = {
 	activityExperience,
 	accommodationListing,
 	appSetting,
+	propertyOwnerContact,
 	accommodationListingNight,
 	observabilityEvent,
 	listingReview,
