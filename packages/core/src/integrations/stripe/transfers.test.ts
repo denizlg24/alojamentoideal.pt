@@ -99,8 +99,17 @@ describe("reverseChargeTransfer", () => {
 });
 
 describe("createConnectedAccountTransfer", () => {
-	test("links a listing payout to the captured charge with an idempotency key", async () => {
-		const calls: { params: Stripe.TransferCreateParams; key?: string }[] = [];
+	function fakeTransferStripe(existing: Partial<Stripe.Transfer>[]): {
+		calls: {
+			create: { params: Stripe.TransferCreateParams; key?: string }[];
+			list: Stripe.TransferListParams[];
+		};
+		stripe: Stripe;
+	} {
+		const calls = {
+			create: [] as { params: Stripe.TransferCreateParams; key?: string }[],
+			list: [] as Stripe.TransferListParams[],
+		};
 		const stripe = {
 			paymentIntents: {
 				retrieve: async () => ({
@@ -114,11 +123,20 @@ describe("createConnectedAccountTransfer", () => {
 					params: Stripe.TransferCreateParams,
 					options: { idempotencyKey?: string },
 				) => {
-					calls.push({ params, key: options.idempotencyKey });
+					calls.create.push({ params, key: options.idempotencyKey });
 					return { amount: params.amount, id: "tr_listing_1" };
+				},
+				list: async (params: Stripe.TransferListParams) => {
+					calls.list.push(params);
+					return { data: existing };
 				},
 			},
 		} as unknown as Stripe;
+		return { calls, stripe };
+	}
+
+	test("links a listing payout to the captured charge with an idempotency key", async () => {
+		const { calls, stripe } = fakeTransferStripe([]);
 
 		const result = await createConnectedAccountTransfer(stripe, {
 			amountMinor: 12_500,
@@ -135,14 +153,49 @@ describe("createConnectedAccountTransfer", () => {
 			id: "tr_listing_1",
 			sourceChargeId: "ch_1",
 		});
-		expect(calls[0]?.params).toMatchObject({
+		expect(calls.list[0]?.transfer_group).toBe("order:order_1");
+		expect(calls.create[0]?.params).toMatchObject({
 			amount: 12_500,
 			currency: "eur",
 			destination: "acct_owner",
 			source_transaction: "ch_1",
 			transfer_group: "order:order_1",
 		});
-		expect(calls[0]?.key).toBe("listing-transfer:item_1");
+		expect(calls.create[0]?.key).toBe("listing-transfer:item_1");
+	});
+
+	test("reuses an existing transfer for the order item instead of paying twice", async () => {
+		const { calls, stripe } = fakeTransferStripe([
+			{
+				amount: 12_500,
+				id: "tr_existing",
+				metadata: { orderId: "order_1", orderItemId: "item_1" },
+				source_transaction: "ch_1",
+			},
+			{
+				amount: 9_900,
+				id: "tr_other_item",
+				metadata: { orderId: "order_1", orderItemId: "item_2" },
+				source_transaction: "ch_1",
+			},
+		]);
+
+		const result = await createConnectedAccountTransfer(stripe, {
+			amountMinor: 12_500,
+			currency: "EUR",
+			destinationAccountId: "acct_owner",
+			idempotencyKey: "listing-transfer:item_1",
+			orderId: "order_1",
+			orderItemId: "item_1",
+			paymentIntentId: "pi_1",
+		});
+
+		expect(result).toEqual({
+			amountMinor: 12_500,
+			id: "tr_existing",
+			sourceChargeId: "ch_1",
+		});
+		expect(calls.create).toHaveLength(0);
 	});
 });
 

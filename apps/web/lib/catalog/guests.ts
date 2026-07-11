@@ -5,6 +5,17 @@ export const MAX_INFANTS = 5;
 export const MAX_PETS = 5;
 
 /**
+ * Canonical guest selection shape shared by search, booking, filtering and
+ * checkout formatting.
+ */
+export interface GuestCounts {
+	adults: number;
+	children: number;
+	infants: number;
+	pets: number;
+}
+
+/**
  * Translates a guest selection into the minimum person capacity a listing must
  * advertise. Every adult and child counts as one occupant; infants (under 2) do
  * not count toward occupancy and are excluded here.

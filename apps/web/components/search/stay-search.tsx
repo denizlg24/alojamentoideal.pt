@@ -88,6 +88,9 @@ export function StaySearch({ className }: { className?: string }) {
 							<span className="text-muted-foreground text-xs">
 								{placeLabel} · {guestTotal}{" "}
 								{guestTotal === 1 ? "guest" : "guests"}
+								{state.pets > 0
+									? `, ${state.pets} ${state.pets === 1 ? "pet" : "pets"}`
+									: ""}
 							</span>
 						</span>
 					</button>

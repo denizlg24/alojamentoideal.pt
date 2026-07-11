@@ -41,9 +41,9 @@ import {
 import {
 	type ActivityKeyInput,
 	activityCartItemClientMutationId,
-	cartItemClientMutationId,
 	randomIdempotencyKey,
 	type StayKeyInput,
+	stayAddCartItemInput,
 } from "@/lib/checkout/idempotency";
 import {
 	clearResumeState,
@@ -204,20 +204,7 @@ async function addCartItemFromExisting(
 	}
 
 	const stay = stayInputFromItem(item);
-	return (
-		await api.addCartItem(cartId, {
-			adults: stay.adults,
-			checkIn: stay.checkIn,
-			checkOut: stay.checkOut,
-			children: stay.children,
-			clientMutationId: cartItemClientMutationId(stay),
-			guests: stay.guests,
-			idempotencyKey: randomIdempotencyKey("cart-item-add"),
-			infants: stay.infants,
-			listingId: stay.listingId,
-			pets: stay.pets,
-		})
-	).cart;
+	return (await api.addCartItem(cartId, stayAddCartItemInput(stay))).cart;
 }
 
 function cartHasStay(cart: CartDto, stayToken: string): boolean {
@@ -653,18 +640,7 @@ export function CheckoutController({ seed }: CheckoutControllerProps) {
 				if (seedStay && seedToken && !cartHasStay(loaded, seedToken)) {
 					try {
 						loaded = (
-							await api.addCartItem(loaded.id, {
-								adults: seedStay.adults,
-								checkIn: seedStay.checkIn,
-								checkOut: seedStay.checkOut,
-								children: seedStay.children,
-								clientMutationId: cartItemClientMutationId(seedStay),
-								guests: seedStay.guests,
-								idempotencyKey: randomIdempotencyKey("cart-item-add"),
-								infants: seedStay.infants,
-								listingId: seedStay.listingId,
-								pets: seedStay.pets,
-							})
+							await api.addCartItem(loaded.id, stayAddCartItemInput(seedStay))
 						).cart;
 					} catch (error) {
 						const err = toCheckoutError(error);
@@ -1629,6 +1605,7 @@ export function CheckoutController({ seed }: CheckoutControllerProps) {
 				<EditStayDialog
 					listingId={editStayItem.listingId}
 					maxGuests={editStayConstraints.maxGuests}
+					maxPets={editStayConstraints.maxPets}
 					minNights={editStayConstraints.minNights}
 					onOpenChange={(open) => {
 						if (!open) {

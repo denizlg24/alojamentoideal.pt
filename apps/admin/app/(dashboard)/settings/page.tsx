@@ -310,32 +310,38 @@ export default async function SettingsPage({
 					</AccordionTrigger>
 					<AccordionContent>
 						<div className="divide-y divide-border/60 border-border/60 border-t border-b">
-							{paymentListings.map((listing) => (
-								<form
-									action={saveListingPaymentDestination}
-									className="grid gap-3 py-3 lg:grid-cols-[minmax(0,1fr)_minmax(18rem,24rem)_auto] lg:items-center"
-									key={listing.id}
-								>
-									<input name="listingId" type="hidden" value={listing.id} />
-									<div className="min-w-0">
-										<p className="truncate font-medium text-sm">
-											{listing.listingName ?? "Untitled listing"}
-										</p>
-										<p className="mt-1 text-muted-foreground text-xs">
-											Hostify {listing.listingExternalId}
-										</p>
-									</div>
-									<Input
-										aria-label={`Stripe connected account for ${listing.listingName ?? listing.listingExternalId}`}
-										defaultValue={listing.stripeConnectedAccountId ?? ""}
-										name="stripeConnectedAccountId"
-										placeholder="acct_... (leave blank for platform)"
-									/>
-									<Button type="submit" variant="secondary">
-										Save
-									</Button>
-								</form>
-							))}
+							{paymentListings.length === 0 ? (
+								<p className="py-8 text-center text-muted-foreground text-sm">
+									No active Hostify listings have been synced yet.
+								</p>
+							) : (
+								paymentListings.map((listing) => (
+									<form
+										action={saveListingPaymentDestination}
+										className="grid gap-3 py-3 lg:grid-cols-[minmax(0,1fr)_minmax(18rem,24rem)_auto] lg:items-center"
+										key={listing.id}
+									>
+										<input name="listingId" type="hidden" value={listing.id} />
+										<div className="min-w-0">
+											<p className="truncate font-medium text-sm">
+												{listing.listingName ?? "Untitled listing"}
+											</p>
+											<p className="mt-1 text-muted-foreground text-xs">
+												Hostify {listing.listingExternalId}
+											</p>
+										</div>
+										<Input
+											aria-label={`Stripe connected account for ${listing.listingName ?? listing.listingExternalId}`}
+											defaultValue={listing.stripeConnectedAccountId ?? ""}
+											name="stripeConnectedAccountId"
+											placeholder="acct_... (leave blank for platform)"
+										/>
+										<Button type="submit" variant="secondary">
+											Save
+										</Button>
+									</form>
+								))
+							)}
 						</div>
 					</AccordionContent>
 				</AccordionItem>

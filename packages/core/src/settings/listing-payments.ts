@@ -34,8 +34,10 @@ export async function listListingPaymentDestinations(): Promise<
 		);
 
 	return listings.map((listing) => ({
-		...listing,
+		id: listing.id,
+		listingExternalId: listing.listingExternalId,
 		listingName: pickLocalizedTitle(listing.processed.title),
+		stripeConnectedAccountId: listing.stripeConnectedAccountId,
 	}));
 }
 

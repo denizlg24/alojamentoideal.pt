@@ -128,6 +128,7 @@ export interface ConnectedAccountTransferRow {
 	attemptCount: number;
 	currency: string;
 	destinationAccountId: string;
+	id: string;
 	lastErrorMessage: string | null;
 	nextAttemptAt: Date;
 	orderReference: string;
@@ -150,6 +151,7 @@ export async function loadConnectedAccountTransferQueue(): Promise<
 				currency: connectedAccountTransferTable.currency,
 				destinationAccountId:
 					connectedAccountTransferTable.destinationAccountId,
+				id: connectedAccountTransferTable.id,
 				lastErrorMessage: connectedAccountTransferTable.lastErrorMessage,
 				nextAttemptAt: connectedAccountTransferTable.nextAttemptAt,
 				orderReference: orderTable.publicReference,

@@ -165,7 +165,17 @@ async function finalizeReservation(
 	const result = await service.confirmOrderReservations(orderId);
 	switch (result.outcome) {
 		case "confirmed":
-			await connectedAccountTransferService().reconcile();
+			// Best effort: the cron reconciler owns retries, and a transfer
+			// failure must never block the confirmation email below.
+			try {
+				await connectedAccountTransferService().reconcile();
+			} catch (error) {
+				logger.warn("Connected-account transfer reconcile failed inline", {
+					error: error instanceof Error ? error.message : String(error),
+					orderId,
+					paymentIntentId,
+				});
+			}
 			logger.info("Order confirmed: provider holds accepted", {
 				orderId,
 				paymentIntentId,

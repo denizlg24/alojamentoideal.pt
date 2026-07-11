@@ -8,14 +8,9 @@ import {
 } from "@workspace/ui/components/popover";
 import { cn } from "@workspace/ui/lib/utils";
 import { Minus, Plus, Users } from "lucide-react";
-import { MAX_INFANTS, MAX_PETS } from "@/lib/catalog/guests";
+import { type GuestCounts, MAX_INFANTS, MAX_PETS } from "@/lib/catalog/guests";
 
-export interface GuestCounts {
-	adults: number;
-	children: number;
-	infants: number;
-	pets: number;
-}
+export type { GuestCounts };
 
 interface GuestFieldsProps {
 	maxPets?: number;

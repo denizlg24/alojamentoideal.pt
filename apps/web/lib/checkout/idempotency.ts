@@ -116,3 +116,23 @@ export function activityCartItemClientMutationId(
 export function randomIdempotencyKey(prefix: string): string {
 	return clamp(`${sanitize(prefix)}.${crypto.randomUUID()}`);
 }
+
+/**
+ * The one `addCartItem` stay payload every add path (store add, checkout
+ * bootstrap seed, carry-over re-add) must send, so a new stay field cannot be
+ * wired into one path and silently dropped from another.
+ */
+export function stayAddCartItemInput(stay: StayKeyInput) {
+	return {
+		adults: stay.adults,
+		checkIn: stay.checkIn,
+		checkOut: stay.checkOut,
+		children: stay.children,
+		clientMutationId: cartItemClientMutationId(stay),
+		guests: stay.guests,
+		idempotencyKey: randomIdempotencyKey("cart-item-add"),
+		infants: stay.infants,
+		listingId: stay.listingId,
+		pets: stay.pets,
+	};
+}

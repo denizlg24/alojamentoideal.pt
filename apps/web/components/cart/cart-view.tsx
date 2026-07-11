@@ -518,6 +518,7 @@ export function CartView() {
 				<EditStayDialog
 					listingId={dialogItem.listingId}
 					maxGuests={dialogConstraints.maxGuests}
+					maxPets={dialogConstraints.maxPets}
 					minNights={dialogConstraints.minNights}
 					onOpenChange={(open) => {
 						if (!open) {

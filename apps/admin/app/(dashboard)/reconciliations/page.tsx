@@ -188,9 +188,7 @@ export default async function ReconciliationsPage() {
 						</TableHeader>
 						<TableBody>
 							{transfers.rows.map((row) => (
-								<TableRow
-									key={`${row.orderReference}:${row.destinationAccountId}`}
-								>
+								<TableRow key={row.id}>
 									<TableCell>
 										<OrderLink reference={row.orderReference} />
 									</TableCell>

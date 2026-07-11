@@ -20,6 +20,10 @@ export interface ConnectedAccountTransferResult {
  * Creates a separate charge-and-transfer payout for one stay item. Linking the
  * transfer to the captured charge avoids platform-balance timing races, while
  * the caller's durable idempotency key makes retries safe after a crash.
+ * Before creating, an existing transfer for the same order item is looked up
+ * via its transfer group and reused: Stripe idempotency keys age out after
+ * 24h, so a very late retry of a transfer whose result was never recorded
+ * locally must not pay the listing twice.
  */
 export async function createConnectedAccountTransfer(
 	stripe: Stripe,
@@ -30,6 +34,28 @@ export async function createConnectedAccountTransfer(
 	}
 	if (!request.idempotencyKey) {
 		throw new Error("Connected account transfer idempotency key is required");
+	}
+
+	const priorTransfers = await stripe.transfers.list({
+		limit: 100,
+		transfer_group: `order:${request.orderId}`,
+	});
+	const prior = priorTransfers.data.find(
+		(transfer) => transfer.metadata?.orderItemId === request.orderItemId,
+	);
+	if (prior) {
+		const priorSourceChargeId =
+			typeof prior.source_transaction === "string"
+				? prior.source_transaction
+				: prior.source_transaction?.id;
+		if (!priorSourceChargeId) {
+			throw new Error("Existing transfer is missing its source charge");
+		}
+		return {
+			amountMinor: prior.amount,
+			id: prior.id,
+			sourceChargeId: priorSourceChargeId,
+		};
 	}
 
 	const intent = await stripe.paymentIntents.retrieve(request.paymentIntentId, {

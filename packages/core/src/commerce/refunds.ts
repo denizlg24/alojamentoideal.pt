@@ -491,7 +491,9 @@ export class OrderRefundService {
 				orderItemId,
 				orderTotalMinor: order.totalMinor,
 				paymentIntentId: order.stripePaymentIntentId,
+				persistedReversalAmountMinor: null,
 				refundId: refund.id,
+				refundRecordId: initializedRecordId,
 			});
 
 		const settledAt = this.#now();
@@ -502,9 +504,16 @@ export class OrderRefundService {
 				lastErrorMessage: transferReversalError ?? null,
 				status: "succeeded",
 				stripeRefundId: refund.id,
-				stripeTransferReversalId: transferReversal?.id ?? null,
-				transferReversalAmountMinor: transferReversal?.amountMinor ?? null,
 				updatedAt: settledAt,
+				// On reversal failure, keep the pinned transferReversalAmountMinor
+				// so the reconciler retries with the amount the idempotency key
+				// was first issued with.
+				...(transferReversal
+					? {
+							stripeTransferReversalId: transferReversal.id,
+							transferReversalAmountMinor: transferReversal.amountMinor,
+						}
+					: {}),
 			})
 			.where(eq(orderRefundTable.id, recordId))
 			.returning();
@@ -575,6 +584,8 @@ export class OrderRefundService {
 				orderTotalMinor: orderTable.totalMinor,
 				reason: orderRefundTable.reason,
 				stripePaymentIntentId: orderTable.stripePaymentIntentId,
+				transferReversalAmountMinor:
+					orderRefundTable.transferReversalAmountMinor,
 			})
 			.from(orderRefundTable)
 			.innerJoin(orderTable, eq(orderRefundTable.orderId, orderTable.id))
@@ -690,7 +701,9 @@ export class OrderRefundService {
 					orderItemId: row.orderItemId,
 					orderTotalMinor: row.orderTotalMinor,
 					paymentIntentId: row.stripePaymentIntentId,
+					persistedReversalAmountMinor: row.transferReversalAmountMinor,
 					refundId: refund.id,
+					refundRecordId: row.id,
 				});
 			const settledAt = this.#now();
 			await this.#db
@@ -700,9 +713,13 @@ export class OrderRefundService {
 					lastErrorMessage: reversalError ?? null,
 					status: "succeeded",
 					stripeRefundId: refund.id,
-					stripeTransferReversalId: reversal?.id ?? null,
-					transferReversalAmountMinor: reversal?.amountMinor ?? null,
 					updatedAt: settledAt,
+					...(reversal
+						? {
+								stripeTransferReversalId: reversal.id,
+								transferReversalAmountMinor: reversal.amountMinor,
+							}
+						: {}),
 				})
 				.where(eq(orderRefundTable.id, row.id));
 			trackEvent({
@@ -729,6 +746,8 @@ export class OrderRefundService {
 				orderTotalMinor: orderTable.totalMinor,
 				stripePaymentIntentId: orderTable.stripePaymentIntentId,
 				stripeRefundId: orderRefundTable.stripeRefundId,
+				transferReversalAmountMinor:
+					orderRefundTable.transferReversalAmountMinor,
 			})
 			.from(orderRefundTable)
 			.innerJoin(orderTable, eq(orderRefundTable.orderId, orderTable.id))
@@ -754,7 +773,9 @@ export class OrderRefundService {
 				orderItemId: row.orderItemId,
 				orderTotalMinor: row.orderTotalMinor,
 				paymentIntentId: row.stripePaymentIntentId,
+				persistedReversalAmountMinor: row.transferReversalAmountMinor,
 				refundId: row.stripeRefundId,
+				refundRecordId: row.id,
 			});
 			if (attempt.error) {
 				await this.#db
@@ -814,11 +835,14 @@ export class OrderRefundService {
 		orderItemId: string | null;
 		orderTotalMinor: number;
 		paymentIntentId: string;
+		persistedReversalAmountMinor: number | null;
 		refundId: string | null;
+		refundRecordId: string;
 	}): Promise<{ error?: string; reversal: TransferReversalResult | null }> {
 		const listingTarget = await this.#listingReversalTarget(
 			input.orderItemId,
 			input.amountMinor,
+			input.persistedReversalAmountMinor,
 		);
 		if (listingTarget) {
 			const reverseListingTransfer = this.#reverseListingTransfer;
@@ -828,6 +852,19 @@ export class OrderRefundService {
 						"Listing transfer reversals are unavailable: Stripe is not configured.",
 					reversal: null,
 				};
+			}
+			// Pin the computed amount on the ledger row before calling Stripe.
+			// The reversal idempotency key is stable across retries, so every
+			// retry must send the exact amount the key was first issued with,
+			// even after sibling reversals change the remaining balance.
+			if (input.persistedReversalAmountMinor === null) {
+				await this.#db
+					.update(orderRefundTable)
+					.set({
+						transferReversalAmountMinor: listingTarget.amountMinor,
+						updatedAt: this.#now(),
+					})
+					.where(eq(orderRefundTable.id, input.refundRecordId));
 			}
 			try {
 				return {
@@ -877,6 +914,7 @@ export class OrderRefundService {
 	async #listingReversalTarget(
 		orderItemId: string | null,
 		refundMinor: number,
+		pinnedAmountMinor: number | null = null,
 	): Promise<{ amountMinor: number; transferId: string } | null> {
 		if (!orderItemId) return null;
 		const [transfer] = await this.#db
@@ -894,6 +932,13 @@ export class OrderRefundService {
 			)
 			.limit(1);
 		if (!transfer?.transferId) return null;
+		// A pinned amount from an earlier attempt wins over the live remaining
+		// balance: the retry must replay the original Stripe request exactly.
+		if (pinnedAmountMinor !== null) {
+			return pinnedAmountMinor > 0
+				? { amountMinor: pinnedAmountMinor, transferId: transfer.transferId }
+				: null;
+		}
 		const [reversed] = await this.#db
 			.select({
 				amountMinor:

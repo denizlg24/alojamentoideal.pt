@@ -370,7 +370,13 @@ export function HomesFilterBar({
 			key: "guests",
 			label: `${guests} ${guests === 1 ? "guest" : "guests"}`,
 			remove: () =>
-				apply({ ...visibleFilters, adults: 1, children: 0, infants: 0 }),
+				apply({
+					...visibleFilters,
+					adults: 1,
+					children: 0,
+					infants: 0,
+					pets: 0,
+				}),
 		});
 	}
 	if (visibleFilters.ratingMin !== null) {

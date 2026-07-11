@@ -1,5 +1,6 @@
 import { format } from "date-fns";
 import { parseIsoDate } from "@/lib/catalog/dates";
+import type { GuestCounts } from "@/lib/catalog/guests";
 
 /**
  * Currencies Stripe/ISO treat as zero-decimal. Mirrors `minorUnitFactor` in
@@ -71,19 +72,15 @@ export function formatActivityDateLong(date: string): string {
 	return format(parseIsoDate(date), "EEE, MMM d, yyyy");
 }
 
-export interface GuestCounts {
-	adults: number;
-	children: number;
-	infants: number;
-	pets?: number;
-}
+export type { GuestCounts };
 
+/** `pets` may be omitted for stored stays that predate pet support. */
 export function guestSummaryLabel({
 	adults,
 	children,
 	infants,
 	pets = 0,
-}: GuestCounts): string {
+}: Omit<GuestCounts, "pets"> & Partial<Pick<GuestCounts, "pets">>): string {
 	const parts = [`${adults} ${adults === 1 ? "adult" : "adults"}`];
 	if (children > 0) {
 		parts.push(`${children} ${children === 1 ? "child" : "children"}`);

@@ -34,6 +34,7 @@ import type {
 interface EditStayDialogProps {
 	listingId: string;
 	maxGuests: number | null;
+	maxPets: number;
 	minNights: number;
 	onOpenChange: (open: boolean) => void;
 	onSave: (next: EditStayValue) => void;
@@ -50,6 +51,7 @@ interface EditStayDialogProps {
 export function EditStayDialog({
 	listingId,
 	maxGuests,
+	maxPets,
 	minNights,
 	onOpenChange,
 	onSave,
@@ -211,7 +213,11 @@ export function EditStayDialog({
 								</span>
 							</AccordionTrigger>
 							<AccordionContent>
-								<GuestFields onChange={setGuests} value={guests} />
+								<GuestFields
+									maxPets={maxPets}
+									onChange={setGuests}
+									value={guests}
+								/>
 								{maxGuests !== null && (
 									<p className="mt-2 text-muted-foreground text-xs">
 										This home sleeps up to {maxGuests}.
