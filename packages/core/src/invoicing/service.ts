@@ -23,6 +23,7 @@ import {
 	type InvoiceCustomerDraft,
 	type InvoiceLineDraft,
 	invoiceableCharges,
+	minorToDecimalString,
 	type ResolvedInvoiceCustomer,
 	resolveDraftInvoiceCustomer,
 	resolveInvoiceCustomer,
@@ -57,6 +58,20 @@ export interface CreateOrderItemInvoiceInput {
 }
 
 export interface CreateCreditNoteInput {
+	invoiceId: string;
+	orderReference: string;
+}
+
+export interface CreatePartialCreditNoteInput extends CreateCreditNoteInput {
+	creditAmountMinor: number;
+}
+
+export interface PartialCreditNoteResult {
+	creditNote: OrderInvoice;
+	replacementInvoice: OrderInvoice;
+}
+
+export interface DeleteInvoiceInput {
 	invoiceId: string;
 	orderReference: string;
 }
@@ -120,6 +135,39 @@ export class InvoicingService {
 			.from(orderInvoiceTable)
 			.where(eq(orderInvoiceTable.orderId, order.id))
 			.orderBy(asc(orderInvoiceTable.createdAt));
+	}
+
+	/** Removes only local failed rows or open Hostkit drafts. Issued fiscal
+	 * documents are immutable and must be annulled with a credit note. */
+	async deleteInvoice(input: DeleteInvoiceInput): Promise<void> {
+		const order = await this.#loadOrder(input.orderReference);
+		const invoice = await this.#loadOrderInvoice(order.id, input.invoiceId);
+		if (invoice.status === "issued" || invoice.status === "credited") {
+			throw new InvoicingError(
+				"invoice_delete_forbidden",
+				"issued fiscal documents cannot be deleted; issue a credit note instead",
+			);
+		}
+
+		if (invoice.status === "draft" && invoice.hostkitInvoiceId) {
+			const item = await this.#loadOrderItem(order.id, invoice.orderItemId);
+			const client = await this.#resolveHostkitClient(item.hostifyListingId);
+			if (!client) {
+				throw new InvoicingError(
+					"hostkit_not_configured",
+					`no Hostkit API key configured for listing ${item.hostifyListingId}`,
+				);
+			}
+			await client.invoicing.deleteDraft({
+				id: invoice.hostkitInvoiceId,
+				invoicingNif: invoice.invoicingNif ?? undefined,
+				series: invoice.hostkitSeries ?? undefined,
+			});
+		}
+
+		await this.#db
+			.delete(orderInvoiceTable)
+			.where(eq(orderInvoiceTable.id, invoice.id));
 	}
 
 	/**
@@ -304,6 +352,7 @@ export class InvoicingService {
 		lines: InvoiceLineDraft[];
 		order: { currency: string; id: string };
 		orderItemId: string;
+		replacementForInvoiceId?: string;
 		reservationCode: string | null;
 		totalMinor: number;
 	}): Promise<OrderInvoice> {
@@ -316,9 +365,13 @@ export class InvoicingService {
 		}
 
 		const record = await this.#insertDraftRecord({
+			customer: params.customer,
 			currency: params.order.currency,
+			invoiceType: params.invoiceType,
+			lines: params.lines,
 			orderId: params.order.id,
 			orderItemId: params.orderItemId,
+			replacementForInvoiceId: params.replacementForInvoiceId,
 			reservationCode: params.reservationCode,
 			totalMinor: params.totalMinor,
 		});
@@ -388,6 +441,7 @@ export class InvoicingService {
 					issuedAt: now,
 					status: "issued",
 				});
+				await this.#markRequestFulfilledIfComplete(params.order.id);
 				return await this.#loadRecord(record.id);
 			} catch (persistError) {
 				// The Hostkit invoice was successfully closed, but we failed to
@@ -518,6 +572,7 @@ export class InvoicingService {
 					lastErrorMessage: null,
 					status: "issued",
 				});
+				await this.#updateRecord(invoice.id, { status: "credited" });
 				return await this.#loadRecord(record.id);
 			} catch (persistError) {
 				// The Hostkit credit note was successfully created, but we failed
@@ -553,6 +608,66 @@ export class InvoicingService {
 		}
 	}
 
+	/**
+	 * Hostkit only annuls a closed invoice in full. A partial correction is
+	 * therefore the certified two-document workflow: credit the original, then
+	 * issue a replacement for the retained amount. Both relationships are kept
+	 * locally so the net adjustment is reconstructable.
+	 */
+	async createPartialCreditNote(
+		input: CreatePartialCreditNoteInput,
+	): Promise<PartialCreditNoteResult> {
+		const order = await this.#loadOrder(input.orderReference);
+		const invoice = await this.#loadOrderInvoice(order.id, input.invoiceId);
+		if (
+			invoice.kind !== "invoice" ||
+			invoice.status !== "issued" ||
+			!invoice.customerSnapshot ||
+			!invoice.lineSnapshot ||
+			!invoice.invoiceType
+		) {
+			throw new InvoicingError(
+				"partial_credit_invalid",
+				"partial credit requires an issued invoice with its original line snapshot",
+			);
+		}
+		if (
+			!Number.isInteger(input.creditAmountMinor) ||
+			input.creditAmountMinor <= 0 ||
+			input.creditAmountMinor >= invoice.totalMinor
+		) {
+			throw new InvoicingError(
+				"partial_credit_invalid",
+				"partial credit amount must be greater than zero and lower than the invoice total",
+			);
+		}
+		const customer = parseCustomerSnapshot(invoice.customerSnapshot);
+		const originalLines = parseLineSnapshot(invoice.lineSnapshot);
+		const retainedMinor = invoice.totalMinor - input.creditAmountMinor;
+		const lines = scaleInvoiceLines(
+			originalLines,
+			retainedMinor,
+			invoice.totalMinor,
+		);
+		const item = await this.#loadOrderItem(order.id, invoice.orderItemId);
+
+		const creditNote = await this.createCreditNote(input);
+		const replacementInvoice = await this.#issueInvoiceForItem({
+			customer,
+			hostifyListingId: item.hostifyListingId,
+			invoiceType: invoice.invoiceType,
+			lines,
+			order,
+			orderItemId: item.id,
+			replacementForInvoiceId: invoice.id,
+			reservationCode: invoice.reservationCode,
+			totalMinor: editableInvoiceLinesTotalMinor(
+				lines.map(toEditableInvoiceLine),
+			),
+		});
+		return { creditNote, replacementInvoice };
+	}
+
 	/** The note URL is only exposed on the series listing, keyed by refid. */
 	async #findCreditNoteUrl(
 		client: HostkitClient,
@@ -578,20 +693,28 @@ export class InvoicingService {
 	}
 
 	async #insertDraftRecord(values: {
+		customer: ResolvedInvoiceCustomer;
 		currency: string;
+		invoiceType: "FR" | "FT";
+		lines: InvoiceLineDraft[];
 		orderId: string;
 		orderItemId: string;
+		replacementForInvoiceId?: string;
 		reservationCode: string | null;
 		totalMinor: number;
 	}) {
 		const id = crypto.randomUUID();
 		try {
 			await this.#db.insert(orderInvoiceTable).values({
+				customerSnapshot: { ...values.customer },
 				currency: values.currency,
 				id,
 				kind: "invoice",
+				invoiceType: values.invoiceType,
+				lineSnapshot: values.lines.map((line) => ({ ...line })),
 				orderId: values.orderId,
 				orderItemId: values.orderItemId,
+				replacementForInvoiceId: values.replacementForInvoiceId,
 				reservationCode: values.reservationCode,
 				status: "draft",
 				totalMinor: values.totalMinor,
@@ -656,6 +779,58 @@ export class InvoicingService {
 			throw new InvoicingError("invoice_not_found", "invoice record vanished");
 		}
 		return record;
+	}
+
+	async #loadOrderInvoice(
+		orderId: string,
+		invoiceId: string,
+	): Promise<OrderInvoice> {
+		const rows = await this.#db
+			.select()
+			.from(orderInvoiceTable)
+			.where(
+				and(
+					eq(orderInvoiceTable.id, invoiceId),
+					eq(orderInvoiceTable.orderId, orderId),
+				),
+			)
+			.limit(1);
+		const invoice = rows[0];
+		if (!invoice) {
+			throw new InvoicingError("invoice_not_found", "invoice not found");
+		}
+		return invoice;
+	}
+
+	async #markRequestFulfilledIfComplete(orderId: string): Promise<void> {
+		const accommodationItems = await this.#db
+			.select({ id: orderItemTable.id })
+			.from(orderItemTable)
+			.innerJoin(
+				accommodationItemDetailTable,
+				eq(accommodationItemDetailTable.orderItemId, orderItemTable.id),
+			)
+			.where(eq(orderItemTable.orderId, orderId));
+		if (accommodationItems.length === 0) {
+			return;
+		}
+		const documents = await this.#db
+			.select({ orderItemId: orderInvoiceTable.orderItemId })
+			.from(orderInvoiceTable)
+			.where(
+				and(
+					eq(orderInvoiceTable.orderId, orderId),
+					eq(orderInvoiceTable.kind, "invoice"),
+					eq(orderInvoiceTable.status, "issued"),
+				),
+			);
+		const issuedItemIds = new Set(documents.map((row) => row.orderItemId));
+		if (accommodationItems.every((item) => issuedItemIds.has(item.id))) {
+			await this.#db
+				.update(orderTable)
+				.set({ invoiceRequestFulfilledAt: this.#now(), updatedAt: this.#now() })
+				.where(eq(orderTable.id, orderId));
+		}
 	}
 
 	async #loadOrder(orderReference: string) {
@@ -796,4 +971,117 @@ function isUniqueViolation(error: unknown): boolean {
 		"code" in error &&
 		(error as { code?: unknown }).code === "23505"
 	);
+}
+
+function parseCustomerSnapshot(
+	value: Record<string, unknown>,
+): ResolvedInvoiceCustomer {
+	if (
+		typeof value.country !== "string" ||
+		typeof value.customerId !== "string" ||
+		typeof value.name !== "string"
+	) {
+		throw new InvoicingError(
+			"partial_credit_invalid",
+			"the original invoice customer snapshot is incomplete",
+		);
+	}
+	return {
+		address: optionalString(value.address),
+		city: optionalString(value.city),
+		country: value.country,
+		cp: optionalString(value.cp),
+		customerId: value.customerId,
+		name: value.name,
+	};
+}
+
+function parseLineSnapshot(
+	values: Record<string, unknown>[],
+): InvoiceLineDraft[] {
+	const lines: InvoiceLineDraft[] = [];
+	for (const value of values) {
+		if (
+			typeof value.customDescription !== "string" ||
+			typeof value.discount !== "number" ||
+			(typeof value.price !== "string" && typeof value.price !== "number") ||
+			typeof value.productId !== "string" ||
+			typeof value.quantity !== "number" ||
+			typeof value.vat !== "number"
+		) {
+			throw new InvoicingError(
+				"partial_credit_invalid",
+				"the original invoice line snapshot is incomplete",
+			);
+		}
+		const type = value.type;
+		lines.push({
+			customDescription: value.customDescription,
+			discount: value.discount,
+			price: value.price,
+			productId: value.productId,
+			quantity: value.quantity,
+			reasonCode: optionalString(value.reasonCode),
+			type: type === "I" || type === "P" || type === "S" ? type : "S",
+			vat: value.vat,
+		});
+	}
+	if (lines.length === 0) {
+		throw new InvoicingError(
+			"partial_credit_invalid",
+			"the original invoice has no line snapshot",
+		);
+	}
+	return lines;
+}
+
+function optionalString(value: unknown): string | undefined {
+	return typeof value === "string" && value.trim() ? value : undefined;
+}
+
+function scaleInvoiceLines(
+	lines: InvoiceLineDraft[],
+	targetMinor: number,
+	originalMinor: number,
+): InvoiceLineDraft[] {
+	const ratio = targetMinor / originalMinor;
+	const scaled = lines.map((line) => ({
+		...line,
+		price: (Number(line.price) * ratio).toFixed(2),
+	}));
+	const editable = scaled.map(toEditableInvoiceLine);
+	let total = editableInvoiceLinesTotalMinor(editable);
+	if (total === targetMinor) return scaled;
+
+	// Correct ordinary cent-rounding drift on the last non-zero line. VAT can
+	// make some gross cent totals unreachable; in that case retain the closest
+	// certified line total and record that actual amount locally.
+	let index = -1;
+	for (let lineIndex = scaled.length - 1; lineIndex >= 0; lineIndex -= 1) {
+		if (Number(scaled[lineIndex]?.price) !== 0) {
+			index = lineIndex;
+			break;
+		}
+	}
+	if (index < 0) return scaled;
+	const baseMinor = Math.round(Number(scaled[index]?.price ?? 0) * 100);
+	let best = scaled;
+	let bestDistance = Math.abs(total - targetMinor);
+	for (let offset = -200; offset <= 200; offset += 1) {
+		const candidate = scaled.map((line, lineIndex) =>
+			lineIndex === index
+				? { ...line, price: minorToDecimalString(baseMinor + offset) }
+				: line,
+		);
+		total = editableInvoiceLinesTotalMinor(
+			candidate.map(toEditableInvoiceLine),
+		);
+		const distance = Math.abs(total - targetMinor);
+		if (distance < bestDistance) {
+			best = candidate;
+			bestDistance = distance;
+		}
+		if (distance === 0) return candidate;
+	}
+	return best;
 }

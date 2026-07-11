@@ -53,6 +53,8 @@ const ERROR_STATUS: Record<InvoicingError["code"], number> = {
 	already_invoiced: 409,
 	billing_contact_missing: 422,
 	credit_note_target_invalid: 422,
+	invoice_delete_forbidden: 409,
+	partial_credit_invalid: 422,
 	currency_unsupported: 422,
 	customer_country_unresolved: 422,
 	hostkit_not_configured: 422,

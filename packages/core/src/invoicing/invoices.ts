@@ -184,10 +184,16 @@ export type InvoiceLineDraft = Omit<
 export function buildInvoiceLine(charge: InvoiceChargeRow): InvoiceLineDraft {
 	const { productId, type } = chargeProduct(charge);
 	const vat = chargeVatPercent(charge);
+	// Explicit tax rows (for example the municipal tourist tax) are persisted
+	// with the whole charge in taxMinor/grossMinor and a zero netMinor. On the
+	// fiscal document they are an exempt TMT product, so their unit price is the
+	// gross charge. Ordinary VAT-bearing rows continue to use their net amount.
+	const lineAmountMinor =
+		charge.kind === "tax" ? charge.grossMinor : charge.netMinor;
 	return {
 		customDescription: charge.name,
 		discount: 0,
-		price: minorToDecimalString(charge.netMinor),
+		price: minorToDecimalString(lineAmountMinor),
 		productId,
 		quantity: 1,
 		reasonCode: vat === 0 ? VAT_EXEMPTION_REASON_CODE : undefined,

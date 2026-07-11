@@ -133,7 +133,9 @@ export class HostkitClient {
 					price: input.price,
 					product_id: input.productId,
 					qty: input.quantity,
-					reason_code: input.reasonCode,
+					// Hostkit requires the parameter on every line. Taxed lines use an
+					// empty value; zero-rated lines carry their exemption code.
+					reason_code: input.reasonCode ?? "",
 					region: input.region,
 					series: input.series,
 					type: input.type,

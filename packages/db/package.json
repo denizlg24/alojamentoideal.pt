@@ -17,7 +17,7 @@
 		"typecheck": "tsc --noEmit",
 		"test": "bun test --pass-with-no-tests",
 		"db:generate": "drizzle-kit generate",
-		"db:migrate": "drizzle-kit migrate",
+		"db:migrate": "bun run scripts/migrate.ts",
 		"db:push": "drizzle-kit push",
 		"db:studio": "drizzle-kit studio"
 	},

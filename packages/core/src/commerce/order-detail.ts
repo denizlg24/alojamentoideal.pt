@@ -119,6 +119,21 @@ export interface OrderContactSummary {
 	taxNumber: string | null;
 }
 
+export interface OrderInvoiceDocumentSummary {
+	currency: string;
+	id: string;
+	issuedAt: string;
+	kind: "credit_note" | "invoice";
+	orderItemId: string;
+	totalMinor: number;
+}
+
+export interface OrderInvoiceRequestSummary {
+	fulfilledAt: string | null;
+	requestedAt: string | null;
+	documents: OrderInvoiceDocumentSummary[];
+}
+
 /** A person on the order, as shown in the owner-only People tab. */
 export interface OrderDetailMember {
 	acceptedAt: string | null;
@@ -161,6 +176,7 @@ export interface OrderDetail {
 	currency: string;
 	guestProgress: OrderGuestProgress;
 	items: OrderDetailItem[];
+	invoiceRequest: OrderInvoiceRequestSummary | null;
 	members: OrderDetailMember[] | null;
 	paymentMethod: OrderPaymentMethodSummary | null;
 	pricing: OrderDetailPricing | null;

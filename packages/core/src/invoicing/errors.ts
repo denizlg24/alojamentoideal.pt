@@ -2,6 +2,8 @@ export type InvoicingErrorCode =
 	| "already_invoiced"
 	| "billing_contact_missing"
 	| "credit_note_target_invalid"
+	| "invoice_delete_forbidden"
+	| "partial_credit_invalid"
 	| "currency_unsupported"
 	| "customer_country_unresolved"
 	| "hostkit_not_configured"

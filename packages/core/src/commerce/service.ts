@@ -21,6 +21,7 @@ import {
 	type OrderBillingAddressSnapshot,
 	type OrderMemberStatus,
 	orderContact as orderContactTable,
+	orderInvoice as orderInvoiceTable,
 	orderItemCharge as orderItemChargeTable,
 	orderItem as orderItemTable,
 	orderMember as orderMemberTable,
@@ -3432,6 +3433,8 @@ export class CommerceService {
 				amountPaidMinor: orderTable.amountPaidMinor,
 				amountRefundedMinor: orderTable.amountRefundedMinor,
 				createdAt: orderTable.createdAt,
+				invoiceRequestedAt: orderTable.invoiceRequestedAt,
+				invoiceRequestFulfilledAt: orderTable.invoiceRequestFulfilledAt,
 				currency: orderTable.currency,
 				discountMinor: orderTable.discountMinor,
 				publicReference: orderTable.publicReference,
@@ -3696,6 +3699,25 @@ export class CommerceService {
 		}
 
 		const bookingStatus = toOrderBookingStatus(orderRow.status);
+		const invoiceDocuments = isOwner
+			? await this.#db
+					.select({
+						currency: orderInvoiceTable.currency,
+						id: orderInvoiceTable.id,
+						issuedAt: orderInvoiceTable.issuedAt,
+						kind: orderInvoiceTable.kind,
+						orderItemId: orderInvoiceTable.orderItemId,
+						totalMinor: orderInvoiceTable.totalMinor,
+					})
+					.from(orderInvoiceTable)
+					.where(
+						and(
+							eq(orderInvoiceTable.orderId, orderId),
+							inArray(orderInvoiceTable.status, ["credited", "issued"]),
+						),
+					)
+					.orderBy(asc(orderInvoiceTable.createdAt))
+			: [];
 		const conversations = orderRoleCan(access.role, "chat")
 			? await this.readOrderConversations(access)
 			: [];
@@ -3710,6 +3732,18 @@ export class CommerceService {
 			currency: orderRow.currency,
 			guestProgress: orderGuestProgress,
 			items,
+			invoiceRequest: isOwner
+				? {
+						documents: invoiceDocuments.flatMap((document) =>
+							document.issuedAt
+								? [{ ...document, issuedAt: document.issuedAt.toISOString() }]
+								: [],
+						),
+						fulfilledAt:
+							orderRow.invoiceRequestFulfilledAt?.toISOString() ?? null,
+						requestedAt: orderRow.invoiceRequestedAt?.toISOString() ?? null,
+					}
+				: null,
 			members,
 			paymentMethod: isOwner ? paymentMethodFromOrderRow(orderRow) : null,
 			pricing: isOwner

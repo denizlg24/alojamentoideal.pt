@@ -20,11 +20,20 @@ export {
 	toEditableInvoiceLine,
 } from "./invoices";
 export {
+	type InvoiceRequestFiscalDetails,
+	InvoiceRequestService,
+	type RequestOrderInvoiceInput,
+	type RequestOrderInvoiceResult,
+} from "./requests";
+export {
 	type BuildInvoiceDraftInput,
 	type CreateCreditNoteInput,
 	type CreateOrderItemInvoiceFromLinesInput,
 	type CreateOrderItemInvoiceInput,
+	type CreatePartialCreditNoteInput,
+	type DeleteInvoiceInput,
 	InvoicingService,
 	type InvoicingServiceOptions,
 	type OrderItemInvoiceDraft,
+	type PartialCreditNoteResult,
 } from "./service";

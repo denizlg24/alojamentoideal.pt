@@ -29,6 +29,7 @@ import { formatDate, formatDateTime, formatMoneyMinor } from "@/lib/format";
 import { buildRefundPolicySuggestions } from "@/lib/orders/refund-policy";
 import { ConversationPanel } from "./conversation-panel";
 import { GuestEditDialog } from "./guest-edit-dialog";
+import { InvoiceActions } from "./invoice-actions";
 import { InvoicePanel } from "./invoice-panel";
 import { OrderActions } from "./order-actions";
 import { RefundPanel } from "./refund-panel";
@@ -286,6 +287,33 @@ export default async function OrderDetailPage({
 					status={row.status}
 				/>
 			</div>
+			{detail.invoiceRequest?.requestedAt ? (
+				<div className="mt-4 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm dark:border-amber-900 dark:bg-amber-950/30">
+					<div className="flex items-center justify-between gap-3">
+						<span className="font-medium">Invoice requested</span>
+						<span className="rounded-full bg-amber-200 px-2 py-0.5 text-amber-900 text-xs dark:bg-amber-900 dark:text-amber-100">
+							{detail.invoiceRequest.fulfilledAt ? "Issued" : "Pending"}
+						</span>
+					</div>
+					{contact ? (
+						<p className="mt-1 text-muted-foreground">
+							Fiscal details:{" "}
+							{contact.isCompany && contact.companyName
+								? contact.companyName
+								: contact.name}{" "}
+							· {contact.taxNumber ?? "No tax number"} ·{" "}
+							{[
+								contact.billingAddress.line1,
+								contact.billingAddress.postalCode,
+								contact.billingAddress.city,
+								contact.billingAddress.country,
+							]
+								.filter(Boolean)
+								.join(", ")}
+						</p>
+					) : null}
+				</div>
+			) : null}
 
 			<dl className="mt-6 grid grid-cols-4 gap-x-6 gap-y-4">
 				<DefinitionRow
@@ -566,6 +594,10 @@ export default async function OrderDetailPage({
 												Document
 											</a>
 										) : null}
+										<InvoiceActions
+											invoice={invoice}
+											reference={row.publicReference}
+										/>
 									</TableCell>
 								</TableRow>
 							))}
