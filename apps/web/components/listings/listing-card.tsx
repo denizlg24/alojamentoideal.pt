@@ -6,6 +6,7 @@ import {
 	BedDouble,
 	Bookmark,
 	CalendarDays,
+	Dog,
 	Home,
 	type LucideIcon,
 	MapPin,
@@ -54,6 +55,7 @@ function capacityStats(listing: CatalogListingSummaryDto): CapacityStat[] {
 		stats.push({ icon: BedDouble, label: pluralize(beds, "bed") });
 	if (bathrooms !== null)
 		stats.push({ icon: Toilet, label: pluralize(bathrooms, "bathroom") });
+	if (listing.petFriendly) stats.push({ icon: Dog, label: "Pet-friendly" });
 	return stats;
 }
 

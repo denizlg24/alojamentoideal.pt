@@ -6,6 +6,11 @@ export {
 	runtimeSettingDefinitions,
 } from "./definitions";
 export {
+	type ListingPaymentDestinationSummary,
+	listListingPaymentDestinations,
+	setListingPaymentDestination,
+} from "./listing-payments";
+export {
 	anyHostkitListingCredentialConfigured,
 	deleteHostkitListingApiKey,
 	getRuntimeSettings,

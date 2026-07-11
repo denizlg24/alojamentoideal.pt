@@ -230,6 +230,7 @@ export function HomesFilterBar({
 		adults: visibleFilters.adults,
 		children: visibleFilters.children,
 		infants: visibleFilters.infants,
+		pets: visibleFilters.pets,
 	};
 
 	// Edit guests in a draft while the popover is open and commit once on close,
@@ -249,7 +250,8 @@ export function HomesFilterBar({
 			next &&
 			(next.adults !== currentGuests.adults ||
 				next.children !== currentGuests.children ||
-				next.infants !== currentGuests.infants)
+				next.infants !== currentGuests.infants ||
+				next.pets !== currentGuests.pets)
 		) {
 			apply({ ...visibleFilters, ...next });
 		}
@@ -276,7 +278,8 @@ export function HomesFilterBar({
 		visibleFilters.place !== null ||
 		visibleFilters.checkIn !== null ||
 		visibleFilters.adults > 1 ||
-		visibleFilters.children > 0;
+		visibleFilters.children > 0 ||
+		visibleFilters.pets > 0;
 	const draftCount = countAdvancedFilters(draft);
 	const draftDates = toDateRange(draft);
 	const draftDatesLabel = draftDates?.from
@@ -285,7 +288,7 @@ export function HomesFilterBar({
 			: format(draftDates.from, "MMM d")
 		: "Any week";
 	const draftGuestTotal = draft.adults + draft.children;
-	const draftGuestsLabel = `${draftGuestTotal} ${draftGuestTotal === 1 ? "guest" : "guests"}`;
+	const draftGuestsLabel = `${draftGuestTotal} ${draftGuestTotal === 1 ? "guest" : "guests"}${draft.pets > 0 ? `, ${draft.pets} ${draft.pets === 1 ? "pet" : "pets"}` : ""}`;
 	const draftPlaceLabel = findLocationPreset(draft.place)?.label ?? "Anywhere";
 	const formatPrice = (amount: number) => formatListingMoney(amount, currency);
 	const hasPriceRange =
@@ -639,6 +642,7 @@ export function HomesFilterBar({
 											adults: draft.adults,
 											children: draft.children,
 											infants: draft.infants,
+											pets: draft.pets,
 										}}
 										onChange={(next) => setDraft({ ...draft, ...next })}
 									/>

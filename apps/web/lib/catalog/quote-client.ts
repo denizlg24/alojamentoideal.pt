@@ -8,6 +8,7 @@ export interface QuoteRequestParams {
 	guests: number;
 	infants: number;
 	listingId: string;
+	pets: number;
 	signal?: AbortSignal;
 }
 

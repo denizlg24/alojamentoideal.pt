@@ -14,6 +14,7 @@ function makeItem(overrides: Partial<CartItemDto> = {}): CartItemDto {
 		id: "item-1",
 		infants: 0,
 		listingId: "listing-1",
+		pets: 0,
 		status: "active",
 		...overrides,
 	} as CartItemDto;
@@ -57,6 +58,12 @@ describe("cartContentFingerprint", () => {
 	test("changes when a stay's guests change", () => {
 		const before = cartContentFingerprint(makeCart([makeItem({ adults: 2 })]));
 		const after = cartContentFingerprint(makeCart([makeItem({ adults: 3 })]));
+		expect(before === after).toBe(false);
+	});
+
+	test("changes when a stay's pet count changes", () => {
+		const before = cartContentFingerprint(makeCart([makeItem({ pets: 0 })]));
+		const after = cartContentFingerprint(makeCart([makeItem({ pets: 1 })]));
 		expect(before === after).toBe(false);
 	});
 

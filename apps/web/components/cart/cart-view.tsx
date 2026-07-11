@@ -532,6 +532,7 @@ export function CartView() {
 						checkOut: dialogItem.checkOut,
 						children: dialogItem.children,
 						infants: dialogItem.infants,
+						pets: dialogItem.pets,
 					}}
 				/>
 			)}

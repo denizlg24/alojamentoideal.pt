@@ -57,6 +57,7 @@ const RECORD_COLUMNS = {
 	name: accommodationListing.name,
 	nickname: accommodationListing.nickname,
 	personCapacity: accommodationListing.personCapacity,
+	petFriendly: accommodationListing.petFriendly,
 	processed: accommodationListing.processed,
 	propertyType: accommodationListing.propertyType,
 	provider: accommodationListing.provider,
@@ -290,6 +291,9 @@ export class CatalogRepository {
 			conditions.push(
 				gte(accommodationListing.personCapacity, query.minGuests),
 			);
+		}
+		if (query.petFriendlyOnly) {
+			conditions.push(eq(accommodationListing.petFriendly, true));
 		}
 		if (query.bedroomsMin !== null) {
 			conditions.push(gte(accommodationListing.bedrooms, query.bedroomsMin));

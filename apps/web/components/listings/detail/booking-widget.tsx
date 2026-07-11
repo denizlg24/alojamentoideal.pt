@@ -29,7 +29,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { type MouseEvent, useEffect, useState } from "react";
 import type { DateRange } from "react-day-picker";
 import { nightsBetween, parseIsoDate, toIsoDate } from "@/lib/catalog/dates";
-import { capacityForGuests, MAX_INFANTS } from "@/lib/catalog/guests";
+import { capacityForGuests, MAX_INFANTS, MAX_PETS } from "@/lib/catalog/guests";
 import { formatListingMoney } from "@/lib/catalog/pricing-display";
 import { getStayRestriction } from "@/lib/catalog/stay-restriction";
 import { cartHasOverlappingStay } from "@/lib/checkout/cart-matching";
@@ -47,6 +47,7 @@ interface GuestCounts {
 	adults: number;
 	children: number;
 	infants: number;
+	pets: number;
 }
 
 interface BookingWidgetProps {
@@ -54,6 +55,7 @@ interface BookingWidgetProps {
 	listingId: string;
 	maxGuests: number | null;
 	minNights: number;
+	petFriendly: boolean;
 }
 
 interface CartFlyIcon {
@@ -92,13 +94,21 @@ function formatStayRange(checkIn: string, checkOut: string): string {
 	return `${format(from, "MMM d")} - ${format(to, "MMM d")}`;
 }
 
-function guestSummary({ adults, children, infants }: GuestCounts): string {
+function guestSummary({
+	adults,
+	children,
+	infants,
+	pets,
+}: GuestCounts): string {
 	const parts = [`${adults} ${adults === 1 ? "adult" : "adults"}`];
 	if (children > 0) {
 		parts.push(`${children} ${children === 1 ? "child" : "children"}`);
 	}
 	if (infants > 0) {
 		parts.push(`${infants} ${infants === 1 ? "infant" : "infants"}`);
+	}
+	if (pets > 0) {
+		parts.push(`${pets} ${pets === 1 ? "pet" : "pets"}`);
 	}
 	return parts.join(", ");
 }
@@ -111,6 +121,7 @@ export function BookingWidget(props: BookingWidgetProps) {
 		searchParams.get("adults"),
 		searchParams.get("children"),
 		searchParams.get("infants"),
+		searchParams.get("pets"),
 	].join("|");
 	return <BookingWidgetInner key={seedKey} {...props} />;
 }
@@ -120,6 +131,7 @@ function BookingWidgetInner({
 	listingId,
 	maxGuests,
 	minNights,
+	petFriendly,
 }: BookingWidgetProps) {
 	const searchParams = useSearchParams();
 	const router = useRouter();
@@ -134,6 +146,7 @@ function BookingWidgetInner({
 		adults: intParam(searchParams.get("adults"), 1, 1),
 		children: intParam(searchParams.get("children"), 0, 0),
 		infants: intParam(searchParams.get("infants"), 0, 0, MAX_INFANTS),
+		pets: petFriendly ? intParam(searchParams.get("pets"), 0, 0, MAX_PETS) : 0,
 	}));
 	const [added, setAdded] = useState(false);
 	const [adding, setAdding] = useState(false);
@@ -167,6 +180,7 @@ function BookingWidgetInner({
 		guests: guestCapacity,
 		infants: guests.infants,
 		listingId,
+		pets: guests.pets,
 	});
 
 	const minStay = checkIn
@@ -189,6 +203,7 @@ function BookingWidgetInner({
 					children: String(guests.children),
 					guests: String(guestCapacity),
 					infants: String(guests.infants),
+					pets: String(guests.pets),
 				}).toString()}`
 			: null;
 	const canReserve =
@@ -302,6 +317,7 @@ function BookingWidgetInner({
 				children: guests.children,
 				guests: guestCapacity,
 				infants: guests.infants,
+				pets: guests.pets,
 				listingId,
 			});
 			setSelectedStayOverlapsCart(true);
@@ -366,7 +382,11 @@ function BookingWidgetInner({
 					</button>
 				</PopoverTrigger>
 				<PopoverContent align="start" className="w-80 p-4">
-					<GuestFields onChange={setGuests} value={guests} />
+					<GuestFields
+						maxPets={petFriendly ? MAX_PETS : 0}
+						onChange={setGuests}
+						value={guests}
+					/>
 					{maxGuests !== null && (
 						<p className="mt-2 text-muted-foreground text-xs">
 							This home sleeps up to {maxGuests}.
@@ -396,7 +416,11 @@ function BookingWidgetInner({
 
 	const renderGuests = () => (
 		<div className="rounded-xl border px-3">
-			<GuestFields onChange={setGuests} value={guests} />
+			<GuestFields
+				maxPets={petFriendly ? MAX_PETS : 0}
+				onChange={setGuests}
+				value={guests}
+			/>
 			{maxGuests !== null && (
 				<p className="pb-3 text-muted-foreground text-xs">
 					This home sleeps up to {maxGuests}.

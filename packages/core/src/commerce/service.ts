@@ -692,6 +692,7 @@ interface AccommodationCartJoinedRow {
 	taxMinor: number;
 	timezone: string | null;
 	totalMinor: number;
+	stripeConnectedAccountId: string | null;
 	updatedAt: Date;
 }
 
@@ -731,6 +732,7 @@ interface AccommodationOrderSource {
 	position: number;
 	quote: NormalizedAccommodationQuoteSnapshot;
 	snapshot: ListingDisplaySnapshot;
+	stripeConnectedAccountId: string | null;
 	type: "accommodation";
 }
 
@@ -5156,6 +5158,7 @@ export class CommerceService {
 				pets: rows.detail.pets,
 				propertyTimezone: rows.detail.propertyTimezone,
 				provider: rows.detail.provider,
+				stripeConnectedAccountId: rows.detail.stripeConnectedAccountId,
 			});
 
 			const providerBookingId = crypto.randomUUID();
@@ -5905,6 +5908,8 @@ export class CommerceService {
 				pets: accommodationQuoteSnapshotTable.pets,
 				position: cartItemTable.position,
 				processed: accommodationListingTable.processed,
+				stripeConnectedAccountId:
+					accommodationListingTable.stripeConnectedAccountId,
 				provider: accommodationQuoteSnapshotTable.provider,
 				providerPayload: accommodationQuoteSnapshotTable.providerPayload,
 				quoteAdults: accommodationQuoteSnapshotTable.adults,
@@ -6009,6 +6014,9 @@ export class CommerceService {
 					row.itemType === "activity"
 						? activityCatalogSnapshot(row)
 						: listingSnapshot(row),
+				...(row.itemType === "accommodation"
+					? { stripeConnectedAccountId: row.stripeConnectedAccountId }
+					: {}),
 				type: row.itemType,
 			} as OrderSource);
 		}
@@ -8733,6 +8741,7 @@ interface CartJoinedDbRow {
 	pets: number | null;
 	position: number;
 	processed: AccommodationListingProcessedContent | null;
+	stripeConnectedAccountId: string | null;
 	provider: string | null;
 	providerPayload: Record<string, unknown> | null;
 	quoteAdults: number | null;
@@ -8888,6 +8897,7 @@ function cartJoinedRowFromDb(row: CartJoinedDbRow): CartJoinedRow {
 		pets: requiredRowValue(row.pets, "pets"),
 		position: row.position,
 		processed: row.processed,
+		stripeConnectedAccountId: row.stripeConnectedAccountId,
 		provider: requiredRowValue(row.provider, "provider"),
 		providerPayload: row.providerPayload,
 		quoteAdults: requiredRowValue(row.quoteAdults, "adults"),

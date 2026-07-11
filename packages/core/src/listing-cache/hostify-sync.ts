@@ -323,6 +323,7 @@ export class HostifyListingCacheSync {
 					fetchedAt,
 					latitude: projection.latitude,
 					longitude: projection.longitude,
+					petFriendly: projection.petFriendly,
 					provider: HOSTIFY_PROVIDER,
 					sectionHashes: projection.sectionHashes,
 					staleAfter: new Date(
@@ -369,6 +370,7 @@ export class HostifyListingCacheSync {
 				longitude: projection.longitude,
 				name: projection.name,
 				nickname: projection.nickname,
+				petFriendly: projection.petFriendly,
 				normalized: projection.normalized,
 				personCapacity: projection.personCapacity,
 				processed: processing.content,
@@ -542,6 +544,7 @@ function derivedFieldsChanged(
 ): boolean {
 	return (
 		existing.active !== projection.active ||
+		existing.petFriendly !== projection.petFriendly ||
 		!sameNullableNumber(existing.latitude, projection.latitude) ||
 		!sameNullableNumber(existing.longitude, projection.longitude)
 	);

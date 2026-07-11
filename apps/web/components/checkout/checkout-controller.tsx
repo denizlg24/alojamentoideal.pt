@@ -165,6 +165,7 @@ function stayInputFromItem(item: AccommodationCartItemDto): StayKeyInput {
 		guests: item.guests,
 		infants: item.infants,
 		listingId: item.listingId,
+		pets: item.pets,
 	};
 }
 
@@ -214,6 +215,7 @@ async function addCartItemFromExisting(
 			idempotencyKey: randomIdempotencyKey("cart-item-add"),
 			infants: stay.infants,
 			listingId: stay.listingId,
+			pets: stay.pets,
 		})
 	).cart;
 }
@@ -510,6 +512,7 @@ export function CheckoutController({ seed }: CheckoutControllerProps) {
 							guests: seed.guests,
 							infants: seed.infants,
 							listingId: seed.listingId,
+							pets: seed.pets,
 						}
 					: null;
 			const seedToken = seedStay ? stayKeyToken(seedStay) : null;
@@ -660,6 +663,7 @@ export function CheckoutController({ seed }: CheckoutControllerProps) {
 								idempotencyKey: randomIdempotencyKey("cart-item-add"),
 								infants: seedStay.infants,
 								listingId: seedStay.listingId,
+								pets: seedStay.pets,
 							})
 						).cart;
 					} catch (error) {
@@ -1468,6 +1472,7 @@ export function CheckoutController({ seed }: CheckoutControllerProps) {
 								adults: item.adults,
 								children: item.children,
 								infants: item.infants,
+								pets: item.pets,
 							})}`;
 				return (
 					<span key={item.id}>
@@ -1638,6 +1643,7 @@ export function CheckoutController({ seed }: CheckoutControllerProps) {
 						checkOut: editStayItem.checkOut,
 						children: editStayItem.children,
 						infants: editStayItem.infants,
+						pets: editStayItem.pets,
 					}}
 				/>
 			)}

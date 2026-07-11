@@ -34,6 +34,7 @@ import {
 	resolvePromotionCode,
 	retrievePaymentIntentSnapshot,
 	reverseChargeTransfer,
+	reverseConnectedAccountTransfer,
 	StripeConfigurationError,
 } from "@workspace/core/integrations/stripe";
 import { getRedis } from "@workspace/core/redis";
@@ -202,6 +203,9 @@ export function orderRefundService(): OrderRefundService {
 			: undefined,
 		reverseActivityTransfer: stripe
 			? (request) => reverseChargeTransfer(stripe, request)
+			: undefined,
+		reverseListingTransfer: stripe
+			? (request) => reverseConnectedAccountTransfer(stripe, request)
 			: undefined,
 	});
 }

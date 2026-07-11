@@ -1,4 +1,6 @@
 import {
+	accommodationItemDetail as accommodationItemDetailTable,
+	connectedAccountTransfer as connectedAccountTransferTable,
 	type Database,
 	type OrderRefund,
 	type OrderRefundReason,
@@ -8,6 +10,7 @@ import {
 } from "@workspace/db";
 import { and, asc, eq, isNotNull, isNull, lte, sql } from "drizzle-orm";
 import type {
+	DirectTransferReversalRequest,
 	RefundRequest,
 	RefundResult,
 	TransferReversalRequest,
@@ -35,6 +38,10 @@ export interface OrderRefundServiceOptions {
 	reverseActivityTransfer?: (
 		request: TransferReversalRequest,
 	) => Promise<TransferReversalResult | null>;
+	/** Reverses a separately-created per-listing transfer. */
+	reverseListingTransfer?: (
+		request: DirectTransferReversalRequest,
+	) => Promise<TransferReversalResult>;
 }
 
 export interface RefundOrderInput {
@@ -57,7 +64,7 @@ export interface RefundOrderResult {
 	/** Amount still refundable after this refund. */
 	refundableMinor: number;
 	/**
-	 * Set when the refund succeeded but the Detours transfer reversal failed;
+	 * Set when the refund succeeded but a connected-account reversal failed;
 	 * the reversal must then be completed manually in the Stripe dashboard.
 	 */
 	transferReversalError?: string;
@@ -223,6 +230,7 @@ export class OrderRefundService {
 	readonly #now: () => Date;
 	readonly #refundPayment: OrderRefundServiceOptions["refundPayment"];
 	readonly #reverseActivityTransfer: OrderRefundServiceOptions["reverseActivityTransfer"];
+	readonly #reverseListingTransfer: OrderRefundServiceOptions["reverseListingTransfer"];
 
 	constructor(options: OrderRefundServiceOptions) {
 		this.#cancelOrderItemReservation = options.cancelOrderItemReservation;
@@ -230,6 +238,7 @@ export class OrderRefundService {
 		this.#now = options.now ?? (() => new Date());
 		this.#refundPayment = options.refundPayment;
 		this.#reverseActivityTransfer = options.reverseActivityTransfer;
+		this.#reverseListingTransfer = options.reverseListingTransfer;
 	}
 
 	async listOrderRefunds(orderId: string): Promise<OrderRefund[]> {
@@ -315,6 +324,11 @@ export class OrderRefundService {
 				item.type === "activity" || item.type === "accommodation"
 					? item.type
 					: null;
+			if (attributedItemType === "accommodation") {
+				await this.#assertListingTransferSettled(orderItemId);
+			}
+		} else {
+			await this.#assertNoListingTransfersForUnattributedRefund(order.id);
 		}
 
 		// Reserve the amount on the order aggregate before hitting Stripe. The
@@ -464,28 +478,21 @@ export class OrderRefundService {
 			);
 		}
 
-		// Legacy-parity transfer reversal: pull the activity share of the refund
-		// back from Detours with an explicit reversal amount. Runs after the
-		// refund like the legacy app did; a reversal failure never unwinds the
-		// refund, it is surfaced for manual follow-up in the Stripe dashboard.
-		const reversalAmountMinor = activityReversalAmountMinor({
-			activityTotalMinor,
-			attributedItemType,
-			orderTotalMinor: order.totalMinor,
-			refundMinor: input.amountMinor,
-		});
-		let transferReversal: TransferReversalResult | null = null;
-		let transferReversalError: string | undefined;
-		if (reversalAmountMinor > 0) {
-			({ error: transferReversalError, reversal: transferReversal } =
-				await this.#attemptActivityReversal({
-					amountMinor: reversalAmountMinor,
-					idempotencyKey: `${idempotencyKey}:reversal`,
-					orderId: order.id,
-					paymentIntentId: order.stripePaymentIntentId,
-					refundId: refund.id,
-				}));
-		}
+		// Pull the attributed listing payout or the activity share of the refund
+		// back with an explicit reversal amount. This runs after the refund; a
+		// reversal failure never unwinds the guest refund and remains retryable.
+		const { error: transferReversalError, reversal: transferReversal } =
+			await this.#attemptOwedTransferReversal({
+				activityTotalMinor,
+				amountMinor: input.amountMinor,
+				attributedItemType,
+				idempotencyKey: `${idempotencyKey}:reversal`,
+				orderId: order.id,
+				orderItemId,
+				orderTotalMinor: order.totalMinor,
+				paymentIntentId: order.stripePaymentIntentId,
+				refundId: refund.id,
+			});
 
 		const settledAt = this.#now();
 		const [record] = await this.#db
@@ -539,8 +546,8 @@ export class OrderRefundService {
 	 *    idempotency key makes the retry safe: Stripe replays an already-created
 	 *    refund instead of issuing a second one. Permanent failures release the
 	 *    reserved amount and park the row failed; transient ones stay pending.
-	 * 2. `succeeded` rows whose Detours transfer reversal failed (error recorded,
-	 *    no reversal id) — the reversal is retried with its original key.
+	 * 2. `succeeded` rows whose connected-account reversal failed (error
+	 *    recorded, no reversal id) — retry with the original key.
 	 */
 	async reconcileRefunds(
 		options: ReconcileRefundsOptions = {},
@@ -675,19 +682,16 @@ export class OrderRefundService {
 				continue;
 			}
 
-			const reversalAmountMinor = await this.#owedReversalAmountMinor(row);
-			let reversal: TransferReversalResult | null = null;
-			let reversalError: string | undefined;
-			if (reversalAmountMinor > 0) {
-				({ error: reversalError, reversal } =
-					await this.#attemptActivityReversal({
-						amountMinor: reversalAmountMinor,
-						idempotencyKey: `${row.idempotencyKey}:reversal`,
-						orderId: row.orderId,
-						paymentIntentId: row.stripePaymentIntentId,
-						refundId: refund.id,
-					}));
-			}
+			const { error: reversalError, reversal } =
+				await this.#attemptOwedTransferReversal({
+					amountMinor: row.amountMinor,
+					idempotencyKey: `${row.idempotencyKey}:reversal`,
+					orderId: row.orderId,
+					orderItemId: row.orderItemId,
+					orderTotalMinor: row.orderTotalMinor,
+					paymentIntentId: row.stripePaymentIntentId,
+					refundId: refund.id,
+				});
 			const settledAt = this.#now();
 			await this.#db
 				.update(orderRefundTable)
@@ -743,29 +747,27 @@ export class OrderRefundService {
 				summary.reversalRetryFailures += 1;
 				continue;
 			}
-			const reversalAmountMinor = await this.#owedReversalAmountMinor(row);
-			let reversal: TransferReversalResult | null = null;
-			if (reversalAmountMinor > 0) {
-				const attempt = await this.#attemptActivityReversal({
-					amountMinor: reversalAmountMinor,
-					idempotencyKey: `${row.idempotencyKey}:reversal`,
-					orderId: row.orderId,
-					paymentIntentId: row.stripePaymentIntentId,
-					refundId: row.stripeRefundId,
-				});
-				if (attempt.error) {
-					await this.#db
-						.update(orderRefundTable)
-						.set({
-							lastErrorMessage: attempt.error,
-							updatedAt: this.#now(),
-						})
-						.where(eq(orderRefundTable.id, row.id));
-					summary.reversalRetryFailures += 1;
-					continue;
-				}
-				reversal = attempt.reversal;
+			const attempt = await this.#attemptOwedTransferReversal({
+				amountMinor: row.amountMinor,
+				idempotencyKey: `${row.idempotencyKey}:reversal`,
+				orderId: row.orderId,
+				orderItemId: row.orderItemId,
+				orderTotalMinor: row.orderTotalMinor,
+				paymentIntentId: row.stripePaymentIntentId,
+				refundId: row.stripeRefundId,
+			});
+			if (attempt.error) {
+				await this.#db
+					.update(orderRefundTable)
+					.set({
+						lastErrorMessage: attempt.error,
+						updatedAt: this.#now(),
+					})
+					.where(eq(orderRefundTable.id, row.id));
+				summary.reversalRetryFailures += 1;
+				continue;
 			}
+			const reversal = attempt.reversal;
 			// A null reversal with no error means the charge carries no transfer
 			// (or nothing is owed after all); clear the flag so the row stops
 			// resurfacing.
@@ -784,11 +786,6 @@ export class OrderRefundService {
 		return summary;
 	}
 
-	/**
-	 * Recomputes how much of a ledger row's refund must be pulled back from
-	 * Detours, from the order's current item mix (same attribution rules as
-	 * `refundOrder`).
-	 */
 	/** Sum of activity item totals on an order, for reversal attribution. */
 	async #getActivityTotalMinor(orderId: string): Promise<number> {
 		const [activityTotals] = await this.#db
@@ -808,31 +805,171 @@ export class OrderRefundService {
 		return activityTotals?.totalMinor ?? 0;
 	}
 
-	async #owedReversalAmountMinor(row: {
+	async #attemptOwedTransferReversal(input: {
+		activityTotalMinor?: number;
 		amountMinor: number;
+		attributedItemType?: "accommodation" | "activity" | null;
+		idempotencyKey: string;
 		orderId: string;
 		orderItemId: string | null;
 		orderTotalMinor: number;
-	}): Promise<number> {
-		const activityTotalMinor = await this.#getActivityTotalMinor(row.orderId);
-		let attributedItemType: "accommodation" | "activity" | null = null;
-		if (row.orderItemId) {
+		paymentIntentId: string;
+		refundId: string | null;
+	}): Promise<{ error?: string; reversal: TransferReversalResult | null }> {
+		const listingTarget = await this.#listingReversalTarget(
+			input.orderItemId,
+			input.amountMinor,
+		);
+		if (listingTarget) {
+			const reverseListingTransfer = this.#reverseListingTransfer;
+			if (!reverseListingTransfer) {
+				return {
+					error:
+						"Listing transfer reversals are unavailable: Stripe is not configured.",
+					reversal: null,
+				};
+			}
+			try {
+				return {
+					reversal: await reverseListingTransfer({
+						amountMinor: listingTarget.amountMinor,
+						idempotencyKey: input.idempotencyKey,
+						transferId: listingTarget.transferId,
+					}),
+				};
+			} catch (error) {
+				return { error: describeRefundError(error), reversal: null };
+			}
+		}
+
+		const activityTotalMinor =
+			input.activityTotalMinor ??
+			(await this.#getActivityTotalMinor(input.orderId));
+		let attributedItemType = input.attributedItemType;
+		if (attributedItemType === undefined && input.orderItemId) {
 			const [item] = await this.#db
 				.select({ type: orderItemTable.type })
 				.from(orderItemTable)
-				.where(eq(orderItemTable.id, row.orderItemId))
+				.where(eq(orderItemTable.id, input.orderItemId))
 				.limit(1);
 			attributedItemType =
 				item?.type === "activity" || item?.type === "accommodation"
 					? item.type
 					: null;
 		}
-		return activityReversalAmountMinor({
+		const amountMinor = activityReversalAmountMinor({
 			activityTotalMinor,
-			attributedItemType,
-			orderTotalMinor: row.orderTotalMinor,
-			refundMinor: row.amountMinor,
+			attributedItemType: attributedItemType ?? null,
+			orderTotalMinor: input.orderTotalMinor,
+			refundMinor: input.amountMinor,
 		});
+		return amountMinor > 0
+			? this.#attemptActivityReversal({
+					amountMinor,
+					idempotencyKey: input.idempotencyKey,
+					orderId: input.orderId,
+					paymentIntentId: input.paymentIntentId,
+					refundId: input.refundId,
+				})
+			: { reversal: null };
+	}
+
+	async #listingReversalTarget(
+		orderItemId: string | null,
+		refundMinor: number,
+	): Promise<{ amountMinor: number; transferId: string } | null> {
+		if (!orderItemId) return null;
+		const [transfer] = await this.#db
+			.select({
+				amountMinor: connectedAccountTransferTable.amountMinor,
+				transferId: connectedAccountTransferTable.stripeTransferId,
+			})
+			.from(connectedAccountTransferTable)
+			.where(
+				and(
+					eq(connectedAccountTransferTable.orderItemId, orderItemId),
+					eq(connectedAccountTransferTable.status, "succeeded"),
+					isNotNull(connectedAccountTransferTable.stripeTransferId),
+				),
+			)
+			.limit(1);
+		if (!transfer?.transferId) return null;
+		const [reversed] = await this.#db
+			.select({
+				amountMinor:
+					sql<number>`coalesce(sum(${orderRefundTable.transferReversalAmountMinor}), 0)`.mapWith(
+						Number,
+					),
+			})
+			.from(orderRefundTable)
+			.where(
+				and(
+					eq(orderRefundTable.orderItemId, orderItemId),
+					eq(orderRefundTable.status, "succeeded"),
+					isNotNull(orderRefundTable.stripeTransferReversalId),
+				),
+			);
+		const remaining = Math.max(
+			0,
+			transfer.amountMinor - (reversed?.amountMinor ?? 0),
+		);
+		return remaining > 0
+			? {
+					amountMinor: Math.min(refundMinor, remaining),
+					transferId: transfer.transferId,
+				}
+			: null;
+	}
+
+	async #assertListingTransferSettled(orderItemId: string): Promise<void> {
+		const [detail] = await this.#db
+			.select({
+				connectedAccountId:
+					accommodationItemDetailTable.stripeConnectedAccountId,
+			})
+			.from(accommodationItemDetailTable)
+			.where(eq(accommodationItemDetailTable.orderItemId, orderItemId))
+			.limit(1);
+		if (!detail?.connectedAccountId) return;
+
+		const [transfer] = await this.#db
+			.select({ status: connectedAccountTransferTable.status })
+			.from(connectedAccountTransferTable)
+			.where(eq(connectedAccountTransferTable.orderItemId, orderItemId))
+			.limit(1);
+		if (transfer?.status !== "succeeded") {
+			throw new CommerceError(
+				"refund_precondition_failed",
+				"The listing payout is still reconciling. Retry the refund after the transfer settles.",
+				409,
+			);
+		}
+	}
+
+	async #assertNoListingTransfersForUnattributedRefund(
+		orderId: string,
+	): Promise<void> {
+		const [transfer] = await this.#db
+			.select({ orderItemId: accommodationItemDetailTable.orderItemId })
+			.from(accommodationItemDetailTable)
+			.innerJoin(
+				orderItemTable,
+				eq(orderItemTable.id, accommodationItemDetailTable.orderItemId),
+			)
+			.where(
+				and(
+					eq(orderItemTable.orderId, orderId),
+					isNotNull(accommodationItemDetailTable.stripeConnectedAccountId),
+				),
+			)
+			.limit(1);
+		if (transfer) {
+			throw new CommerceError(
+				"refund_precondition_failed",
+				"Refunds for orders with listing payouts must be attributed to one reservation at a time.",
+				422,
+			);
+		}
 	}
 
 	async #attemptActivityReversal(input: {

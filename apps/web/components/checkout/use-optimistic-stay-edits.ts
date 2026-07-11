@@ -16,6 +16,7 @@ export interface GuestSelection {
 	adults: number;
 	children: number;
 	infants: number;
+	pets: number;
 }
 
 export interface EditStayValue extends GuestSelection {
@@ -174,6 +175,7 @@ export function useOptimisticStayEdits({
 			children: next.children,
 			guests,
 			infants: next.infants,
+			pets: next.pets,
 			nights: nightsBetween(next.checkIn, next.checkOut),
 		}));
 		withRepricing(setRepricingItemIds, itemId);
@@ -188,6 +190,7 @@ export function useOptimisticStayEdits({
 				guests,
 				idempotencyKey: randomIdempotencyKey("stay"),
 				infants: next.infants,
+				pets: next.pets,
 			}),
 		);
 	};

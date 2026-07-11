@@ -23,6 +23,7 @@ export interface StayKeyParts {
 	guests: number;
 	infants: number;
 	listingId: string;
+	pets: number;
 }
 
 /**
@@ -37,6 +38,7 @@ export function stayKeyToken(stay: StayKeyParts): string {
 		stay.adults,
 		stay.children,
 		stay.infants,
+		stay.pets,
 		stay.guests,
 	].join("|");
 }

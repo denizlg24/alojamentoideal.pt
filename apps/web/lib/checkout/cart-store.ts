@@ -107,6 +107,7 @@ export function cartContentFingerprint(cart: CartDto | null): string {
 				item.adults,
 				item.children,
 				item.infants,
+				item.pets,
 				item.guests,
 			].join("|");
 		})
@@ -360,6 +361,7 @@ export async function addStayToCart(stay: StayKeyInput): Promise<CartDto> {
 			idempotencyKey: randomIdempotencyKey("cart-item-add"),
 			infants: stay.infants,
 			listingId: stay.listingId,
+			pets: stay.pets,
 		}),
 	);
 	notifyCartChanged(mutation.cart);

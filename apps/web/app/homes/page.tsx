@@ -133,6 +133,9 @@ function buildCatalogQuery(
 		apiParams.set("radiusKm", String(preset.radiusKm));
 	}
 	apiParams.set("limit", String(HOMES_PAGE_SIZE));
+	if (Number(params.get("pets") ?? 0) > 0) {
+		apiParams.set("petFriendly", "true");
+	}
 
 	let parsed = parseCatalogListQuery(apiParams);
 	if (!parsed.success) {
@@ -153,6 +156,7 @@ function buildCatalogQuery(
 		locale: "en",
 		minGuests: null,
 		offset: 0,
+		petFriendlyOnly: false,
 		priceMax: null,
 		priceMin: null,
 		propertyType: null,
@@ -176,7 +180,7 @@ function buildStayQuery(
 	next.set("checkIn", stay.dates.checkIn);
 	next.set("checkOut", stay.dates.checkOut);
 	next.set("guests", String(stay.guests));
-	for (const key of ["adults", "children", "infants"] as const) {
+	for (const key of ["adults", "children", "infants", "pets"] as const) {
 		const value = params.get(key);
 		if (value) next.set(key, value);
 	}

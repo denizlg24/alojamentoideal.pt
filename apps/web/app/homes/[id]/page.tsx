@@ -5,7 +5,7 @@ import type {
 } from "@workspace/core/catalog";
 import { Separator } from "@workspace/ui/components/separator";
 import { Skeleton } from "@workspace/ui/components/skeleton";
-import { Bath, Bed, DoorOpen, Star, Users } from "lucide-react";
+import { Bath, Bed, Dog, DoorOpen, Star, Users } from "lucide-react";
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { Suspense } from "react";
@@ -87,6 +87,7 @@ function capacityParts(listing: CatalogListingDetailDto): string[] {
 		parts.push(
 			`${capacity.bathrooms} ${capacity.bathrooms === 1 ? "bath" : "baths"}`,
 		);
+	if (listing.petFriendly) parts.push("Pet-friendly");
 	return parts;
 }
 
@@ -184,6 +185,11 @@ async function ListingContent({
 							</p>
 						)}
 						<div className="flex flex-wrap gap-4 text-muted-foreground text-sm">
+							{listing.petFriendly && (
+								<span className="flex items-center gap-1.5">
+									<Dog className="size-4" /> Pets are welcome
+								</span>
+							)}
 							{listing.capacity.guests && (
 								<span className="flex items-center gap-1.5">
 									<Users className="size-4" /> {listing.capacity.guests} guests
@@ -283,6 +289,7 @@ async function ListingContent({
 					listingId={listing.id}
 					maxGuests={listing.capacity.guests}
 					minNights={listing.minNights}
+					petFriendly={listing.petFriendly}
 				/>
 			</div>
 		</div>

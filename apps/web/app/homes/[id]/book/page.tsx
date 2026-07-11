@@ -9,7 +9,7 @@ import { CheckoutController } from "@/components/checkout/checkout-controller";
 import { CheckoutHeader } from "@/components/checkout/checkout-header";
 import type { CheckoutSeed } from "@/components/checkout/types";
 import { getCachedCatalogDetail } from "@/lib/catalog/cache";
-import { capacityForGuests, MAX_INFANTS } from "@/lib/catalog/guests";
+import { capacityForGuests, MAX_INFANTS, MAX_PETS } from "@/lib/catalog/guests";
 import {
 	generateListingStaticParams,
 	getListingCatalogScope,
@@ -151,6 +151,7 @@ async function CheckoutDynamic({
 	const adults = readInt(query.adults, 1, 1, 30);
 	const children = readInt(query.children, 0, 0, 30);
 	const infants = readInt(query.infants, 0, 0, MAX_INFANTS);
+	const pets = listing.petFriendly ? readInt(query.pets, 0, 0, MAX_PETS) : 0;
 	const guests = readInt(
 		query.guests,
 		capacityForGuests(adults, children),
@@ -166,6 +167,7 @@ async function CheckoutDynamic({
 		guests,
 		infants,
 		listingId: listing.id,
+		pets,
 	};
 
 	// Key the live controller on the stay so a navigation that lands here with
@@ -180,6 +182,7 @@ async function CheckoutDynamic({
 		seed.children,
 		seed.infants,
 		seed.guests,
+		seed.pets,
 	].join("|");
 
 	return <CheckoutController key={stayKey} seed={seed} />;

@@ -75,12 +75,14 @@ export interface GuestCounts {
 	adults: number;
 	children: number;
 	infants: number;
+	pets?: number;
 }
 
 export function guestSummaryLabel({
 	adults,
 	children,
 	infants,
+	pets = 0,
 }: GuestCounts): string {
 	const parts = [`${adults} ${adults === 1 ? "adult" : "adults"}`];
 	if (children > 0) {
@@ -88,6 +90,9 @@ export function guestSummaryLabel({
 	}
 	if (infants > 0) {
 		parts.push(`${infants} ${infants === 1 ? "infant" : "infants"}`);
+	}
+	if (pets > 0) {
+		parts.push(`${pets} ${pets === 1 ? "pet" : "pets"}`);
 	}
 	return parts.join(", ");
 }

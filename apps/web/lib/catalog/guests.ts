@@ -2,6 +2,7 @@
  * Maximum number of infants allowed in a booking.
  */
 export const MAX_INFANTS = 5;
+export const MAX_PETS = 5;
 
 /**
  * Translates a guest selection into the minimum person capacity a listing must

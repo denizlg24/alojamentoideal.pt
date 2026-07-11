@@ -23,6 +23,7 @@ interface UseListingQuoteArgs {
 	guests: number;
 	infants: number;
 	listingId: string;
+	pets: number;
 }
 
 const DEBOUNCE_MS = 350;
@@ -42,6 +43,7 @@ export function useListingQuote({
 	guests,
 	infants,
 	listingId,
+	pets,
 }: UseListingQuoteArgs): QuoteState {
 	const [state, setState] = useState<QuoteState>({ status: "idle" });
 
@@ -63,6 +65,7 @@ export function useListingQuote({
 				guests,
 				infants,
 				listingId,
+				pets,
 				signal: controller.signal,
 			})
 				.then((result) => {
@@ -104,6 +107,7 @@ export function useListingQuote({
 		guests,
 		infants,
 		listingId,
+		pets,
 	]);
 
 	return state;

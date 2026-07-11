@@ -14,6 +14,7 @@ const STAY = {
 	guests: 3,
 	infants: 0,
 	listingId: "listing-1",
+	pets: 0,
 };
 
 describe("stayKeyToken", () => {
@@ -30,6 +31,7 @@ describe("stayKeyToken", () => {
 		expect(stayKeyToken({ ...STAY, listingId: "listing-2" }) === base).toBe(
 			false,
 		);
+		expect(stayKeyToken({ ...STAY, pets: 1 }) === base).toBe(false);
 	});
 });
 

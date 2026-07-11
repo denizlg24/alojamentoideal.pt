@@ -34,6 +34,7 @@ export interface CatalogListQuery {
 	locale: CatalogLocale;
 	minGuests: number | null;
 	offset: number;
+	petFriendlyOnly?: boolean;
 	priceMax: number | null;
 	priceMin: number | null;
 	propertyType: string | null;
@@ -70,6 +71,10 @@ const baseSchema = z.object({
 	lng: longitude.optional(),
 	minGuests: z.coerce.number().int().min(1).optional(),
 	offset: z.coerce.number().int().min(0).optional(),
+	petFriendly: z
+		.enum(["true", "false", "1", "0"])
+		.optional()
+		.transform((value) => value === "true" || value === "1"),
 	priceMax: z.coerce.number().min(0).optional(),
 	priceMin: z.coerce.number().min(0).optional(),
 	propertyType: optionalText,
@@ -118,6 +123,7 @@ export function parseCatalogListQuery(
 		lng: searchParams.get("lng") ?? undefined,
 		minGuests: searchParams.get("guests") ?? undefined,
 		offset: searchParams.get("offset") ?? undefined,
+		petFriendly: searchParams.get("petFriendly") ?? undefined,
 		priceMax: searchParams.get("priceMax") ?? undefined,
 		priceMin: searchParams.get("priceMin") ?? undefined,
 		propertyType: searchParams.get("propertyType") ?? undefined,
@@ -151,6 +157,7 @@ export function parseCatalogListQuery(
 			locale: value.lang ?? "en",
 			minGuests: value.minGuests ?? null,
 			offset: value.offset ?? 0,
+			petFriendlyOnly: value.petFriendly ?? false,
 			priceMax: value.priceMax ?? null,
 			priceMin: value.priceMin ?? null,
 			propertyType: value.propertyType,

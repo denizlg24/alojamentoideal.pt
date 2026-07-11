@@ -73,6 +73,7 @@ export function EditStayDialog({
 		adults: value.adults,
 		children: value.children,
 		infants: value.infants,
+		pets: value.pets,
 	});
 
 	// Reseed the drafts from the committed stay only when the dialog opens, not on
@@ -89,6 +90,7 @@ export function EditStayDialog({
 				adults: value.adults,
 				children: value.children,
 				infants: value.infants,
+				pets: value.pets,
 			});
 		}
 	}, [open]);
@@ -114,6 +116,7 @@ export function EditStayDialog({
 		adults: guests.adults,
 		children: guests.children,
 		infants: guests.infants,
+		pets: guests.pets,
 	});
 
 	const canSave =
@@ -126,7 +129,8 @@ export function EditStayDialog({
 		checkOut !== value.checkOut ||
 		guests.adults !== value.adults ||
 		guests.children !== value.children ||
-		guests.infants !== value.infants;
+		guests.infants !== value.infants ||
+		guests.pets !== value.pets;
 
 	const handleSave = () => {
 		if (!checkIn || !checkOut || !canSave) {

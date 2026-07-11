@@ -6,6 +6,7 @@ import {
 	type RuntimeSettingKey,
 	runtimeSettingDefinitions,
 	setHostkitListingApiKey,
+	setListingPaymentDestination,
 	updateRuntimeSettings,
 } from "@workspace/core/settings";
 import type { AppSettingValue } from "@workspace/db";
@@ -124,4 +125,24 @@ export async function removeHostkitListingKey(
 	await deleteHostkitListingApiKey(listingExternalId);
 	revalidatePath("/settings");
 	redirect("/settings?saved=hostkit");
+}
+
+export async function saveListingPaymentDestination(
+	formData: FormData,
+): Promise<void> {
+	await requireAdminUser();
+	try {
+		await setListingPaymentDestination(
+			String(formData.get("listingId") ?? ""),
+			String(formData.get("stripeConnectedAccountId") ?? ""),
+		);
+	} catch (error) {
+		settingsErrorRedirect(
+			error instanceof Error
+				? error.message
+				: "Listing payment destination could not be saved.",
+		);
+	}
+	revalidatePath("/settings");
+	redirect("/settings?saved=listing-payment");
 }

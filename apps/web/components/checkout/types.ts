@@ -14,6 +14,7 @@ export interface CheckoutSeed {
 	guests: number;
 	infants: number;
 	listingId: string;
+	pets: number;
 }
 
 /** Mutable contact/billing form state. Mirrors the draft-order contact shape. */

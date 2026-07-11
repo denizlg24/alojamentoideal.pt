@@ -1,6 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import type Stripe from "stripe";
-import { reverseChargeTransfer } from "./transfers";
+import {
+	createConnectedAccountTransfer,
+	reverseChargeTransfer,
+	reverseConnectedAccountTransfer,
+} from "./transfers";
 
 function fakeStripe(options: { transfer: string | null }): {
 	calls: {
@@ -91,5 +95,70 @@ describe("reverseChargeTransfer", () => {
 				paymentIntentId: "pi_1",
 			}),
 		).rejects.toThrow(/idempotency/i);
+	});
+});
+
+describe("createConnectedAccountTransfer", () => {
+	test("links a listing payout to the captured charge with an idempotency key", async () => {
+		const calls: { params: Stripe.TransferCreateParams; key?: string }[] = [];
+		const stripe = {
+			paymentIntents: {
+				retrieve: async () => ({
+					id: "pi_1",
+					latest_charge: { id: "ch_1" },
+					status: "succeeded",
+				}),
+			},
+			transfers: {
+				create: async (
+					params: Stripe.TransferCreateParams,
+					options: { idempotencyKey?: string },
+				) => {
+					calls.push({ params, key: options.idempotencyKey });
+					return { amount: params.amount, id: "tr_listing_1" };
+				},
+			},
+		} as unknown as Stripe;
+
+		const result = await createConnectedAccountTransfer(stripe, {
+			amountMinor: 12_500,
+			currency: "EUR",
+			destinationAccountId: "acct_owner",
+			idempotencyKey: "listing-transfer:item_1",
+			orderId: "order_1",
+			orderItemId: "item_1",
+			paymentIntentId: "pi_1",
+		});
+
+		expect(result).toEqual({
+			amountMinor: 12_500,
+			id: "tr_listing_1",
+			sourceChargeId: "ch_1",
+		});
+		expect(calls[0]?.params).toMatchObject({
+			amount: 12_500,
+			currency: "eur",
+			destination: "acct_owner",
+			source_transaction: "ch_1",
+			transfer_group: "order:order_1",
+		});
+		expect(calls[0]?.key).toBe("listing-transfer:item_1");
+	});
+});
+
+describe("reverseConnectedAccountTransfer", () => {
+	test("reverses the listing transfer directly with the refund key", async () => {
+		const { calls, stripe } = fakeStripe({ transfer: null });
+		const result = await reverseConnectedAccountTransfer(stripe, {
+			amountMinor: 2_500,
+			idempotencyKey: "manual_refund:o1:2500:reversal",
+			transferId: "tr_listing_1",
+		});
+		expect(result).toEqual({
+			amountMinor: 2_500,
+			id: "trr_1",
+			transferId: "tr_listing_1",
+		});
+		expect(calls.reversal[0]?.id).toBe("tr_listing_1");
 	});
 });

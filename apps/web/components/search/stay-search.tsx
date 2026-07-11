@@ -26,8 +26,9 @@ export function StaySearch({ className }: { className?: string }) {
 			adults: state.adults,
 			children: state.children,
 			infants: state.infants,
+			pets: state.pets,
 		}),
-		[state.adults, state.children, state.infants],
+		[state.adults, state.children, state.infants, state.pets],
 	);
 	const placeLabel = findLocationPreset(state.place)?.label ?? "Anywhere";
 

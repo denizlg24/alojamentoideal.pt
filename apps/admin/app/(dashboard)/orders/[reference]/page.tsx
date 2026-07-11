@@ -91,6 +91,9 @@ function itemMeta(item: OrderDetailItem): string {
 		if (item.guests) {
 			parts.push(pluralize(item.guests, "guest", "guests"));
 		}
+		if (item.pets) {
+			parts.push(pluralize(item.pets, "pet", "pets"));
+		}
 		if (item.nights) {
 			parts.push(pluralize(item.nights, "night", "nights"));
 		}

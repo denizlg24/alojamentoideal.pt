@@ -420,6 +420,7 @@ export const accommodationListing = pgTable(
 		longitude: doublePrecision("longitude"),
 		name: text("name"),
 		nickname: text("nickname"),
+		petFriendly: boolean("pet_friendly").notNull().default(false),
 		normalized: jsonb("normalized")
 			.$type<AccommodationListingNormalizedContent>()
 			.notNull(),
@@ -452,6 +453,7 @@ export const accommodationListing = pgTable(
 			.notNull(),
 		sourceHash: text("source_hash").notNull(),
 		staleAfter: timestampWithTimezone("stale_after").notNull(),
+		stripeConnectedAccountId: text("stripe_connected_account_id"),
 		syncRunId: text("sync_run_id").references(() => providerSyncRun.id, {
 			onDelete: "set null",
 		}),
@@ -1782,6 +1784,7 @@ export const accommodationItemDetail = pgTable(
 		pets: integer("pets").notNull().default(0),
 		propertyTimezone: text("property_timezone").notNull(),
 		provider: text("provider").notNull(),
+		stripeConnectedAccountId: text("stripe_connected_account_id"),
 	},
 	(table) => [
 		index("accommodation_item_details_listing_idx").on(
@@ -1789,6 +1792,76 @@ export const accommodationItemDetail = pgTable(
 			table.externalAccountId,
 			table.hostifyListingId,
 		),
+	],
+);
+
+export type ConnectedAccountTransferStatus = "failed" | "pending" | "succeeded";
+
+/**
+ * Durable outbox/ledger for a stay item's Stripe Connect transfer. A row is
+ * inserted before Stripe is called and carries a stable idempotency key, so a
+ * process crash at any point can be repaired without paying an owner twice.
+ */
+export const connectedAccountTransfer = pgTable(
+	"connected_account_transfers",
+	{
+		id: text("id").primaryKey(),
+		orderId: text("order_id")
+			.notNull()
+			.references(() => order.id, { onDelete: "cascade" }),
+		orderItemId: text("order_item_id")
+			.notNull()
+			.references(() => orderItem.id, { onDelete: "cascade" }),
+		destinationAccountId: text("destination_account_id").notNull(),
+		amountMinor: bigint("amount_minor", { mode: "number" }).notNull(),
+		currency: text("currency").notNull(),
+		status: text("status")
+			.$type<ConnectedAccountTransferStatus>()
+			.notNull()
+			.default("pending"),
+		stripeTransferId: text("stripe_transfer_id"),
+		stripeSourceChargeId: text("stripe_source_charge_id"),
+		stripeIdempotencyKey: text("stripe_idempotency_key").notNull(),
+		attemptCount: integer("attempt_count").notNull().default(0),
+		nextAttemptAt: timestampWithTimezone("next_attempt_at")
+			.notNull()
+			.defaultNow(),
+		lastErrorMessage: text("last_error_message"),
+		completedAt: timestampWithTimezone("completed_at"),
+		createdAt: timestampWithTimezone("created_at").notNull().defaultNow(),
+		updatedAt: timestampWithTimezone("updated_at").notNull().defaultNow(),
+	},
+	(table) => [
+		uniqueIndex("connected_account_transfers_order_item_uidx").on(
+			table.orderItemId,
+		),
+		uniqueIndex("connected_account_transfers_idempotency_uidx").on(
+			table.stripeIdempotencyKey,
+		),
+		uniqueIndex("connected_account_transfers_stripe_transfer_uidx")
+			.on(table.stripeTransferId)
+			.where(sql`${table.stripeTransferId} is not null`),
+		index("connected_account_transfers_reconcile_idx").on(
+			table.status,
+			table.nextAttemptAt,
+		),
+		check(
+			"connected_account_transfers_amount_positive",
+			sql`${table.amountMinor} > 0`,
+		),
+		check(
+			"connected_account_transfers_attempt_count_nonneg",
+			sql`${table.attemptCount} >= 0`,
+		),
+		check(
+			"connected_account_transfers_status_check",
+			sql`${table.status} in ('pending', 'succeeded', 'failed')`,
+		),
+		foreignKey({
+			columns: [table.orderItemId, table.orderId],
+			foreignColumns: [orderItem.id, orderItem.orderId],
+			name: "connected_account_transfers_item_order_fk",
+		}).onDelete("cascade"),
 	],
 );
 
@@ -2005,8 +2078,8 @@ export const orderRefund = pgTable(
 			.default("pending"),
 		stripeRefundId: text("stripe_refund_id"),
 		stripeRefundIdempotencyKey: text("stripe_refund_idempotency_key").notNull(),
-		// Explicit Detours transfer reversal issued alongside the refund; null for
-		// accommodation-only refunds and refunds recorded before reversals existed.
+		// Explicit connected-account reversal issued alongside the refund. This may
+		// reverse the Detours share or an attributed listing payout.
 		stripeTransferReversalId: text("stripe_transfer_reversal_id"),
 		transferReversalAmountMinor: bigint("transfer_reversal_amount_minor", {
 			mode: "number",
@@ -2100,7 +2173,10 @@ export const schema = {
 	bookingGuest,
 	guestSubmissionJob,
 	accommodationItemDetail,
+	connectedAccountTransfer,
 	orderItemCharge,
 	orderInvoice,
 	apiIdempotencyKey,
+	orderRefund,
+	activityItemDetail,
 };

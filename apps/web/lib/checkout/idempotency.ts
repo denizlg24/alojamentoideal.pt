@@ -28,6 +28,7 @@ export interface StayKeyInput {
 	guests: number;
 	infants: number;
 	listingId: string;
+	pets: number;
 }
 
 export interface ActivityKeyInput {
@@ -60,6 +61,7 @@ export function cartItemIdempotencyKey(input: StayKeyInput): string {
 			`a${input.adults}`,
 			`c${input.children}`,
 			`i${input.infants}`,
+			`p${input.pets}`,
 		].join(":"),
 	);
 }

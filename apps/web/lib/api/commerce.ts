@@ -16,6 +16,7 @@ import {
 	type CommerceParseResult,
 	type CommerceQuoteInput,
 	CommerceService,
+	ConnectedAccountTransferService,
 	HostifyConversationGateway,
 	HostifyReservationGateway,
 	mapStripePaymentStatus,
@@ -30,11 +31,13 @@ import {
 } from "@workspace/core/integrations/bokun";
 import { createHostifyClientFromEnv } from "@workspace/core/integrations/hostify";
 import {
+	createConnectedAccountTransfer,
 	createRefund,
 	createStripeClientFromEnv,
 	resolvePromotionCode,
 	retrievePaymentIntentSnapshot,
 	reverseChargeTransfer,
+	reverseConnectedAccountTransfer,
 	StripeConfigurationError,
 } from "@workspace/core/integrations/stripe";
 import { getRedis } from "@workspace/core/redis";
@@ -405,6 +408,19 @@ export function orderRefundService(): OrderRefundService {
 		reverseActivityTransfer: stripe
 			? (request) => reverseChargeTransfer(stripe, request)
 			: undefined,
+		reverseListingTransfer: stripe
+			? (request) => reverseConnectedAccountTransfer(stripe, request)
+			: undefined,
+	});
+}
+
+export function connectedAccountTransferService(): ConnectedAccountTransferService {
+	const stripe = optionalStripeClient();
+	return new ConnectedAccountTransferService({
+		createTransfer: stripe
+			? (request) => createConnectedAccountTransfer(stripe, request)
+			: undefined,
+		db: getDb(),
 	});
 }
 
