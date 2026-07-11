@@ -3,6 +3,12 @@ import { asc, eq } from "drizzle-orm";
 
 const STRIPE_CONNECTED_ACCOUNT_ID = /^acct_[A-Za-z0-9]+$/;
 
+function pickLocalizedTitle(
+	title: { en: string; es: string; pt: string } | null | undefined,
+): string | null {
+	const value = (title?.en || title?.pt || title?.es || "").trim();
+	return value.length > 0 ? value : null;
+}
 export interface ListingPaymentDestinationSummary {
 	id: string;
 	listingExternalId: string;
@@ -13,12 +19,12 @@ export interface ListingPaymentDestinationSummary {
 export async function listListingPaymentDestinations(): Promise<
 	ListingPaymentDestinationSummary[]
 > {
-	return getDb()
+	const listings = await getDb()
 		.select({
 			id: accommodationListing.id,
 			listingExternalId: accommodationListing.externalId,
-			listingName: accommodationListing.name,
 			stripeConnectedAccountId: accommodationListing.stripeConnectedAccountId,
+			processed: accommodationListing.processed,
 		})
 		.from(accommodationListing)
 		.where(eq(accommodationListing.active, true))
@@ -26,6 +32,11 @@ export async function listListingPaymentDestinations(): Promise<
 			asc(accommodationListing.name),
 			asc(accommodationListing.externalId),
 		);
+
+	return listings.map((listing) => ({
+		...listing,
+		listingName: pickLocalizedTitle(listing.processed.title),
+	}));
 }
 
 export async function setListingPaymentDestination(
