@@ -168,9 +168,15 @@ export function InvoicePanel({
 			if (!response.ok) {
 				const body = (await response.json().catch(() => null)) as {
 					error?: string;
-					issues?: { message: string }[];
+					issues?: { message: string; path?: string }[];
 				} | null;
-				const issues = body?.issues?.map((issue) => issue.message).join(" ");
+				const issues = body?.issues
+					?.map((issue) =>
+						typeof issue.path === "string" && issue.path
+							? `${fieldLabel(issue.path)}: ${issue.message}`
+							: issue.message,
+					)
+					.join(" ");
 				setError(issues || body?.error || "Could not issue the invoice.");
 				return;
 			}
@@ -591,4 +597,16 @@ export function InvoicePanel({
 			{error ? <p className="text-destructive text-sm">{error}</p> : null}
 		</div>
 	);
+}
+
+function fieldLabel(path: string): string {
+	return path
+		.replace(/^customer\./, "Recipient ")
+		.replace(
+			/^lines\.(\d+)\./,
+			(_, index: string) => `Line ${Number(index) + 1} `,
+		)
+		.replace(/([a-z])([A-Z])/g, "$1 $2")
+		.replace(/\./g, " ")
+		.replace(/^./, (character) => character.toUpperCase());
 }

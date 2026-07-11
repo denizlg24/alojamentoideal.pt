@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { readJson } from "@/lib/api/admin-route";
 import { invoicingService, withInvoicingAdmin } from "@/lib/api/invoicing";
+import { sendIssuedInvoiceEmail } from "@/lib/email/invoice-issued";
 
 interface AdminOrderItemInvoiceRouteContext {
 	params: Promise<{ itemId: string; reference: string }>;
@@ -99,6 +100,7 @@ export const POST = withInvoicingAdmin<AdminOrderItemInvoiceRouteContext>(
 				orderItemId: itemId,
 				orderReference: reference,
 			});
+			await notifyGuest(invoice, reference);
 			return Response.json({ data: { invoice }, success: true });
 		}
 
@@ -107,6 +109,25 @@ export const POST = withInvoicingAdmin<AdminOrderItemInvoiceRouteContext>(
 			orderItemId: itemId,
 			orderReference: reference,
 		});
+		await notifyGuest(invoice, reference);
 		return Response.json({ data: { invoice }, success: true });
 	},
 );
+
+async function notifyGuest(
+	invoice: { documentUrl: string | null; id: string },
+	reference: string,
+): Promise<void> {
+	if (!invoice.documentUrl) return;
+	try {
+		await sendIssuedInvoiceEmail({
+			documentUrl: invoice.documentUrl,
+			invoiceId: invoice.id,
+			orderReference: reference,
+		});
+	} catch (error) {
+		// Issuance already succeeded. Keep the document downloadable and avoid
+		// encouraging an operator retry that would create a duplicate invoice.
+		console.error("Invoice issued but guest email delivery failed", error);
+	}
+}

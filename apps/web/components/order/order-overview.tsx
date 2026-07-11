@@ -4,7 +4,6 @@ import {
 	Compass,
 	Home,
 	MessageCircle,
-	ReceiptText,
 	Users,
 } from "lucide-react";
 import Link from "next/link";
@@ -16,6 +15,7 @@ import {
 } from "@/lib/checkout/format";
 import { siteConfig } from "@/lib/site/config";
 import { countryName } from "@/lib/site/countries";
+import { InvoiceRequestRow } from "./invoice-request-row";
 
 /**
  * A paid booking whose confirmation has been retried past the grace window (the
@@ -113,36 +113,6 @@ function LinkRow({
 			</span>
 			<ChevronRight className="ml-auto size-4 shrink-0 text-muted-foreground" />
 		</Link>
-	);
-}
-
-function DisabledActionRow({
-	icon,
-	subtitle,
-	title,
-}: {
-	icon: ReactNode;
-	subtitle: string;
-	title: string;
-}) {
-	return (
-		<button
-			aria-disabled="true"
-			className="-mx-2 flex w-[calc(100%+1rem)] cursor-not-allowed items-center gap-3 rounded-xl px-2 py-3 text-left opacity-60"
-			disabled
-			type="button"
-		>
-			<span className="grid size-9 shrink-0 place-items-center rounded-full bg-muted text-muted-foreground">
-				{icon}
-			</span>
-			<span className="flex min-w-0 flex-col">
-				<span className="font-medium text-sm">{title}</span>
-				<span className="break-words text-muted-foreground text-xs">
-					{subtitle}
-				</span>
-			</span>
-			<ChevronRight className="ml-auto size-4 shrink-0 text-muted-foreground" />
-		</button>
 	);
 }
 
@@ -463,13 +433,16 @@ export function OrderOverview({ detail }: { detail: OrderDetail }) {
 						title="Guest registration"
 					/>
 				)}
-				{hasStays && (
-					<DisabledActionRow
-						icon={<ReceiptText className="size-4" />}
-						subtitle="Invoice generation is not available yet"
-						title="Generate invoice"
+				{hasStays &&
+				detail.role === "owner" &&
+				detail.contact &&
+				detail.invoiceRequest ? (
+					<InvoiceRequestRow
+						contact={detail.contact}
+						invoiceRequest={detail.invoiceRequest}
+						reference={detail.reference}
 					/>
-				)}
+				) : null}
 			</section>
 		</div>
 	);

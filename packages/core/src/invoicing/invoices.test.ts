@@ -111,12 +111,14 @@ describe("buildInvoiceLine", () => {
 			grossMinor: 800,
 			kind: "tax",
 			name: "Touristic tax",
-			netMinor: 800,
-			taxMinor: 0,
+			netMinor: 0,
+			taxMinor: 800,
 			taxRateBasisPoints: null,
 		});
 		expect(line.productId).toBe("TMT");
 		expect(line.type).toBe("I");
+		expect(line.price).toBe("8.00");
+		expect(line.vat).toBe(0);
 		expect(line.reasonCode).toBe("M99");
 	});
 

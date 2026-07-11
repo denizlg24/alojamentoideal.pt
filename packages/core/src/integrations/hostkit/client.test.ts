@@ -247,7 +247,8 @@ describe("HostkitClient", () => {
 		expect(addUrl?.searchParams.get("customer_id")).toBe("999999990");
 		expect(lineUrl?.pathname.endsWith("/addInvoiceLine")).toBe(true);
 		expect(lineUrl?.searchParams.get("price")).toBe("1234.56");
-		expect(lineUrl?.searchParams.has("reason_code")).toBe(false);
+		expect(lineUrl?.searchParams.has("reason_code")).toBe(true);
+		expect(lineUrl?.searchParams.get("reason_code")).toBe("");
 		expect(closeUrl?.pathname.endsWith("/closeInvoice")).toBe(true);
 	});
 });

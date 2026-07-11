@@ -1096,6 +1096,10 @@ export const order = pgTable(
 		status: text("status").notNull().default("draft"),
 		refundCompletedAt: timestampWithTimezone("refund_completed_at"),
 		refundRequestedAt: timestampWithTimezone("refund_requested_at"),
+		invoiceRequestedAt: timestampWithTimezone("invoice_requested_at"),
+		invoiceRequestFulfilledAt: timestampWithTimezone(
+			"invoice_request_fulfilled_at",
+		),
 		stripeRefundId: text("stripe_refund_id"),
 		stripeRefundIdempotencyKey: text("stripe_refund_idempotency_key"),
 		stripePaymentIntentId: text("stripe_payment_intent_id"),
@@ -1824,7 +1828,7 @@ export const orderItemCharge = pgTable(
 );
 
 export type OrderInvoiceKind = "credit_note" | "invoice";
-export type OrderInvoiceStatus = "draft" | "failed" | "issued";
+export type OrderInvoiceStatus = "credited" | "draft" | "failed" | "issued";
 
 /**
  * Fiscal documents (invoices / credit notes) issued through Hostkit against
@@ -1854,6 +1858,10 @@ export const orderInvoice = pgTable(
 			(): AnyPgColumn => orderInvoice.id,
 			{ onDelete: "set null" },
 		),
+		replacementForInvoiceId: text("replacement_for_invoice_id").references(
+			(): AnyPgColumn => orderInvoice.id,
+			{ onDelete: "set null" },
+		),
 		// Hostkit identifiers: document id within a series of an invoicing NIF.
 		hostkitInvoiceId: text("hostkit_invoice_id"),
 		hostkitSeries: text("hostkit_series"),
@@ -1863,6 +1871,10 @@ export const orderInvoice = pgTable(
 		documentUrl: text("document_url"),
 		currency: text("currency").notNull(),
 		totalMinor: bigint("total_minor", { mode: "number" }).notNull(),
+		invoiceType: text("invoice_type").$type<"FR" | "FT">(),
+		customerSnapshot:
+			jsonb("customer_snapshot").$type<Record<string, unknown>>(),
+		lineSnapshot: jsonb("line_snapshot").$type<Record<string, unknown>[]>(),
 		lastErrorMessage: text("last_error_message"),
 		issuedAt: timestampWithTimezone("issued_at"),
 		createdAt: timestampWithTimezone("created_at").notNull().defaultNow(),
@@ -1872,6 +1884,9 @@ export const orderInvoice = pgTable(
 		index("order_invoices_order_idx").on(table.orderId),
 		index("order_invoices_order_item_idx").on(table.orderItemId),
 		index("order_invoices_ref_invoice_idx").on(table.refInvoiceId),
+		index("order_invoices_replacement_invoice_idx").on(
+			table.replacementForInvoiceId,
+		),
 		// One live (draft or issued) invoice per order item; failed rows do not
 		// block a retry, credit notes are unlimited.
 		uniqueIndex("order_invoices_active_invoice_uidx")
@@ -1885,7 +1900,7 @@ export const orderInvoice = pgTable(
 		),
 		check(
 			"order_invoices_status_check",
-			sql`${table.status} in ('draft', 'failed', 'issued')`,
+			sql`${table.status} in ('credited', 'draft', 'failed', 'issued')`,
 		),
 		foreignKey({
 			columns: [table.orderItemId, table.orderId],
