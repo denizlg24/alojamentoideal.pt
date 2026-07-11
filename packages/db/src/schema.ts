@@ -528,6 +528,57 @@ export const propertyOwnerContact = pgTable(
 	],
 );
 
+/**
+ * Guest-facing help-center articles authored in the admin app. Markdown body;
+ * only `published` rows are visible on the public site.
+ */
+export const helpArticle = pgTable(
+	"help_articles",
+	{
+		id: text("id").primaryKey(),
+		slug: text("slug").notNull(),
+		title: text("title").notNull(),
+		excerpt: text("excerpt").notNull(),
+		contentMd: text("content_md").notNull(),
+		published: boolean("published").notNull().default(false),
+		sortOrder: integer("sort_order").notNull().default(0),
+		createdAt: timestampWithTimezone("created_at").notNull().defaultNow(),
+		updatedAt: timestampWithTimezone("updated_at").notNull().defaultNow(),
+	},
+	(table) => [
+		uniqueIndex("help_articles_slug_uidx").on(table.slug),
+		index("help_articles_published_sort_idx").on(
+			table.published,
+			table.sortOrder,
+		),
+	],
+);
+
+/**
+ * General contact-form submissions from the public help page. Kept
+ * independently from email delivery so a temporary mail-provider failure
+ * never loses a message.
+ */
+export const contactMessage = pgTable(
+	"contact_messages",
+	{
+		id: text("id").primaryKey(),
+		name: text("name").notNull(),
+		email: text("email").notNull(),
+		subject: text("subject").notNull(),
+		message: text("message").notNull(),
+		readAt: timestampWithTimezone("read_at"),
+		notificationSentAt: timestampWithTimezone("notification_sent_at"),
+		notificationError: text("notification_error"),
+		createdAt: timestampWithTimezone("created_at").notNull().defaultNow(),
+		updatedAt: timestampWithTimezone("updated_at").notNull().defaultNow(),
+	},
+	(table) => [
+		index("contact_messages_created_at_idx").on(table.createdAt),
+		index("contact_messages_email_idx").on(table.email),
+	],
+);
+
 export const listingHostkitCredential = pgTable(
 	"listing_hostkit_credentials",
 	{
@@ -2030,6 +2081,8 @@ export const schema = {
 	accommodationListing,
 	appSetting,
 	propertyOwnerContact,
+	helpArticle,
+	contactMessage,
 	accommodationListingNight,
 	observabilityEvent,
 	listingReview,

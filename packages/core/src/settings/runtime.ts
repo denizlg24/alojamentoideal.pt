@@ -131,7 +131,10 @@ export function validateRuntimeSettingValue(
 				);
 			}
 		}
-		if (key === "communications.ownerContactEmail") {
+		if (
+			key === "communications.ownerContactEmail" ||
+			key === "communications.generalContactEmail"
+		) {
 			if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed)) {
 				throw new Error(`${definition.label} must be a valid email address`);
 			}

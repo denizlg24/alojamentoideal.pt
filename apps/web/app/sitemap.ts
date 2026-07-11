@@ -1,3 +1,4 @@
+import { listPublishedHelpArticles } from "@workspace/core/help";
 import type { MetadataRoute } from "next";
 import { generateListingStaticParams } from "@/lib/catalog/listing-route";
 import { siteConfig } from "@/lib/site/config";
@@ -17,6 +18,8 @@ const STATIC_ROUTES: ReadonlyArray<{
 	{ changeFrequency: "daily", path: "/homes", priority: 0.9 },
 	{ changeFrequency: "monthly", path: "/about", priority: 0.6 },
 	{ changeFrequency: "monthly", path: "/owner", priority: 0.6 },
+	{ changeFrequency: "monthly", path: "/faq", priority: 0.5 },
+	{ changeFrequency: "weekly", path: "/help", priority: 0.5 },
 	...LEGAL_PAGE_ORDER.map((slug) => ({
 		changeFrequency: "yearly" as const,
 		path: `/legal/${slug}`,
@@ -26,6 +29,14 @@ const STATIC_ROUTES: ReadonlyArray<{
 
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
 	const lastModified = new Date();
+	const helpArticleRoutes = (await listPublishedHelpArticles()).map(
+		(article) => ({
+			url: `${siteConfig.url}/help/${encodeURIComponent(article.slug)}`,
+			lastModified: article.updatedAt,
+			changeFrequency: "monthly" as const,
+			priority: 0.4,
+		}),
+	);
 	const listingRoutes = (await generateListingStaticParams())
 		.filter(({ id }) => id !== "__ci_placeholder__")
 		.map(({ id }) => ({
@@ -42,6 +53,7 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
 			changeFrequency: route.changeFrequency,
 			priority: route.priority,
 		})),
+		...helpArticleRoutes,
 		...listingRoutes,
 	];
 }

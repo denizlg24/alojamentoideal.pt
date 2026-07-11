@@ -40,6 +40,15 @@ export const runtimeSettingDefinitions = [
 		type: "string",
 	},
 	{
+		defaultValue: "geral@alojamentoideal.pt",
+		description:
+			"Inbox that receives contact-form messages from the public help page.",
+		group: "communications",
+		key: "communications.generalContactEmail",
+		label: "General contact inbox",
+		type: "string",
+	},
+	{
 		defaultValue: true,
 		description: "Create live Hostify reservations during checkout.",
 		envName: "HOSTIFY_BOOKINGS_ENABLED",

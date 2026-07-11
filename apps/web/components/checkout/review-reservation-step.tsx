@@ -80,7 +80,7 @@ export function ReviewReservationStep({
 						onCheckedChange={(checked) => onTermsChange(checked === true)}
 					/>
 					<Label
-						className="font-normal text-sm leading-snug"
+						className="inline font-normal text-sm leading-snug"
 						htmlFor="checkout-terms"
 					>
 						I agree to the{" "}

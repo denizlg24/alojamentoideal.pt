@@ -32,6 +32,14 @@
 			"types": "./src/commerce/index.ts",
 			"default": "./src/commerce/index.ts"
 		},
+		"./contact": {
+			"types": "./src/contact/index.ts",
+			"default": "./src/contact/index.ts"
+		},
+		"./help": {
+			"types": "./src/help/index.ts",
+			"default": "./src/help/index.ts"
+		},
 		"./compliance": {
 			"types": "./src/compliance/index.ts",
 			"default": "./src/compliance/index.ts"

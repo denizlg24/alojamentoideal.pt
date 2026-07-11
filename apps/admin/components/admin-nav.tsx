@@ -10,8 +10,10 @@ import {
 import { cn } from "@workspace/ui/lib/utils";
 import {
 	Activity,
+	BookOpen,
 	ContactRound,
 	Landmark,
+	Mail,
 	ReceiptText,
 	RefreshCcw,
 	Settings,
@@ -22,7 +24,9 @@ import { usePathname } from "next/navigation";
 
 const links = [
 	{ href: "/orders", icon: ReceiptText, label: "Orders" },
+	{ href: "/contacts", icon: Mail, label: "Contacts" },
 	{ href: "/owner-contacts", icon: ContactRound, label: "Owner contacts" },
+	{ href: "/help-articles", icon: BookOpen, label: "Help articles" },
 	{ href: "/settlements/detours", icon: Landmark, label: "Settlements" },
 	{ href: "/reconciliations", icon: RefreshCcw, label: "Reconciliations" },
 	{ href: "/observability", icon: Activity, label: "Observability" },
