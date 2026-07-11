@@ -17,6 +17,7 @@ import {
 	ReceiptText,
 	RefreshCcw,
 	Settings,
+	Star,
 	Users,
 } from "lucide-react";
 import Link from "next/link";
@@ -24,6 +25,7 @@ import { usePathname } from "next/navigation";
 
 const links = [
 	{ href: "/orders", icon: ReceiptText, label: "Orders" },
+	{ href: "/reviews", icon: Star, label: "Reviews" },
 	{ href: "/contacts", icon: Mail, label: "Contacts" },
 	{ href: "/owner-contacts", icon: ContactRound, label: "Owner contacts" },
 	{ href: "/help-articles", icon: BookOpen, label: "Help articles" },

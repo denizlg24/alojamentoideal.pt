@@ -59,6 +59,7 @@ export {
 	conversationMessage,
 	guestSubmissionJob,
 	helpArticle,
+	listingBookmark,
 	listingHostkitCredential,
 	listingReview,
 	listingReviewSummary,

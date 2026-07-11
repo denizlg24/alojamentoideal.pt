@@ -856,7 +856,7 @@ export function HomesFilterBar({
 
 			<div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
 				<p className="font-medium text-sm">
-					Displaying {total} {total === 1 ? "home" : "homes"}
+					{total} {total === 1 ? "listing" : "listings"} matching your filters
 				</p>
 				<div className="flex items-center gap-2">
 					<span className="text-muted-foreground text-sm">Sort by</span>
