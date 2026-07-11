@@ -325,6 +325,158 @@ export class ListingReviewRepository {
 				],
 			});
 	}
+
+	/**
+	 * Looks up a review by the reservation it was written for. Internal guest
+	 * reviews store the order item id in `reservationId`, so this is the
+	 * "has this stay already been reviewed" check (the unique index cannot
+	 * enforce it because internal rows keep `externalId` null).
+	 */
+	async findByReservation(
+		provider: string,
+		accountId: string,
+		source: ListingReviewSource,
+		reservationId: string,
+	): Promise<ReviewModerationRow | null> {
+		const [row] = await this.#db
+			.select(moderationSelection())
+			.from(listingReview)
+			.where(
+				and(
+					eq(listingReview.provider, provider),
+					eq(listingReview.externalAccountId, accountId),
+					eq(listingReview.source, source),
+					eq(listingReview.reservationId, reservationId),
+				),
+			)
+			.limit(1);
+		return row ? toModerationRow(row) : null;
+	}
+
+	/**
+	 * Reviews for the admin moderation list, newest first. Unscoped by listing
+	 * so the dashboard sees every review; optional status/source filters drive
+	 * the tabs. Fetches one row beyond `limit` to report `hasNext`.
+	 */
+	async listForModeration(options: {
+		limit: number;
+		offset: number;
+		source?: ListingReviewSource;
+		status?: string;
+	}): Promise<{ hasNext: boolean; rows: ReviewModerationRow[] }> {
+		const conditions = [];
+		if (options.source) {
+			conditions.push(eq(listingReview.source, options.source));
+		}
+		if (options.status) {
+			conditions.push(eq(listingReview.status, options.status));
+		}
+
+		const rows = await this.#db
+			.select(moderationSelection())
+			.from(listingReview)
+			.where(conditions.length > 0 ? and(...conditions) : undefined)
+			.orderBy(desc(listingReview.createdAt))
+			.limit(options.limit + 1)
+			.offset(options.offset);
+
+		return {
+			hasNext: rows.length > options.limit,
+			rows: rows.slice(0, options.limit).map(toModerationRow),
+		};
+	}
+
+	/**
+	 * Moderates a review and returns its listing scope so the caller can
+	 * recompute that listing's rating aggregate. Returns `null` when the review
+	 * does not exist.
+	 */
+	async setStatus(
+		id: string,
+		status: string,
+	): Promise<{
+		accountId: string;
+		listingExternalId: string;
+		provider: string;
+	} | null> {
+		const [row] = await this.#db
+			.update(listingReview)
+			.set({ status, updatedAt: new Date() })
+			.where(eq(listingReview.id, id))
+			.returning({
+				accountId: listingReview.externalAccountId,
+				listingExternalId: listingReview.listingExternalId,
+				provider: listingReview.provider,
+			});
+		return row ?? null;
+	}
+}
+
+/** A review row as the moderation surfaces (admin list, dedupe check) see it. */
+export interface ReviewModerationRow {
+	accountId: string;
+	channel: string | null;
+	comments: string | null;
+	createdAt: string;
+	guestName: string | null;
+	id: string;
+	listingExternalId: string;
+	provider: string;
+	rating: number | null;
+	reservationId: string | null;
+	reviewedAt: string | null;
+	source: ListingReviewSource;
+	status: string;
+}
+
+function moderationSelection() {
+	return {
+		accountId: listingReview.externalAccountId,
+		channel: listingReview.channel,
+		comments: listingReview.comments,
+		createdAt: listingReview.createdAt,
+		guestName: listingReview.guestName,
+		id: listingReview.id,
+		listingExternalId: listingReview.listingExternalId,
+		provider: listingReview.provider,
+		rating: listingReview.rating,
+		reservationId: listingReview.reservationId,
+		reviewedAt: listingReview.reviewedAt,
+		source: listingReview.source,
+		status: listingReview.status,
+	};
+}
+
+function toModerationRow(row: {
+	accountId: string;
+	channel: string | null;
+	comments: string | null;
+	createdAt: Date;
+	guestName: string | null;
+	id: string;
+	listingExternalId: string;
+	provider: string;
+	rating: number | null;
+	reservationId: string | null;
+	reviewedAt: Date | null;
+	source: string;
+	status: string;
+}): ReviewModerationRow {
+	return {
+		accountId: row.accountId,
+		channel: row.channel,
+		comments: row.comments,
+		createdAt: row.createdAt.toISOString(),
+		guestName: row.guestName,
+		id: row.id,
+		listingExternalId: row.listingExternalId,
+		provider: row.provider,
+		rating: row.rating,
+		reservationId: row.reservationId,
+		reviewedAt: row.reviewedAt ? row.reviewedAt.toISOString() : null,
+		source: row.source === "internal" ? "internal" : "external",
+		status: row.status,
+	};
 }
 
 export function reviewRowId(

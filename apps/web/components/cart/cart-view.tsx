@@ -518,6 +518,7 @@ export function CartView() {
 				<EditStayDialog
 					listingId={dialogItem.listingId}
 					maxGuests={dialogConstraints.maxGuests}
+					maxPets={dialogConstraints.maxPets}
 					minNights={dialogConstraints.minNights}
 					onOpenChange={(open) => {
 						if (!open) {
@@ -532,6 +533,7 @@ export function CartView() {
 						checkOut: dialogItem.checkOut,
 						children: dialogItem.children,
 						infants: dialogItem.infants,
+						pets: dialogItem.pets,
 					}}
 				/>
 			)}

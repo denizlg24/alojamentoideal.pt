@@ -15,6 +15,7 @@ export interface HomesFilters {
 	checkOut: string | null;
 	children: number;
 	infants: number;
+	pets: number;
 	place: string | null;
 	priceMax: number | null;
 	priceMin: number | null;
@@ -33,6 +34,7 @@ export const DEFAULT_HOMES_FILTERS: HomesFilters = {
 	checkOut: null,
 	children: 0,
 	infants: 0,
+	pets: 0,
 	place: null,
 	priceMax: null,
 	priceMin: null,
@@ -75,6 +77,7 @@ export function parseHomesFilters(params: URLSearchParams): HomesFilters {
 		checkOut: readDate(params.get("checkOut")),
 		children: Math.max(0, readInt(params.get("children"), 0)),
 		infants: Math.min(5, Math.max(0, readInt(params.get("infants"), 0))),
+		pets: Math.min(5, Math.max(0, readInt(params.get("pets"), 0))),
 		place: params.get("place"),
 		priceMax: readFloat(params.get("priceMax")),
 		priceMin: readFloat(params.get("priceMin")),
@@ -97,6 +100,7 @@ export function buildHomesSearchParams(filters: HomesFilters): URLSearchParams {
 	params.set("adults", String(filters.adults));
 	params.set("children", String(filters.children));
 	params.set("infants", String(filters.infants));
+	params.set("pets", String(filters.pets));
 	params.set(
 		"guests",
 		String(capacityForGuests(filters.adults, filters.children)),

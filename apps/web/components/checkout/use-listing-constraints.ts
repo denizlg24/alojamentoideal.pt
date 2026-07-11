@@ -1,15 +1,18 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { MAX_PETS } from "@/lib/catalog/guests";
 
 /** Listing facts the stay editor needs, fetched once per listing. */
 export interface ListingConstraints {
 	maxGuests: number | null;
+	maxPets: number;
 	minNights: number;
 }
 
 export const DEFAULT_LISTING_CONSTRAINTS: ListingConstraints = {
 	maxGuests: null,
+	maxPets: 0,
 	minNights: 1,
 };
 
@@ -24,12 +27,17 @@ async function fetchConstraints(
 			return null;
 		}
 		const payload = (await response.json()) as {
-			data?: { capacity?: { guests?: number }; minNights?: number };
+			data?: {
+				capacity?: { guests?: number };
+				minNights?: number;
+				petFriendly?: boolean;
+			};
 		};
 		return [
 			listingId,
 			{
 				maxGuests: payload.data?.capacity?.guests ?? null,
+				maxPets: payload.data?.petFriendly ? MAX_PETS : 0,
 				minNights: payload.data?.minNights ?? 1,
 			},
 		];

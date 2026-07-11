@@ -15,6 +15,7 @@ export interface ListingState {
 	active: boolean;
 	latitude: number | null;
 	longitude: number | null;
+	petFriendly?: boolean;
 	processedSourceHash: string | null;
 	processingStatus: string;
 	sourceHash: string;
@@ -35,6 +36,7 @@ export interface UpsertListingInput {
 	longitude: number | null;
 	name: string | null;
 	nickname: string | null;
+	petFriendly: boolean;
 	normalized: AccommodationListingNormalizedContent;
 	personCapacity: number | null;
 	processed: AccommodationListingProcessedContent;
@@ -63,6 +65,7 @@ export interface RefreshListingCoordinatesInput {
 	fetchedAt: Date;
 	latitude: number | null;
 	longitude: number | null;
+	petFriendly: boolean;
 	provider: string;
 	sectionHashes: ListingSectionHashes;
 	staleAfter: Date;
@@ -419,6 +422,7 @@ export class ListingCacheRepository {
 				active: accommodationListing.active,
 				latitude: accommodationListing.latitude,
 				longitude: accommodationListing.longitude,
+				petFriendly: accommodationListing.petFriendly,
 				processedSourceHash: accommodationListing.processedSourceHash,
 				processingStatus: accommodationListing.processingStatus,
 				sourceHash: accommodationListing.sourceHash,
@@ -447,6 +451,7 @@ export class ListingCacheRepository {
 				fetchedAt: input.fetchedAt,
 				latitude: input.latitude,
 				longitude: input.longitude,
+				petFriendly: input.petFriendly,
 				sectionHashes: input.sectionHashes,
 				staleAfter: input.staleAfter,
 				syncRunId: input.syncRunId,
@@ -461,6 +466,7 @@ export class ListingCacheRepository {
 						${accommodationListing.active} is distinct from ${input.active}
 						or ${accommodationListing.latitude} is distinct from ${input.latitude}
 						or ${accommodationListing.longitude} is distinct from ${input.longitude}
+						or ${accommodationListing.petFriendly} is distinct from ${input.petFriendly}
 					)`,
 				),
 			)
@@ -487,6 +493,7 @@ export class ListingCacheRepository {
 			longitude: input.longitude,
 			name: input.name,
 			nickname: input.nickname,
+			petFriendly: input.petFriendly,
 			normalized: input.normalized,
 			personCapacity: input.personCapacity,
 			processed: input.processed,
@@ -526,6 +533,7 @@ export class ListingCacheRepository {
 					longitude: values.longitude,
 					name: values.name,
 					nickname: values.nickname,
+					petFriendly: values.petFriendly,
 					normalized: values.normalized,
 					personCapacity: values.personCapacity,
 					processed: values.processed,

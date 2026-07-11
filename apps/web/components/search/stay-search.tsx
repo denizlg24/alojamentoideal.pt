@@ -26,8 +26,9 @@ export function StaySearch({ className }: { className?: string }) {
 			adults: state.adults,
 			children: state.children,
 			infants: state.infants,
+			pets: state.pets,
 		}),
-		[state.adults, state.children, state.infants],
+		[state.adults, state.children, state.infants, state.pets],
 	);
 	const placeLabel = findLocationPreset(state.place)?.label ?? "Anywhere";
 
@@ -87,6 +88,9 @@ export function StaySearch({ className }: { className?: string }) {
 							<span className="text-muted-foreground text-xs">
 								{placeLabel} · {guestTotal}{" "}
 								{guestTotal === 1 ? "guest" : "guests"}
+								{state.pets > 0
+									? `, ${state.pets} ${state.pets === 1 ? "pet" : "pets"}`
+									: ""}
 							</span>
 						</span>
 					</button>

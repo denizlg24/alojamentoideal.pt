@@ -70,9 +70,16 @@ export function ListingsResults({
 		Math.min(Math.floor(offset / limit) + 1, totalPages),
 	);
 	const pages = pageWindow(currentPage, totalPages);
+	const rangeStart = (currentPage - 1) * limit + 1;
+	const rangeEnd = Math.min(currentPage * limit, total);
 
 	return (
 		<div className="flex flex-col gap-6">
+			<p className="text-muted-foreground text-sm">
+				Displaying{" "}
+				{rangeStart === rangeEnd ? rangeEnd : `${rangeStart}-${rangeEnd}`} out
+				of {total} {total === 1 ? "home" : "homes"}
+			</p>
 			<div className="flex flex-col gap-4">
 				{listings.map((listing) => (
 					<ListingCard

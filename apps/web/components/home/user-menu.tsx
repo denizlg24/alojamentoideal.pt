@@ -1,6 +1,10 @@
 "use client";
 
-import { Avatar, AvatarFallback } from "@workspace/ui/components/avatar";
+import {
+	Avatar,
+	AvatarFallback,
+	AvatarImage,
+} from "@workspace/ui/components/avatar";
 import { Button } from "@workspace/ui/components/button";
 import {
 	DropdownMenu,
@@ -90,6 +94,9 @@ export function UserMenu({ opaque }: { opaque: boolean }) {
 					variant="ghost"
 				>
 					<Avatar className="size-8">
+						{user.image && (
+							<AvatarImage alt={user.name ?? ""} src={user.image} />
+						)}
 						<AvatarFallback className="text-xs">
 							{initials(user.name) || <UserRound className="size-4" />}
 						</AvatarFallback>
@@ -103,6 +110,12 @@ export function UserMenu({ opaque }: { opaque: boolean }) {
 				<DropdownMenuSeparator />
 				<DropdownMenuItem asChild>
 					<Link href="/account">Account</Link>
+				</DropdownMenuItem>
+				<DropdownMenuItem asChild>
+					<Link href="/account/orders">Orders</Link>
+				</DropdownMenuItem>
+				<DropdownMenuItem asChild>
+					<Link href="/account/bookmarks">Bookmarks</Link>
 				</DropdownMenuItem>
 				<DropdownMenuItem onClick={handleLogout}>Log out</DropdownMenuItem>
 			</DropdownMenuContent>
@@ -145,6 +158,16 @@ export function MobileAuthSection() {
 			<SheetClose asChild>
 				<Link className={MOBILE_ITEM_CLASS} href="/account">
 					Account
+				</Link>
+			</SheetClose>
+			<SheetClose asChild>
+				<Link className={MOBILE_ITEM_CLASS} href="/account/orders">
+					Orders
+				</Link>
+			</SheetClose>
+			<SheetClose asChild>
+				<Link className={MOBILE_ITEM_CLASS} href="/account/bookmarks">
+					Bookmarks
 				</Link>
 			</SheetClose>
 			<SheetClose asChild>

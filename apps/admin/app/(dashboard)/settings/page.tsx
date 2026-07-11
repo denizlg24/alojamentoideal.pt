@@ -2,6 +2,7 @@ import type { RuntimeSettings } from "@workspace/core/settings";
 import {
 	getRuntimeSettings,
 	listHostkitListingCredentials,
+	listListingPaymentDestinations,
 	type RuntimeSettingDefinition,
 	runtimeSettingDefinitions,
 } from "@workspace/core/settings";
@@ -20,6 +21,7 @@ import {
 	bumpManualSyncVersion,
 	removeHostkitListingKey,
 	saveHostkitListingKey,
+	saveListingPaymentDestination,
 	saveSettings,
 } from "./actions";
 import { SyncRefreshButton } from "./sync-refresh-button";
@@ -94,12 +96,14 @@ function SettingField({
 export default async function SettingsPage({
 	searchParams,
 }: SettingsPageProps) {
-	const [params, settings, hostkitListings, syncJobs] = await Promise.all([
-		searchParams,
-		getRuntimeSettings(),
-		listHostkitListingCredentials(),
-		getSyncOverview(),
-	]);
+	const [params, settings, hostkitListings, paymentListings, syncJobs] =
+		await Promise.all([
+			searchParams,
+			getRuntimeSettings(),
+			listHostkitListingCredentials(),
+			listListingPaymentDestinations(),
+			getSyncOverview(),
+		]);
 	const error = params.error;
 	const saved = params.saved;
 	const savedMessage =
@@ -286,6 +290,56 @@ export default async function SettingsPage({
 											</Button>
 										</form>
 									</div>
+								))
+							)}
+						</div>
+					</AccordionContent>
+				</AccordionItem>
+
+				<AccordionItem value="listing-payments">
+					<AccordionTrigger>
+						<span className="flex flex-col gap-0.5">
+							<span className="font-medium text-sm">
+								Listing payment destinations
+							</span>
+							<span className="font-normal text-muted-foreground text-xs">
+								Optional Stripe connected account for each home's gross booking
+								funds.
+							</span>
+						</span>
+					</AccordionTrigger>
+					<AccordionContent>
+						<div className="divide-y divide-border/60 border-border/60 border-t border-b">
+							{paymentListings.length === 0 ? (
+								<p className="py-8 text-center text-muted-foreground text-sm">
+									No active Hostify listings have been synced yet.
+								</p>
+							) : (
+								paymentListings.map((listing) => (
+									<form
+										action={saveListingPaymentDestination}
+										className="grid gap-3 py-3 lg:grid-cols-[minmax(0,1fr)_minmax(18rem,24rem)_auto] lg:items-center"
+										key={listing.id}
+									>
+										<input name="listingId" type="hidden" value={listing.id} />
+										<div className="min-w-0">
+											<p className="truncate font-medium text-sm">
+												{listing.listingName ?? "Untitled listing"}
+											</p>
+											<p className="mt-1 text-muted-foreground text-xs">
+												Hostify {listing.listingExternalId}
+											</p>
+										</div>
+										<Input
+											aria-label={`Stripe connected account for ${listing.listingName ?? listing.listingExternalId}`}
+											defaultValue={listing.stripeConnectedAccountId ?? ""}
+											name="stripeConnectedAccountId"
+											placeholder="acct_... (leave blank for platform)"
+										/>
+										<Button type="submit" variant="secondary">
+											Save
+										</Button>
+									</form>
 								))
 							)}
 						</div>

@@ -27,7 +27,12 @@ export {
 	type RefundResult,
 } from "./refunds";
 export {
+	type ConnectedAccountTransferRequest,
+	type ConnectedAccountTransferResult,
+	createConnectedAccountTransfer,
+	type DirectTransferReversalRequest,
 	reverseChargeTransfer,
+	reverseConnectedAccountTransfer,
 	type TransferReversalRequest,
 	type TransferReversalResult,
 } from "./transfers";

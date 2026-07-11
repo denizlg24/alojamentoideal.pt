@@ -2,6 +2,7 @@ import "@workspace/ui/globals.css";
 import type { Metadata, Viewport } from "next";
 import { Bricolage_Grotesque, Hanken_Grotesk } from "next/font/google";
 import { AuthDialogProvider } from "@/components/auth/auth-dialog-provider";
+import { SavedListingsProvider } from "@/components/listings/saved-listings-provider";
 import { siteConfig } from "@/lib/site/config";
 import { defaultOpenGraphImage } from "@/lib/site/metadata";
 
@@ -86,7 +87,9 @@ export default function RootLayout({
 	return (
 		<html lang="en" className={`${fontSans.variable} ${fontDisplay.variable}`}>
 			<body>
-				<AuthDialogProvider>{children}</AuthDialogProvider>
+				<AuthDialogProvider>
+					<SavedListingsProvider>{children}</SavedListingsProvider>
+				</AuthDialogProvider>
 			</body>
 		</html>
 	);

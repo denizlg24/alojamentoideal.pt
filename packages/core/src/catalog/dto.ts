@@ -85,6 +85,7 @@ export interface CatalogListingSummaryDto {
 	freshness: CatalogFreshnessDto;
 	id: string;
 	location: CatalogLocationDto;
+	petFriendly: boolean;
 	propertyType: string | null;
 	provider: string;
 	reviews: CatalogReviewsDto;
@@ -119,6 +120,7 @@ export interface CatalogListingRecord {
 	name: string | null;
 	nickname: string | null;
 	personCapacity: number | null;
+	petFriendly?: boolean;
 	processed: AccommodationListingProcessedContent;
 	propertyType: string | null;
 	provider: string;
@@ -175,6 +177,7 @@ export function toCatalogListingSummary(
 			state: readRawListingString(record.raw, "state"),
 			timezone: record.timezone,
 		},
+		petFriendly: record.petFriendly ?? false,
 		propertyType: pickPropertyType(record),
 		provider: record.provider,
 		reviews: {

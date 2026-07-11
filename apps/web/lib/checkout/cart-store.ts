@@ -5,9 +5,9 @@ import { toCheckoutError } from "./errors";
 import {
 	type ActivityKeyInput,
 	activityCartItemClientMutationId,
-	cartItemClientMutationId,
 	randomIdempotencyKey,
 	type StayKeyInput,
+	stayAddCartItemInput,
 } from "./idempotency";
 
 /**
@@ -107,6 +107,7 @@ export function cartContentFingerprint(cart: CartDto | null): string {
 				item.adults,
 				item.children,
 				item.infants,
+				item.pets,
 				item.guests,
 			].join("|");
 		})
@@ -350,17 +351,7 @@ async function mutateWithUsableCart<T>(
  */
 export async function addStayToCart(stay: StayKeyInput): Promise<CartDto> {
 	const mutation = await mutateWithUsableCart((cart) =>
-		api.addCartItem(cart.id, {
-			adults: stay.adults,
-			checkIn: stay.checkIn,
-			checkOut: stay.checkOut,
-			children: stay.children,
-			clientMutationId: cartItemClientMutationId(stay),
-			guests: stay.guests,
-			idempotencyKey: randomIdempotencyKey("cart-item-add"),
-			infants: stay.infants,
-			listingId: stay.listingId,
-		}),
+		api.addCartItem(cart.id, stayAddCartItemInput(stay)),
 	);
 	notifyCartChanged(mutation.cart);
 	return mutation.cart;

@@ -92,7 +92,7 @@ export default function AboutPage() {
 						<h1 className="font-display text-[clamp(3.5rem,8vw,7.5rem)] leading-[0.86] tracking-[-0.07em]">
 							Stays that
 							<br />
-							<span className="text-[#9b5c3d] italic">feel like home.</span>
+							<span className="text-[#9b5c3d]">feel like home.</span>
 						</h1>
 						<p className="mt-8 max-w-lg text-lg leading-relaxed text-[#665d55] sm:text-xl">
 							We create comfortable, modern places to stay along Portugal&apos;s

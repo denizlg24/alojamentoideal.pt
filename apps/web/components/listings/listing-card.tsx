@@ -4,8 +4,8 @@ import { Button } from "@workspace/ui/components/button";
 import { Skeleton } from "@workspace/ui/components/skeleton";
 import {
 	BedDouble,
-	Bookmark,
 	CalendarDays,
+	Dog,
 	Home,
 	type LucideIcon,
 	MapPin,
@@ -17,6 +17,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { Suspense } from "react";
 import type { ListingCardPrice } from "@/lib/catalog/pricing-display";
+import { BookmarkButton } from "./bookmark-button";
 import { ListingAmenitiesDialog } from "./listing-amenities-dialog";
 import {
 	ListingCardPriceAsync,
@@ -54,6 +55,7 @@ function capacityStats(listing: CatalogListingSummaryDto): CapacityStat[] {
 		stats.push({ icon: BedDouble, label: pluralize(beds, "bed") });
 	if (bathrooms !== null)
 		stats.push({ icon: Toilet, label: pluralize(bathrooms, "bathroom") });
+	if (listing.petFriendly) stats.push({ icon: Dog, label: "Pet-friendly" });
 	return stats;
 }
 
@@ -224,12 +226,10 @@ export function ListingCard({
 									<CalendarDays className="size-3.5" />
 								</Link>
 							</Button>
-							<span
-								className="flex size-8 items-center justify-center rounded-full border bg-background"
-								aria-hidden="true"
-							>
-								<Bookmark className="size-4" />
-							</span>
+							<BookmarkButton
+								listingId={listing.id}
+								listingTitle={listing.title}
+							/>
 						</div>
 					</div>
 				</div>

@@ -11,6 +11,7 @@ import Link from "next/link";
 import type { ReactNode } from "react";
 import { StatusDot } from "@/components/status-dot";
 import {
+	loadConnectedAccountTransferQueue,
 	loadGuestSubmissionQueue,
 	loadMissingConversationQueue,
 	loadOwedReversalQueue,
@@ -70,9 +71,10 @@ function QueueSection({
 }
 
 export default async function ReconciliationsPage() {
-	const [holds, refunds, reversals, conversations, guestJobs] =
+	const [holds, transfers, refunds, reversals, conversations, guestJobs] =
 		await Promise.all([
 			loadReservationHoldQueue(),
+			loadConnectedAccountTransferQueue(),
 			loadPendingRefundQueue(),
 			loadOwedReversalQueue(),
 			loadMissingConversationQueue(),
@@ -81,6 +83,7 @@ export default async function ReconciliationsPage() {
 
 	const overview = [
 		{ count: holds.count, label: "Reservation holds" },
+		{ count: transfers.count, label: "Listing transfers" },
 		{ count: refunds.count, label: "Pending refunds" },
 		{ count: reversals.count, label: "Owed reversals" },
 		{ count: conversations.count, label: "Missing conversations" },
@@ -98,7 +101,7 @@ export default async function ReconciliationsPage() {
 				days or are flagged for recovery.
 			</p>
 
-			<dl className="mt-6 grid gap-x-6 gap-y-4 border-border/60 border-y py-5 sm:grid-cols-3 lg:grid-cols-5">
+			<dl className="mt-6 grid gap-x-6 gap-y-4 border-border/60 border-y py-5 sm:grid-cols-3 lg:grid-cols-6">
 				{overview.map((entry) => (
 					<div key={entry.label}>
 						<dt className="text-muted-foreground text-xs uppercase tracking-wide">
@@ -166,6 +169,54 @@ export default async function ReconciliationsPage() {
 				</QueueSection>
 
 				<QueueSection
+					count={transfers.count}
+					description="Per-listing Stripe Connect transfers awaiting creation or retry. Stable idempotency keys make every retry safe after a timeout or process crash. Drained by the reservations cron."
+					shown={transfers.rows.length}
+					title="Listing connected-account transfers"
+				>
+					<Table className="mt-4">
+						<TableHeader>
+							<TableRow>
+								<TableHead>Order</TableHead>
+								<TableHead>Destination</TableHead>
+								<TableHead className="text-right">Amount</TableHead>
+								<TableHead>Status</TableHead>
+								<TableHead className="text-right">Attempts</TableHead>
+								<TableHead>Next attempt</TableHead>
+								<TableHead>Last error</TableHead>
+							</TableRow>
+						</TableHeader>
+						<TableBody>
+							{transfers.rows.map((row) => (
+								<TableRow key={row.id}>
+									<TableCell>
+										<OrderLink reference={row.orderReference} />
+									</TableCell>
+									<TableCell className="font-mono text-xs">
+										{row.destinationAccountId}
+									</TableCell>
+									<TableCell className="text-right tabular-nums">
+										{formatMoneyMinor(row.amountMinor, row.currency)}
+									</TableCell>
+									<TableCell>
+										<StatusDot status={row.status} />
+									</TableCell>
+									<TableCell className="text-right tabular-nums">
+										{row.attemptCount}
+									</TableCell>
+									<TableCell className="text-muted-foreground">
+										{formatRelative(row.nextAttemptAt)}
+									</TableCell>
+									<TableCell className="max-w-72 truncate text-muted-foreground text-xs">
+										{row.lastErrorMessage ?? "—"}
+									</TableCell>
+								</TableRow>
+							))}
+						</TableBody>
+					</Table>
+				</QueueSection>
+
+				<QueueSection
 					count={refunds.count}
 					description="Refund ledger rows still pending: the amount is reserved on the order but the Stripe refund has not been confirmed. Resumed by the refunds cron with the stored idempotency key."
 					shown={refunds.rows.length}
@@ -209,7 +260,7 @@ export default async function ReconciliationsPage() {
 
 				<QueueSection
 					count={reversals.count}
-					description="Refunds that succeeded but whose Detours transfer reversal failed: the guest was repaid while the activity share is still on the connected account. Retried by the refunds cron."
+					description="Refunds that succeeded but whose Detours or listing transfer reversal failed. The guest was repaid while funds are still on a connected account. Retried by the refunds cron."
 					shown={reversals.rows.length}
 					title="Owed transfer reversals"
 				>

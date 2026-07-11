@@ -108,6 +108,23 @@ describe("buildListingCacheProjection amenities", () => {
 });
 
 describe("buildListingCacheProjection visibility", () => {
+	test("normalizes Hostify pets_allowed into pet-friendly information", () => {
+		const projection = buildListingCacheProjection({
+			amenities: [],
+			description: null,
+			details: null,
+			fees: null,
+			guestGuide: null,
+			listing: { id: 42, pets_allowed: 1 },
+			photos: [],
+			rooms: [],
+			status: null,
+			translations: [],
+		});
+
+		expect(projection.petFriendly).toBe(true);
+	});
+
 	test("prefers Hostify is_listed over active", () => {
 		const projection = buildListingCacheProjection({
 			amenities: [],

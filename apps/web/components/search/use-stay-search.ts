@@ -10,6 +10,7 @@ export interface StaySearchState {
 	adults: number;
 	children: number;
 	infants: number;
+	pets: number;
 	place: string | null;
 	range: DateRange | undefined;
 }
@@ -18,6 +19,7 @@ const DEFAULTS: StaySearchState = {
 	adults: 1,
 	children: 0,
 	infants: 0,
+	pets: 0,
 	place: null,
 	range: undefined,
 };
@@ -53,6 +55,7 @@ export function useStaySearch(initial?: Partial<StaySearchState>) {
 		params.set("adults", String(state.adults));
 		params.set("children", String(state.children));
 		params.set("infants", String(state.infants));
+		params.set("pets", String(state.pets));
 		params.set(
 			"guests",
 			String(capacityForGuests(state.adults, state.children)),

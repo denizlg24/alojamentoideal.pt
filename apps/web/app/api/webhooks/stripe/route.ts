@@ -18,7 +18,10 @@ import {
 } from "@workspace/core/integrations/stripe";
 import { hashIdentifier, logger } from "@workspace/core/observability";
 import { accountProfileRepository } from "@/lib/api/account";
-import { commerceService } from "@/lib/api/commerce";
+import {
+	commerceService,
+	connectedAccountTransferService,
+} from "@/lib/api/commerce";
 import { withApiRoute } from "@/lib/api/route";
 import { sendOrderConfirmationEmail } from "@/lib/email/order-confirmation";
 import {
@@ -162,6 +165,17 @@ async function finalizeReservation(
 	const result = await service.confirmOrderReservations(orderId);
 	switch (result.outcome) {
 		case "confirmed":
+			// Best effort: the cron reconciler owns retries, and a transfer
+			// failure must never block the confirmation email below.
+			try {
+				await connectedAccountTransferService().reconcile();
+			} catch (error) {
+				logger.warn("Connected-account transfer reconcile failed inline", {
+					error: error instanceof Error ? error.message : String(error),
+					orderId,
+					paymentIntentId,
+				});
+			}
 			logger.info("Order confirmed: provider holds accepted", {
 				orderId,
 				paymentIntentId,

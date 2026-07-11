@@ -3,6 +3,7 @@ import type {
 	OrderRefundReason,
 } from "@workspace/db";
 import {
+	connectedAccountTransfer as connectedAccountTransferTable,
 	conversation as conversationTable,
 	getDb,
 	guestSubmissionJob as guestSubmissionJobTable,
@@ -122,6 +123,56 @@ export interface PendingRefundRow {
 	reason: OrderRefundReason;
 }
 
+export interface ConnectedAccountTransferRow {
+	amountMinor: number;
+	attemptCount: number;
+	currency: string;
+	destinationAccountId: string;
+	id: string;
+	lastErrorMessage: string | null;
+	nextAttemptAt: Date;
+	orderReference: string;
+	status: string;
+}
+
+export async function loadConnectedAccountTransferQueue(): Promise<
+	ReconciliationQueue<ConnectedAccountTransferRow>
+> {
+	const db = getDb();
+	const predicate = inArray(connectedAccountTransferTable.status, [
+		"pending",
+		"failed",
+	]);
+	const [rows, [totals]] = await Promise.all([
+		db
+			.select({
+				amountMinor: connectedAccountTransferTable.amountMinor,
+				attemptCount: connectedAccountTransferTable.attemptCount,
+				currency: connectedAccountTransferTable.currency,
+				destinationAccountId:
+					connectedAccountTransferTable.destinationAccountId,
+				id: connectedAccountTransferTable.id,
+				lastErrorMessage: connectedAccountTransferTable.lastErrorMessage,
+				nextAttemptAt: connectedAccountTransferTable.nextAttemptAt,
+				orderReference: orderTable.publicReference,
+				status: connectedAccountTransferTable.status,
+			})
+			.from(connectedAccountTransferTable)
+			.innerJoin(
+				orderTable,
+				eq(orderTable.id, connectedAccountTransferTable.orderId),
+			)
+			.where(predicate)
+			.orderBy(asc(connectedAccountTransferTable.nextAttemptAt))
+			.limit(QUEUE_ROW_LIMIT),
+		db
+			.select({ count: countAll })
+			.from(connectedAccountTransferTable)
+			.where(predicate),
+	]);
+	return { count: totals?.count ?? 0, rows };
+}
+
 export async function loadPendingRefundQueue(): Promise<
 	ReconciliationQueue<PendingRefundRow>
 > {
@@ -155,8 +206,8 @@ export interface OwedReversalRow {
 	orderReference: string;
 }
 
-// Succeeded refunds whose Detours transfer reversal failed: the refund left
-// the platform account but the activity share was never pulled back.
+// Succeeded refunds whose connected-account reversal failed: the refund left
+// the platform account but a Detours or listing payout was not pulled back.
 const owedReversalPredicate = and(
 	eq(orderRefundTable.status, "succeeded"),
 	isNull(orderRefundTable.stripeTransferReversalId),

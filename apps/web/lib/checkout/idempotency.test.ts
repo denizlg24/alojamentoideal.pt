@@ -17,6 +17,7 @@ const stay: StayKeyInput = {
 	guests: 3,
 	infants: 0,
 	listingId: "listing-42",
+	pets: 0,
 };
 
 describe("cartItemIdempotencyKey", () => {
@@ -32,6 +33,10 @@ describe("cartItemIdempotencyKey", () => {
 		expect(
 			cartItemIdempotencyKey(stay) ===
 				cartItemIdempotencyKey({ ...stay, guests: 4 }),
+		).toBe(false);
+		expect(
+			cartItemIdempotencyKey(stay) ===
+				cartItemIdempotencyKey({ ...stay, pets: 1 }),
 		).toBe(false);
 	});
 

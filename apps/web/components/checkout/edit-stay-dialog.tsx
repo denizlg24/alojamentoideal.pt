@@ -34,6 +34,7 @@ import type {
 interface EditStayDialogProps {
 	listingId: string;
 	maxGuests: number | null;
+	maxPets: number;
 	minNights: number;
 	onOpenChange: (open: boolean) => void;
 	onSave: (next: EditStayValue) => void;
@@ -50,6 +51,7 @@ interface EditStayDialogProps {
 export function EditStayDialog({
 	listingId,
 	maxGuests,
+	maxPets,
 	minNights,
 	onOpenChange,
 	onSave,
@@ -73,6 +75,7 @@ export function EditStayDialog({
 		adults: value.adults,
 		children: value.children,
 		infants: value.infants,
+		pets: value.pets,
 	});
 
 	// Reseed the drafts from the committed stay only when the dialog opens, not on
@@ -89,6 +92,7 @@ export function EditStayDialog({
 				adults: value.adults,
 				children: value.children,
 				infants: value.infants,
+				pets: value.pets,
 			});
 		}
 	}, [open]);
@@ -114,6 +118,7 @@ export function EditStayDialog({
 		adults: guests.adults,
 		children: guests.children,
 		infants: guests.infants,
+		pets: guests.pets,
 	});
 
 	const canSave =
@@ -126,7 +131,8 @@ export function EditStayDialog({
 		checkOut !== value.checkOut ||
 		guests.adults !== value.adults ||
 		guests.children !== value.children ||
-		guests.infants !== value.infants;
+		guests.infants !== value.infants ||
+		guests.pets !== value.pets;
 
 	const handleSave = () => {
 		if (!checkIn || !checkOut || !canSave) {
@@ -207,7 +213,11 @@ export function EditStayDialog({
 								</span>
 							</AccordionTrigger>
 							<AccordionContent>
-								<GuestFields onChange={setGuests} value={guests} />
+								<GuestFields
+									maxPets={maxPets}
+									onChange={setGuests}
+									value={guests}
+								/>
 								{maxGuests !== null && (
 									<p className="mt-2 text-muted-foreground text-xs">
 										This home sleeps up to {maxGuests}.

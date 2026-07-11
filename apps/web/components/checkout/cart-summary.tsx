@@ -72,6 +72,7 @@ function SummaryItemRow({
 								adults: item.adults,
 								children: item.children,
 								infants: item.infants,
+								pets: item.pets,
 							})}
 						</span>
 					)}

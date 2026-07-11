@@ -1,4 +1,5 @@
 export * from "./cancellation-policy";
+export * from "./connected-account-transfers";
 export * from "./conversations";
 export * from "./errors";
 export * from "./idempotency";
@@ -17,3 +18,4 @@ export * from "./state";
 export * from "./stay-overlap";
 export * from "./totals";
 export * from "./types";
+export * from "./user-orders";

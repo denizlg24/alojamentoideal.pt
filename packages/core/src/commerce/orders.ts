@@ -18,6 +18,7 @@ export interface DraftOrderItemSource {
 	position: number;
 	quote: NormalizedAccommodationQuoteSnapshot;
 	snapshot: ListingDisplaySnapshot;
+	stripeConnectedAccountId?: string | null;
 }
 
 export interface DraftOrderRows {
@@ -56,6 +57,7 @@ export interface DraftAccommodationDetailRow {
 	pets: number;
 	propertyTimezone: string;
 	provider: string;
+	stripeConnectedAccountId: string | null;
 }
 
 export interface DraftOrderChargeRow {
@@ -96,6 +98,7 @@ export function buildDraftOrderRows(
 			pets: quote.pets,
 			propertyTimezone: source.snapshot.propertyTimezone,
 			provider: quote.provider,
+			stripeConnectedAccountId: source.stripeConnectedAccountId ?? null,
 		},
 		item: {
 			catalogSnapshot: source.snapshot,

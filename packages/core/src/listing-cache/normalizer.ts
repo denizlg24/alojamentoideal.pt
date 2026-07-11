@@ -60,6 +60,7 @@ export interface ListingCacheProjection {
 	longitude: number | null;
 	name: string | null;
 	nickname: string | null;
+	petFriendly: boolean;
 	normalized: AccommodationListingNormalizedContent;
 	personCapacity: number | null;
 	processedFallback: {
@@ -166,6 +167,7 @@ export function buildListingCacheProjection(
 		longitude: readNumberFrom(listing, ["lng", "longitude"]),
 		name: readString(listing, "name"),
 		nickname: readString(listing, "nickname"),
+		petFriendly: readBoolean(listing, "pets_allowed") ?? false,
 		normalized,
 		personCapacity: readNumber(listing, "person_capacity"),
 		processedFallback: {

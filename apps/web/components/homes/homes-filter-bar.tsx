@@ -230,6 +230,7 @@ export function HomesFilterBar({
 		adults: visibleFilters.adults,
 		children: visibleFilters.children,
 		infants: visibleFilters.infants,
+		pets: visibleFilters.pets,
 	};
 
 	// Edit guests in a draft while the popover is open and commit once on close,
@@ -249,7 +250,8 @@ export function HomesFilterBar({
 			next &&
 			(next.adults !== currentGuests.adults ||
 				next.children !== currentGuests.children ||
-				next.infants !== currentGuests.infants)
+				next.infants !== currentGuests.infants ||
+				next.pets !== currentGuests.pets)
 		) {
 			apply({ ...visibleFilters, ...next });
 		}
@@ -276,7 +278,8 @@ export function HomesFilterBar({
 		visibleFilters.place !== null ||
 		visibleFilters.checkIn !== null ||
 		visibleFilters.adults > 1 ||
-		visibleFilters.children > 0;
+		visibleFilters.children > 0 ||
+		visibleFilters.pets > 0;
 	const draftCount = countAdvancedFilters(draft);
 	const draftDates = toDateRange(draft);
 	const draftDatesLabel = draftDates?.from
@@ -285,7 +288,7 @@ export function HomesFilterBar({
 			: format(draftDates.from, "MMM d")
 		: "Any week";
 	const draftGuestTotal = draft.adults + draft.children;
-	const draftGuestsLabel = `${draftGuestTotal} ${draftGuestTotal === 1 ? "guest" : "guests"}`;
+	const draftGuestsLabel = `${draftGuestTotal} ${draftGuestTotal === 1 ? "guest" : "guests"}${draft.pets > 0 ? `, ${draft.pets} ${draft.pets === 1 ? "pet" : "pets"}` : ""}`;
 	const draftPlaceLabel = findLocationPreset(draft.place)?.label ?? "Anywhere";
 	const formatPrice = (amount: number) => formatListingMoney(amount, currency);
 	const hasPriceRange =
@@ -367,7 +370,13 @@ export function HomesFilterBar({
 			key: "guests",
 			label: `${guests} ${guests === 1 ? "guest" : "guests"}`,
 			remove: () =>
-				apply({ ...visibleFilters, adults: 1, children: 0, infants: 0 }),
+				apply({
+					...visibleFilters,
+					adults: 1,
+					children: 0,
+					infants: 0,
+					pets: 0,
+				}),
 		});
 	}
 	if (visibleFilters.ratingMin !== null) {
@@ -639,6 +648,7 @@ export function HomesFilterBar({
 											adults: draft.adults,
 											children: draft.children,
 											infants: draft.infants,
+											pets: draft.pets,
 										}}
 										onChange={(next) => setDraft({ ...draft, ...next })}
 									/>
@@ -852,7 +862,7 @@ export function HomesFilterBar({
 
 			<div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
 				<p className="font-medium text-sm">
-					Displaying {total} {total === 1 ? "home" : "homes"}
+					{total} {total === 1 ? "listing" : "listings"} matching your filters
 				</p>
 				<div className="flex items-center gap-2">
 					<span className="text-muted-foreground text-sm">Sort by</span>

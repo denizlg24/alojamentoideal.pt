@@ -1,6 +1,9 @@
 import { getAccommodationsConfig } from "@workspace/core/accommodations";
 import { isAuthorizedCronRequest } from "@workspace/core/listing-cache";
-import { commerceService } from "@/lib/api/commerce";
+import {
+	commerceService,
+	connectedAccountTransferService,
+} from "@/lib/api/commerce";
 import { withApiRoute } from "@/lib/api/route";
 import { sendOrderConfirmationEmail } from "@/lib/email/order-confirmation";
 import { sendOrderCompensationEmail } from "@/lib/email/order-could-not-confirm";
@@ -35,7 +38,8 @@ export const GET = withApiRoute(
 			onConfirmed: sendOrderConfirmationEmail,
 			onPendingNotice: sendOrderPendingConfirmationEmail,
 		});
+		const transfers = await connectedAccountTransferService().reconcile();
 
-		return Response.json({ data: summary, success: true });
+		return Response.json({ data: { ...summary, transfers }, success: true });
 	},
 );

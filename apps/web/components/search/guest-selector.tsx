@@ -8,15 +8,12 @@ import {
 } from "@workspace/ui/components/popover";
 import { cn } from "@workspace/ui/lib/utils";
 import { Minus, Plus, Users } from "lucide-react";
-import { MAX_INFANTS } from "@/lib/catalog/guests";
+import { type GuestCounts, MAX_INFANTS, MAX_PETS } from "@/lib/catalog/guests";
 
-export interface GuestCounts {
-	adults: number;
-	children: number;
-	infants: number;
-}
+export type { GuestCounts };
 
 interface GuestFieldsProps {
+	maxPets?: number;
 	onChange: (next: GuestCounts) => void;
 	value: GuestCounts;
 }
@@ -74,7 +71,11 @@ function Stepper({
 	);
 }
 
-export function GuestFields({ onChange, value }: GuestFieldsProps) {
+export function GuestFields({
+	maxPets = MAX_PETS,
+	onChange,
+	value,
+}: GuestFieldsProps) {
 	return (
 		<div className="flex flex-col">
 			<Stepper
@@ -101,6 +102,14 @@ export function GuestFields({ onChange, value }: GuestFieldsProps) {
 				max={MAX_INFANTS}
 				onChange={(infants) => onChange({ ...value, infants })}
 			/>
+			<Stepper
+				label="Pets"
+				hint={maxPets > 0 ? "Dogs and cats" : "Not allowed at this home"}
+				value={value.pets}
+				min={0}
+				max={maxPets}
+				onChange={(pets) => onChange({ ...value, pets })}
+			/>
 		</div>
 	);
 }
@@ -117,6 +126,10 @@ export function GuestSelector({
 	open?: boolean;
 }) {
 	const total = value.adults + value.children;
+	const petLabel =
+		value.pets > 0
+			? `, ${value.pets} ${value.pets === 1 ? "pet" : "pets"}`
+			: "";
 
 	return (
 		<Popover open={open} onOpenChange={onOpenChange}>
@@ -136,6 +149,7 @@ export function GuestSelector({
 						</span>
 						<span className="text-sm">
 							{total} {total === 1 ? "guest" : "guests"}
+							{petLabel}
 						</span>
 					</span>
 				</Button>
