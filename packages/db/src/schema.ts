@@ -777,6 +777,29 @@ export const listingReviewSummary = pgTable(
 	],
 );
 
+export const listingBookmark = pgTable(
+	"listing_bookmark",
+	{
+		id: text("id").primaryKey(),
+		userId: text("user_id")
+			.notNull()
+			.references(() => user.id, { onDelete: "cascade" }),
+		provider: text("provider").notNull(),
+		externalAccountId: text("external_account_id").notNull(),
+		listingExternalId: text("listing_external_id").notNull(),
+		createdAt: timestampWithTimezone("created_at").notNull().defaultNow(),
+	},
+	(table) => [
+		uniqueIndex("listing_bookmark_user_listing_uidx").on(
+			table.userId,
+			table.provider,
+			table.externalAccountId,
+			table.listingExternalId,
+		),
+		index("listing_bookmark_user_idx").on(table.userId, table.createdAt),
+	],
+);
+
 export interface AccommodationQuoteFeeSnapshot {
 	amountMinor: number | null;
 	chargeLabel: string | null;
@@ -2160,6 +2183,7 @@ export const schema = {
 	observabilityEvent,
 	listingReview,
 	listingReviewSummary,
+	listingBookmark,
 	listingHostkitCredential,
 	cart,
 	cartItem,

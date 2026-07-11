@@ -63,7 +63,7 @@ export default function HelpPage() {
 					</p>
 					<h1 className="max-w-3xl font-display text-[clamp(3rem,7vw,6.5rem)] leading-[0.88] tracking-[-0.06em]">
 						Hello, how can
-						<span className="text-[#9b5c3d] italic"> we help?</span>
+						<span className="text-[#9b5c3d]"> we help?</span>
 					</h1>
 					<p className="mt-7 max-w-xl text-[#665d55] text-lg leading-relaxed">
 						Short, practical guides for every step of your stay. If a guide does

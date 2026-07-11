@@ -5,6 +5,7 @@ import {
 	AvatarImage,
 } from "@workspace/ui/components/avatar";
 import { Button } from "@workspace/ui/components/button";
+import Link from "next/link";
 import { AccountSection, ReadField } from "./account-ui";
 import { DateOfBirthField } from "./date-of-birth-field";
 import { IdentityVerification } from "./identity-verification";
@@ -43,6 +44,14 @@ export function AccountView({
 				<p className="mt-1 text-muted-foreground text-sm">
 					Manage your details and how we reach you about your stays.
 				</p>
+				<div className="mt-4 flex flex-wrap gap-2">
+					<Button asChild className="rounded-full" size="sm" variant="outline">
+						<Link href="/account/orders">Your orders</Link>
+					</Button>
+					<Button asChild className="rounded-full" size="sm" variant="outline">
+						<Link href="/account/bookmarks">Your bookmarks</Link>
+					</Button>
+				</div>
 			</header>
 
 			<AccountSection

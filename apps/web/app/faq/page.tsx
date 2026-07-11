@@ -225,7 +225,7 @@ export default function FaqPage() {
 					</p>
 					<h1 className="max-w-3xl font-display text-[clamp(3rem,7vw,6.5rem)] leading-[0.88] tracking-[-0.06em]">
 						Good stays start with
-						<span className="text-[#9b5c3d] italic"> clear answers.</span>
+						<span className="text-[#9b5c3d]"> clear answers.</span>
 					</h1>
 					<p className="mt-7 max-w-xl text-[#665d55] text-lg leading-relaxed">
 						Everything guests usually ask us about booking, paying, cancelling

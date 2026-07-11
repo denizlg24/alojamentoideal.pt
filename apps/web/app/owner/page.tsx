@@ -42,7 +42,7 @@ export default function OwnerPage() {
 						<h1 className="font-display text-[clamp(3.7rem,8vw,7.5rem)] leading-[0.86] tracking-[-0.07em]">
 							Make more of
 							<br />
-							<span className="text-[#9b5c3d] italic">your place.</span>
+							<span className="text-[#9b5c3d]">your place.</span>
 						</h1>
 						<p className="mt-8 max-w-lg text-[#665d55] text-lg leading-relaxed sm:text-xl">
 							We manage a small collection of stays that feel like home. If you

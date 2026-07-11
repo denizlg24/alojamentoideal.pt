@@ -5,7 +5,9 @@ import { OrderAccessRedeemer } from "@/components/order/order-access-redeemer";
 import { OrderHubShell } from "@/components/order/order-hub-shell";
 import { OrderHubSkeleton } from "@/components/order/order-hub-skeleton";
 import { OrderOverview } from "@/components/order/order-overview";
+import { OrderReviewSection } from "@/components/order/order-review-section";
 import { loadOrderForRequest } from "@/lib/order/load";
+import { loadOrderReviewItems } from "@/lib/order/reviews";
 import { buildPrivatePageMetadata } from "@/lib/site/metadata";
 import { redeemOrderAccess } from "./actions";
 
@@ -48,9 +50,15 @@ async function OrderOverviewRoute({ params, searchParams }: OrderPageProps) {
 		return <OrderAccessDenied />;
 	}
 
+	const reviewItems = await loadOrderReviewItems(loaded.detail);
+
 	return (
 		<OrderHubShell detail={loaded.detail}>
 			<OrderOverview detail={loaded.detail} />
+			<OrderReviewSection
+				items={reviewItems}
+				reference={loaded.detail.reference}
+			/>
 		</OrderHubShell>
 	);
 }
