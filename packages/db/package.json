@@ -27,7 +27,7 @@
 	},
 	"devDependencies": {
 		"@types/node": "^26",
-		"@types/pg": "^8.16.4",
+		"@types/pg": "^8.20.4",
 		"@workspace/typescript-config": "workspace:*",
 		"drizzle-kit": "^0.31.6",
 		"typescript": "^6"
