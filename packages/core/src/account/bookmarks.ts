@@ -1,5 +1,5 @@
 import { type Database, listingBookmark } from "@workspace/db";
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq } from "@workspace/db/query";
 
 /** Catalog scope a bookmark belongs to, mirroring `CatalogScope`. */
 export interface BookmarkScope {

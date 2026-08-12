@@ -9,7 +9,7 @@ import {
 	order as orderTable,
 	providerBooking as providerBookingTable,
 } from "@workspace/db";
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, eq } from "@workspace/db/query";
 import type { HostkitClient } from "../integrations/hostkit";
 import { redactHostkitText } from "../integrations/hostkit";
 import { InvoicingError } from "./errors";

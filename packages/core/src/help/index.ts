@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { type Database, getDb, helpArticle } from "@workspace/db";
-import { and, asc, eq, ne } from "drizzle-orm";
+import { and, asc, eq, ne } from "@workspace/db/query";
 import { z } from "zod";
 
 export const helpArticleInputSchema = z.object({

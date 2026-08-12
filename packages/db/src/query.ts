@@ -7,6 +7,7 @@
  */
 export {
 	and,
+	arrayContains,
 	asc,
 	desc,
 	eq,
@@ -16,8 +17,14 @@ export {
 	inArray,
 	isNotNull,
 	isNull,
+	like,
 	lt,
+	lte,
+	min,
+	ne,
+	notInArray,
 	or,
 	type SQL,
 	sql,
 } from "drizzle-orm";
+export type { AnyPgColumn } from "drizzle-orm/pg-core";

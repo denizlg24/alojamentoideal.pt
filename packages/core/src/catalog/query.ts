@@ -4,6 +4,7 @@ import {
 	type Database,
 	listingReviewSummary,
 } from "@workspace/db";
+import type { AnyPgColumn } from "@workspace/db/query";
 import {
 	and,
 	arrayContains,
@@ -13,8 +14,7 @@ import {
 	gte,
 	type SQL,
 	sql,
-} from "drizzle-orm";
-import type { AnyPgColumn } from "drizzle-orm/pg-core";
+} from "@workspace/db/query";
 import {
 	type CatalogListingDetailDto,
 	type CatalogListingSummaryDto,

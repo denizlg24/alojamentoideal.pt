@@ -8,7 +8,7 @@ import {
 	providerSyncRun,
 	providerSyncState,
 } from "@workspace/db";
-import { and, asc, eq, sql } from "drizzle-orm";
+import { and, asc, eq, sql } from "@workspace/db/query";
 import type { ListingProcessingStatus } from "./processor";
 
 export interface ListingState {

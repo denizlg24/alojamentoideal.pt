@@ -6,7 +6,7 @@ import {
 	getDb,
 	listingHostkitCredential,
 } from "@workspace/db";
-import { and, asc, eq, inArray, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, sql } from "@workspace/db/query";
 import {
 	decryptIdentityField,
 	encryptIdentityField,

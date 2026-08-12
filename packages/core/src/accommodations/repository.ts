@@ -3,7 +3,7 @@ import {
 	accommodationListingNight,
 	type Database,
 } from "@workspace/db";
-import { and, asc, eq, gte, inArray, lt, min, sql } from "drizzle-orm";
+import { and, asc, eq, gte, inArray, lt, min, sql } from "@workspace/db/query";
 import { normalizeCurrencyCode } from "./currency";
 
 export interface AccommodationScope {

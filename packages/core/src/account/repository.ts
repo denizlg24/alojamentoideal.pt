@@ -4,7 +4,7 @@ import {
 	userIdentityDocument,
 	userProfile,
 } from "@workspace/db";
-import { and, desc, eq, isNull, sql } from "drizzle-orm";
+import { and, desc, eq, isNull, sql } from "@workspace/db/query";
 import {
 	decryptIdentityField,
 	encryptIdentityField,

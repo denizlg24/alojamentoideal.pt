@@ -5,7 +5,7 @@ import {
 	order,
 	orderItem,
 } from "@workspace/db";
-import { and, asc, desc, eq, inArray } from "drizzle-orm";
+import { and, asc, desc, eq, inArray } from "@workspace/db/query";
 
 export interface UserOrderItemSummary {
 	/** Local activity date, `YYYY-MM-DD`. Null for accommodation items. */

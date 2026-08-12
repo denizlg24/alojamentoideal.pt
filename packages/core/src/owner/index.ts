@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { type Database, getDb, propertyOwnerContact } from "@workspace/db";
-import { desc, eq } from "drizzle-orm";
+import { desc, eq } from "@workspace/db/query";
 import { z } from "zod";
 
 export const propertyOwnerContactInputSchema = z.object({

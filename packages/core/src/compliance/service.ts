@@ -10,7 +10,17 @@ import {
 	order as orderTable,
 	providerBooking as providerBookingTable,
 } from "@workspace/db";
-import { and, asc, eq, gt, inArray, lte, or, type SQL, sql } from "drizzle-orm";
+import {
+	and,
+	asc,
+	eq,
+	gt,
+	inArray,
+	lte,
+	or,
+	type SQL,
+	sql,
+} from "@workspace/db/query";
 import { decryptIdentityField } from "../account/identity-encryption";
 import type { HostkitClient } from "../integrations/hostkit";
 import { redactHostkitText } from "../integrations/hostkit";

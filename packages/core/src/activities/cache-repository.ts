@@ -4,7 +4,7 @@ import {
 	providerSyncRun,
 	providerSyncState,
 } from "@workspace/db";
-import { and, asc, eq, notInArray, sql } from "drizzle-orm";
+import { and, asc, eq, notInArray, sql } from "@workspace/db/query";
 import type { ActivityDetail, ActivitySummary } from "./types";
 
 export interface ActivityCacheScope {

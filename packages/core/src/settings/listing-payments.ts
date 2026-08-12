@@ -1,5 +1,5 @@
 import { accommodationListing, getDb } from "@workspace/db";
-import { asc, eq } from "drizzle-orm";
+import { asc, eq } from "@workspace/db/query";
 
 const STRIPE_CONNECTED_ACCOUNT_ID = /^acct_[A-Za-z0-9]+$/;
 

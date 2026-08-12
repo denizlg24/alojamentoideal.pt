@@ -3,7 +3,7 @@ import {
 	listingReview,
 	listingReviewSummary,
 } from "@workspace/db";
-import { and, desc, eq, inArray, isNotNull, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNotNull, sql } from "@workspace/db/query";
 
 export type ListingReviewSource = "external" | "internal";
 

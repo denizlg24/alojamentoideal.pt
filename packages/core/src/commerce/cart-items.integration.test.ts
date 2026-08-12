@@ -6,7 +6,7 @@ import {
 	getDb,
 	getPool,
 } from "@workspace/db";
-import { eq, like, sql } from "drizzle-orm";
+import { eq, like, sql } from "@workspace/db/query";
 import type { AddActivityCartItemBody } from "./schemas";
 import { CommerceService } from "./service";
 import type { CartOwner } from "./types";

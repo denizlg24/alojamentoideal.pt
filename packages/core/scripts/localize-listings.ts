@@ -83,7 +83,7 @@ import {
 	getPool,
 	type LocalizedText,
 } from "@workspace/db";
-import { eq, inArray } from "drizzle-orm";
+import { eq, inArray } from "@workspace/db/query";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const reportDir = join(here, ".listing-localization");

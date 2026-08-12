@@ -4,7 +4,7 @@ import {
 	orderContact as orderContactTable,
 	order as orderTable,
 } from "@workspace/db";
-import { eq } from "drizzle-orm";
+import { eq } from "@workspace/db/query";
 import { InvoicingError } from "./errors";
 
 export interface InvoiceRequestFiscalDetails {

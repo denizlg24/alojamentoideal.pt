@@ -3,7 +3,7 @@ import {
 	type ProviderBookingStatus,
 	providerBooking as providerBookingTable,
 } from "@workspace/db";
-import { and, eq } from "drizzle-orm";
+import { and, eq } from "@workspace/db/query";
 import type {
 	HostifyClient,
 	HostifyUpdateReservationInput,

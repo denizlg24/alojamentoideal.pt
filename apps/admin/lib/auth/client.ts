@@ -6,7 +6,7 @@ import { createAuthClient } from "better-auth/react";
  * Same-origin auth client: no baseURL so requests target this app's own
  * /api/auth mount rather than the web app's.
  */
-export const authClient = createAuthClient({
+const authClient = createAuthClient({
 	plugins: [adminClient(), inferAdditionalFields<Auth>()],
 });
 
