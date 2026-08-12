@@ -27,11 +27,11 @@
 	},
 	"dependencies": {
 		"drizzle-orm": "^0.45.2",
-		"pg": "^8.22.0"
+		"pg": "^8.23.0"
 	},
 	"devDependencies": {
 		"@types/node": "^26",
-		"@types/pg": "^8.16.4",
+		"@types/pg": "^8.21.0",
 		"@workspace/typescript-config": "workspace:*",
 		"drizzle-kit": "^0.31.6",
 		"typescript": "^6"
