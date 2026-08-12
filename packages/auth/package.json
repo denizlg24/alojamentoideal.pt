@@ -21,8 +21,8 @@
 	"dependencies": {
 		"@workspace/db": "workspace:*",
 		"@workspace/emails": "workspace:*",
-		"better-auth": "^1.6.20",
-		"resend": "^6.14.0",
+		"better-auth": "^1.6.26",
+		"resend": "^6.18.1",
 		"zod": "^4.4.3"
 	},
 	"peerDependencies": {
@@ -38,7 +38,7 @@
 		"@types/node": "^26",
 		"@types/react": "^19",
 		"@workspace/typescript-config": "workspace:*",
-		"react": "19.2.7",
+		"react": "19.2.8",
 		"typescript": "^6"
 	}
 }
