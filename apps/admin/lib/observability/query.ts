@@ -1,5 +1,13 @@
 import { getDb, observabilityEvent } from "@workspace/db";
-import { and, desc, gte, ilike, inArray, or, type SQL } from "drizzle-orm";
+import {
+	and,
+	desc,
+	gte,
+	ilike,
+	inArray,
+	or,
+	type SQL,
+} from "@workspace/db/query";
 
 export const EVENT_SEVERITIES = [
 	"debug",

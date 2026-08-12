@@ -4,7 +4,7 @@ import {
 	type ReviewModerationRow,
 } from "@workspace/core/listing-reviews";
 import { accommodationListing, getDb } from "@workspace/db";
-import { inArray } from "drizzle-orm";
+import { inArray } from "@workspace/db/query";
 
 export const REVIEW_STATUSES = ["pending", "published", "hidden"] as const;
 

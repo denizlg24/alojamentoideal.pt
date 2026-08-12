@@ -1,7 +1,7 @@
 import "server-only";
 
 import { getDb, orderInvoice } from "@workspace/db";
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray } from "@workspace/db/query";
 
 export function isTrustedInvoiceDocumentUrl(value: string): boolean {
 	try {

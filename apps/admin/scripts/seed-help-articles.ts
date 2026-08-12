@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { getDb, helpArticle } from "@workspace/db";
-import { eq } from "drizzle-orm";
+import { eq } from "@workspace/db/query";
 
 /**
  * Deploy-time seed: guarantees the initial help-center guides exist. Runs

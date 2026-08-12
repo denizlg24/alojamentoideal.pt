@@ -11,6 +11,10 @@
 		"./schema": {
 			"types": "./src/schema.ts",
 			"default": "./src/schema.ts"
+		},
+		"./query": {
+			"types": "./src/query.ts",
+			"default": "./src/query.ts"
 		}
 	},
 	"scripts": {

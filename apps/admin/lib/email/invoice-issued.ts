@@ -1,6 +1,6 @@
 import { escapeHtml, getEmailSender } from "@workspace/auth";
 import { getDb, order, orderContact } from "@workspace/db";
-import { eq } from "drizzle-orm";
+import { eq } from "@workspace/db/query";
 
 const MAX_INVOICE_BYTES = 10 * 1024 * 1024;
 const DOWNLOAD_RETRY_DELAYS_MS = [2_000, 4_000, 8_000];

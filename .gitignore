@@ -46,6 +46,9 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 
+.env.admin
+.env.web
+
 
 
 # Hostify shape-dump diagnostic output

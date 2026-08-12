@@ -41,7 +41,7 @@ import { getRedis } from "@workspace/core/redis";
 import { getRuntimeSettings } from "@workspace/core/settings";
 import type { AppliedDiscountSnapshot } from "@workspace/db";
 import { getDb, order } from "@workspace/db";
-import { eq } from "drizzle-orm";
+import { eq } from "@workspace/db/query";
 import { createPusherRealtimePublisher } from "./realtime";
 
 export const HOSTIFY_PROVIDER = "hostify";

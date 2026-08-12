@@ -1,5 +1,5 @@
 import { getDb, providerSyncRun, providerSyncState } from "@workspace/db";
-import { desc } from "drizzle-orm";
+import { desc } from "@workspace/db/query";
 
 /** Summary of the most recent run for a job, counters folded to one entity. */
 export interface SyncJobRun {

@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { account, getDb, user } from "@workspace/db";
+import { eq } from "@workspace/db/query";
 import { hashPassword } from "better-auth/crypto";
-import { eq } from "drizzle-orm";
 
 /**
  * Deploy-time seed: guarantees the account behind ROOT_ADMIN_EMAIL exists and

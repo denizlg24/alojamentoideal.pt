@@ -5,7 +5,7 @@ import {
 	orderItem,
 	providerBooking,
 } from "@workspace/db";
-import { and, desc, eq, ilike, or, type SQL, sql } from "drizzle-orm";
+import { and, desc, eq, ilike, or, type SQL, sql } from "@workspace/db/query";
 
 export const ORDER_STATUSES = [
 	"draft",
