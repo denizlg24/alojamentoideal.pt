@@ -3,6 +3,7 @@
 import "leaflet/dist/leaflet.css";
 import L from "leaflet";
 import { useEffect, useRef, useState } from "react";
+import { CARTO_TILE_ATTRIBUTION, getCartoTileUrl } from "@/lib/catalog/maps";
 
 /**
  * Single-marker Leaflet map for the listing's "Where you'll be" section. Touches
@@ -33,13 +34,9 @@ export function ListingMap({
 			zoom: 14,
 		});
 
-		L.tileLayer(
-			"https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png",
-			{
-				attribution:
-					'&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
-			},
-		).addTo(map);
+		L.tileLayer(getCartoTileUrl(), {
+			attribution: CARTO_TILE_ATTRIBUTION,
+		}).addTo(map);
 
 		L.marker([latitude, longitude], {
 			icon: L.divIcon({

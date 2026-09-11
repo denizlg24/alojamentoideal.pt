@@ -6,6 +6,7 @@ import type { CatalogListingSummaryDto } from "@workspace/core/catalog";
 import L from "leaflet";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { DEFAULT_MAP_ZOOM, PRESET_MAP_ZOOM } from "@/lib/catalog/locations";
+import { CARTO_TILE_ATTRIBUTION, getCartoTileUrl } from "@/lib/catalog/maps";
 import {
 	type ListingCardPrice,
 	type ListingPriceDisplay,
@@ -286,13 +287,9 @@ export function ListingsMap({
 		});
 		const layer = L.layerGroup().addTo(map);
 
-		L.tileLayer(
-			"https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png",
-			{
-				attribution:
-					'&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
-			},
-		).addTo(map);
+		L.tileLayer(getCartoTileUrl(), {
+			attribution: CARTO_TILE_ATTRIBUTION,
+		}).addTo(map);
 
 		const handle = { layer, map };
 		mapHandleRef.current = handle;
