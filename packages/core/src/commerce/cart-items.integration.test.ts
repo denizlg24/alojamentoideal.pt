@@ -241,4 +241,41 @@ describe.skipIf(!dbAvailable)("scoped promotion codes", () => {
 		expect(cart.appliedDiscount).toBeNull();
 		expect(cart.totalMinor).toBe(10_000);
 	});
+
+	test("checkout re-prices the cart when a code's scope changed since it was applied", async () => {
+		let scope: AppliedDiscountSnapshot["scope"] = "all";
+		const service = testService(async () => tenPercentOff(scope));
+		const { cartId, owner } = await createOwnedCart(service);
+		await service.addItem(cartId, activityAddBody("test-scope-drift"), owner);
+		const applied = await service.applyDiscount(cartId, { code: "TEN" }, owner);
+		expect(applied.cart.totalMinor).toBe(9000);
+
+		scope = "housing";
+		const attempt = service.createDraftOrder(
+			{
+				cartId,
+				contact: {
+					billingAddress: {},
+					companyName: null,
+					dateOfBirth: null,
+					email: "guest@example.com",
+					firstName: "Test",
+					isCompany: false,
+					language: "en",
+					lastName: "Guest",
+					name: "Test Guest",
+					notes: null,
+					phoneE164: "+351910000000",
+					taxNumber: null,
+				},
+			},
+			owner,
+		);
+		await expect(attempt).rejects.toMatchObject({ code: "cart_changed" });
+
+		const { cart } = await service.getCart(cartId, owner);
+		expect(cart.appliedDiscount?.scope).toBe("housing");
+		expect(cart.discountMinor).toBe(0);
+		expect(cart.totalMinor).toBe(10_000);
+	});
 });

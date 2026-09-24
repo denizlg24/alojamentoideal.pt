@@ -37,6 +37,7 @@ export type PromotionCodeBlocker =
 	| "first_time_only"
 	| "minimum_amount"
 	| "product_restricted"
+	| "redemption_limit"
 	| "unknown_scope"
 	| "unsupported_code";
 
@@ -82,6 +83,14 @@ export function promotionCodeBlockers(
 	}
 	if ((coupon?.applies_to?.products?.length ?? 0) > 0) {
 		blockers.push("product_restricted");
+	}
+	// Stripe only counts redemptions it performs itself, so a limit would
+	// never be reached here.
+	if (
+		promotionCode.max_redemptions != null ||
+		coupon?.max_redemptions != null
+	) {
+		blockers.push("redemption_limit");
 	}
 	if (!readPromotionCodeScope(promotionCode.metadata)) {
 		blockers.push("unknown_scope");

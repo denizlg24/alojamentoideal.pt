@@ -4887,7 +4887,9 @@ export class CommerceService {
 	 * Re-resolves the cart's applied coupon against the provider before checkout,
 	 * mirroring quote revalidation, so an expired/deactivated code cannot be
 	 * charged. Returns the freshly resolved snapshot, or null when no discount is
-	 * applied. Throws `discount_invalid` (409) if the code is no longer valid.
+	 * applied. Throws `discount_invalid` (409) if the code is no longer valid, and
+	 * `cart_changed` (409) after re-pricing the cart when the code's scope changed
+	 * since it was applied, so the guest never pays a total they were not shown.
 	 */
 	async #revalidateCartDiscount(
 		cartId: string,
@@ -4913,6 +4915,23 @@ export class CommerceService {
 			throw new CommerceError(
 				"discount_invalid",
 				"This promotion code is no longer valid.",
+				409,
+			);
+		}
+
+		if (discountScopeOf(resolved) !== discountScopeOf(applied)) {
+			await this.#db.transaction(async (tx) => {
+				const now = new Date();
+				await this.#ensureMutableCart(tx, cartId, now, { forUpdate: true });
+				await tx
+					.update(cartTable)
+					.set({ appliedDiscount: resolved, updatedAt: now })
+					.where(eq(cartTable.id, cartId));
+				await this.#recalculateCartTotals(tx, cartId, now);
+			});
+			throw new CommerceError(
+				"cart_changed",
+				"This promotion code now applies to different items. Please review the updated total.",
 				409,
 			);
 		}

@@ -117,6 +117,23 @@ describe("promotionCodeBlockers", () => {
 		]);
 	});
 
+	test("flags redemption limits checkout cannot enforce", () => {
+		expect(
+			promotionCodeBlockers(promotionCode({ max_redemptions: 50 }), NOW),
+		).toEqual(["redemption_limit"]);
+		expect(
+			promotionCodeBlockers(
+				promotionCode({
+					promotion: {
+						coupon: coupon({ max_redemptions: 10 }),
+						type: "coupon",
+					},
+				}),
+				NOW,
+			),
+		).toEqual(["redemption_limit"]);
+	});
+
 	test("flags an invalid or unexpanded coupon", () => {
 		expect(
 			promotionCodeBlockers(

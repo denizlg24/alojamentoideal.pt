@@ -179,6 +179,8 @@ export const BLOCKER_REASONS: Record<PromotionCodeBlocker, string> = {
 		"Uses a Stripe minimum order amount, which checkout cannot check.",
 	product_restricted:
 		"The coupon is limited to Stripe products; checkout does not use Stripe products.",
+	redemption_limit:
+		"Has a Stripe redemption limit, which checkout cannot enforce. Create a code without one.",
 	unknown_scope:
 		"Its restriction is unreadable. Pick Homes, Activities or Both to fix it.",
 	unsupported_code: "Contains characters guests cannot enter at checkout.",
