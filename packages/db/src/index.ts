@@ -18,6 +18,7 @@ export type {
 	ConversationMessageDeliveryStatus,
 	ConversationMessageSenderType,
 	ConversationStatus,
+	DiscountScope,
 	GuestSubmissionJobStatus,
 	IdentityDocumentSource,
 	IdentityDocumentStatus,

@@ -67,6 +67,12 @@ import {
 	type ReconcileConversationsSummary,
 	trimMessageBody,
 } from "./conversations";
+import {
+	discountCoversActivities,
+	discountCoversHousing,
+	discountScopeOf,
+	eligibleDiscountBaseMinor,
+} from "./discount-scope";
 import { CommerceError, invalidRequest } from "./errors";
 import { hashIdempotencyRequest, idempotencyExpiresAt } from "./idempotency";
 import {
@@ -108,7 +114,7 @@ import {
 	identityStatusToBookingGuestStatus,
 } from "./order-guests";
 import {
-	allocateDiscountByHousingBase,
+	allocateDiscountByBase,
 	buildActivityDraftOrderRows,
 	buildDiscountChargeRow,
 	buildDraftOrderRows,
@@ -4856,7 +4862,23 @@ export class CommerceService {
 			.update(cartTable)
 			.set({ appliedDiscount: discount, updatedAt: now })
 			.where(eq(cartTable.id, cartId));
-		await this.#recalculateCartTotals(tx, cartId, now);
+		const totals = await this.#recalculateCartTotals(tx, cartId, now);
+
+		const scope = discountScopeOf(discount);
+		if (
+			totals.validItemCount > 0 &&
+			eligibleDiscountBaseMinor(scope, totals) === 0
+		) {
+			throw new CommerceError(
+				"discount_invalid",
+				scope === "housing"
+					? "This promotion code only applies to homes."
+					: scope === "activities"
+						? "This promotion code only applies to activities."
+						: "This promotion code cannot be applied to this cart.",
+				422,
+			);
+		}
 
 		return { cart: await this.#cartDto(tx, cartId, now) };
 	}
@@ -4957,16 +4979,30 @@ export class CommerceService {
 			);
 		}
 
-		const housingBases = orderSources.map((source) =>
-			source.type === "accommodation" ? source.quote.housingFeeMinor : 0,
-		);
 		const discount = revalidatedDiscount.resolved;
-		const housingBaseTotal = housingBases.reduce((sum, base) => sum + base, 0);
+		const discountScope = discount ? discountScopeOf(discount) : null;
+		const discountBases = orderSources.map((source) => {
+			if (!discountScope) {
+				return 0;
+			}
+			if (source.type === "activity") {
+				return discountCoversActivities(discountScope)
+					? source.quote.subtotalMinor
+					: 0;
+			}
+			return discountCoversHousing(discountScope)
+				? source.quote.housingFeeMinor
+				: 0;
+		});
+		const eligibleBaseTotal = discountBases.reduce(
+			(sum, base) => sum + base,
+			0,
+		);
 		const discountMinor = discount
-			? computeDiscountMinor(discount, housingBaseTotal, totals.currency)
+			? computeDiscountMinor(discount, eligibleBaseTotal, totals.currency)
 			: 0;
-		const discountAllocations = allocateDiscountByHousingBase(
-			housingBases,
+		const discountAllocations = allocateDiscountByBase(
+			discountBases,
 			discountMinor,
 		);
 
@@ -5019,15 +5055,28 @@ export class CommerceService {
 		);
 
 		for (const [index, source] of orderSources.entries()) {
+			const itemDiscountMinor = discountAllocations[index] ?? 0;
+
 			if (source.type === "activity") {
 				const rows = buildActivityDraftOrderRows(source, input.contact);
 				const orderItemId = crypto.randomUUID();
+				const charges =
+					discount && itemDiscountMinor > 0
+						? [
+								...rows.charges,
+								buildDiscountChargeRow(
+									discount,
+									itemDiscountMinor,
+									rows.charges.length + 1,
+								),
+							]
+						: rows.charges;
 
 				await tx.insert(orderItemTable).values({
 					catalogSnapshot: rows.item.catalogSnapshot,
 					createdAt: now,
 					currency: rows.item.currency,
-					discountMinor: 0,
+					discountMinor: itemDiscountMinor,
 					id: orderItemId,
 					imageUrlSnapshot: rows.item.imageUrlSnapshot,
 					orderId,
@@ -5038,7 +5087,7 @@ export class CommerceService {
 					subtotalMinor: rows.item.subtotalMinor,
 					taxMinor: rows.item.taxMinor,
 					titleSnapshot: rows.item.titleSnapshot,
-					totalMinor: rows.item.totalMinor,
+					totalMinor: rows.item.totalMinor - itemDiscountMinor,
 					type: rows.item.type,
 					updatedAt: now,
 				});
@@ -5086,9 +5135,9 @@ export class CommerceService {
 					updatedAt: now,
 				});
 
-				if (rows.charges.length > 0) {
+				if (charges.length > 0) {
 					await tx.insert(orderItemChargeTable).values(
-						rows.charges.map((charge) => ({
+						charges.map((charge) => ({
 							createdAt: now,
 							grossMinor: charge.grossMinor,
 							id: crypto.randomUUID(),
@@ -5111,7 +5160,6 @@ export class CommerceService {
 
 			const rows = buildDraftOrderRows(source, input.contact);
 			const orderItemId = crypto.randomUUID();
-			const itemDiscountMinor = discountAllocations[index] ?? 0;
 			const charges =
 				discount && itemDiscountMinor > 0
 					? [
@@ -5748,6 +5796,10 @@ export class CommerceService {
 			rows.map((row) =>
 				row.itemType === "activity"
 					? {
+							activityBaseMinor: requiredRowValue(
+								row.activitySubtotalMinor,
+								"subtotal",
+							),
 							currency: requiredRowValue(row.activityCurrency, "currency"),
 							housingFeeMinor: 0,
 							subtotalMinor: requiredRowValue(
@@ -5790,7 +5842,10 @@ export class CommerceService {
 		const discountMinor = cartRow?.appliedDiscount
 			? computeDiscountMinor(
 					cartRow.appliedDiscount,
-					totals.housingBaseMinor,
+					eligibleDiscountBaseMinor(
+						discountScopeOf(cartRow.appliedDiscount),
+						totals,
+					),
 					totals.currency,
 				)
 			: 0;
@@ -8540,6 +8595,7 @@ function discountsEqual(
 		first.currency === second.currency &&
 		first.percentBasisPoints === second.percentBasisPoints &&
 		first.promotionCode === second.promotionCode &&
+		discountScopeOf(first) === discountScopeOf(second) &&
 		first.source === second.source &&
 		first.type === second.type
 	);

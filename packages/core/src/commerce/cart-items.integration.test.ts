@@ -1,5 +1,6 @@
 import { afterAll, describe, expect, test } from "bun:test";
 import {
+	type AppliedDiscountSnapshot,
 	activityQuoteSnapshot,
 	apiIdempotencyKey,
 	cart as cartTable,
@@ -7,6 +8,7 @@ import {
 	getPool,
 } from "@workspace/db";
 import { eq, like, sql } from "@workspace/db/query";
+import { CommerceError } from "./errors";
 import type { AddActivityCartItemBody } from "./schemas";
 import { CommerceService } from "./service";
 import type { CartOwner } from "./types";
@@ -33,7 +35,11 @@ const UNIT_PRICE_MINOR = 5_000;
 
 const createdCartIds: string[] = [];
 
-function testService(): CommerceService {
+function testService(
+	resolveDiscount: (
+		code: string,
+	) => Promise<AppliedDiscountSnapshot | null> = async () => null,
+): CommerceService {
 	return new CommerceService({
 		accountId: "test-account",
 		currency: "EUR",
@@ -71,7 +77,7 @@ function testService(): CommerceService {
 			};
 		},
 		quoteTtlSeconds: 900,
-		resolveDiscount: async () => null,
+		resolveDiscount,
 	});
 }
 
@@ -182,5 +188,57 @@ describe.skipIf(!dbAvailable)("cart item re-add after removal", () => {
 		const { cart } = await service.getCart(cartId, owner);
 		expect(cart.items).toHaveLength(0);
 		expect(cart.totalMinor).toBe(0);
+	});
+});
+
+function tenPercentOff(
+	scope: AppliedDiscountSnapshot["scope"],
+): AppliedDiscountSnapshot {
+	return {
+		amountMinor: null,
+		couponId: "co_test",
+		currency: null,
+		percentBasisPoints: 1000,
+		promotionCode: "TEN",
+		scope,
+		source: "stripe",
+		type: "percentage",
+	};
+}
+
+describe.skipIf(!dbAvailable)("scoped promotion codes", () => {
+	test("an activity-scoped code discounts activity items", async () => {
+		const service = testService(async () => tenPercentOff("activities"));
+		const { cartId, owner } = await createOwnedCart(service);
+		await service.addItem(cartId, activityAddBody("test-scope-add"), owner);
+
+		const { cart } = await service.applyDiscount(
+			cartId,
+			{ code: "TEN" },
+			owner,
+		);
+		expect(cart.discountMinor).toBe(1000);
+		expect(cart.totalMinor).toBe(9000);
+		expect(cart.appliedDiscount?.scope).toBe("activities");
+	});
+
+	test("a housing-only code is refused on a cart of activities", async () => {
+		const service = testService(async () => tenPercentOff("housing"));
+		const { cartId, owner } = await createOwnedCart(service);
+		await service.addItem(
+			cartId,
+			activityAddBody("test-scope-add-housing"),
+			owner,
+		);
+
+		const attempt = service.applyDiscount(cartId, { code: "TEN" }, owner);
+		await expect(attempt).rejects.toBeInstanceOf(CommerceError);
+		await expect(attempt).rejects.toThrow(
+			"This promotion code only applies to homes.",
+		);
+
+		const { cart } = await service.getCart(cartId, owner);
+		expect(cart.appliedDiscount).toBeNull();
+		expect(cart.totalMinor).toBe(10_000);
 	});
 });

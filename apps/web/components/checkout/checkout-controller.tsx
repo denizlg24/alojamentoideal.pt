@@ -1565,6 +1565,7 @@ export function CheckoutController({ seed }: CheckoutControllerProps) {
 				phase === "ready" && items.length > 0 ? (
 					<DiscountCodeForm
 						appliedCode={cart?.appliedDiscount?.promotionCode ?? null}
+						appliedScope={cart?.appliedDiscount?.scope ?? null}
 						error={discountError}
 						onApply={handleApplyDiscount}
 						onRemove={handleRemoveDiscount}

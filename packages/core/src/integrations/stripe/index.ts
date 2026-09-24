@@ -22,6 +22,22 @@ export {
 	type StripePaymentMethodSummary,
 } from "./payment-intents";
 export {
+	couponDiscount,
+	createPromotionCode,
+	DISCOUNT_SCOPE_METADATA_KEY,
+	discountScopeSchema,
+	listPromotionCodes,
+	type PromotionCodeBlocker,
+	PromotionCodeConflictError,
+	type PromotionCodeInput,
+	type PromotionCodeSummary,
+	type PromotionDiscount,
+	promotionCodeInputSchema,
+	readPromotionCodeScope,
+	setPromotionCodeActive,
+	setPromotionCodeScope,
+} from "./promotions";
+export {
 	createRefund,
 	type RefundRequest,
 	type RefundResult,

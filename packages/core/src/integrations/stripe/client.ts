@@ -1,5 +1,13 @@
 import type { AppliedDiscountSnapshot } from "@workspace/db";
 import Stripe from "stripe";
+import {
+	couponDiscount,
+	expandedCoupon,
+	PROMOTION_CODE_EXPAND,
+	PROMOTION_CODE_PATTERN,
+	promotionCodeBlockers,
+	readPromotionCodeScope,
+} from "./promotions";
 
 export class StripeConfigurationError extends Error {
 	constructor(message: string) {
@@ -31,22 +39,24 @@ export function createStripeClientFromEnv(
  * Resolves a customer-entered promotion code into a normalized discount
  * snapshot. Stripe is authoritative: the percentage/amount is read from the
  * coupon, never trusted from the client. Returns `null` when the code is
- * unknown, inactive, or its coupon is no longer valid; genuine Stripe/network
- * failures propagate so callers can distinguish "invalid" from "unavailable".
+ * unknown, inactive, expired, or carries a rule checkout cannot honour; genuine
+ * Stripe/network failures propagate so callers can distinguish "invalid" from
+ * "unavailable".
  */
 export async function resolvePromotionCode(
 	stripe: Stripe,
 	code: string,
+	now: Date = new Date(),
 ): Promise<AppliedDiscountSnapshot | null> {
 	const normalizedCode = code.trim();
-	if (!/^[A-Za-z0-9-]{1,100}$/.test(normalizedCode)) {
+	if (!PROMOTION_CODE_PATTERN.test(normalizedCode)) {
 		return null;
 	}
 
 	const promotionCodes = await stripe.promotionCodes.list({
 		active: true,
 		code: normalizedCode,
-		expand: ["data.promotion.coupon", "data.promotion.coupon.applies_to"],
+		expand: PROMOTION_CODE_EXPAND,
 		limit: 1,
 	});
 
@@ -55,41 +65,39 @@ export async function resolvePromotionCode(
 		return null;
 	}
 
-	const coupon = promotionCode.promotion?.coupon;
 	// Unexpanded (string id) or missing coupon means we cannot trust the value.
-	if (!coupon || typeof coupon === "string" || !coupon.valid) {
-		return null;
-	}
-
-	const restrictions = promotionCode.restrictions;
+	const coupon = expandedCoupon(promotionCode);
+	const scope = readPromotionCodeScope(promotionCode.metadata);
 	if (
-		promotionCode.customer ||
-		restrictions?.first_time_transaction ||
-		restrictions?.minimum_amount != null ||
-		(coupon.applies_to?.products?.length ?? 0) > 0
+		!coupon ||
+		!scope ||
+		promotionCodeBlockers(promotionCode, now).length > 0
 	) {
 		return null;
 	}
 
-	if (coupon.percent_off != null) {
+	const discount = couponDiscount(coupon);
+	if (discount?.type === "percentage") {
 		return {
 			amountMinor: null,
 			couponId: coupon.id,
 			currency: null,
-			percentBasisPoints: Math.round(coupon.percent_off * 100),
+			percentBasisPoints: Math.round(discount.percentOff * 100),
 			promotionCode: promotionCode.code,
+			scope,
 			source: "stripe",
 			type: "percentage",
 		};
 	}
 
-	if (coupon.amount_off != null && coupon.currency) {
+	if (discount?.type === "fixed") {
 		return {
-			amountMinor: coupon.amount_off,
+			amountMinor: discount.amountMinor,
 			couponId: coupon.id,
-			currency: coupon.currency.toUpperCase(),
+			currency: discount.currency,
 			percentBasisPoints: null,
 			promotionCode: promotionCode.code,
+			scope,
 			source: "stripe",
 			type: "fixed",
 		};

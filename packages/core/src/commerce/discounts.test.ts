@@ -5,7 +5,7 @@ import type {
 } from "@workspace/db";
 import { feeLineNetMinor, housingFeeMinor } from "./money";
 import {
-	allocateDiscountByHousingBase,
+	allocateDiscountByBase,
 	buildDiscountChargeRow,
 	generatePublicOrderReference,
 } from "./orders";
@@ -87,32 +87,34 @@ describe("computeDiscountMinor", () => {
 	});
 });
 
-describe("allocateDiscountByHousingBase", () => {
+describe("allocateDiscountByBase", () => {
 	test("splits proportionally with the remainder on the last item", () => {
-		const allocations = allocateDiscountByHousingBase(
-			[10_000, 20_000, 30_000],
-			1000,
-		);
+		const allocations = allocateDiscountByBase([10_000, 20_000, 30_000], 1000);
 		expect(allocations).toEqual([166, 333, 501]);
 		expect(allocations.reduce((sum, value) => sum + value, 0)).toBe(1000);
 	});
 
 	test("assigns the whole discount to a single item", () => {
-		expect(allocateDiscountByHousingBase([5000], 999)).toEqual([999]);
+		expect(allocateDiscountByBase([5000], 999)).toEqual([999]);
 	});
 
 	test("returns zeros when there is no discount", () => {
-		expect(allocateDiscountByHousingBase([10_000, 20_000], 0)).toEqual([0, 0]);
+		expect(allocateDiscountByBase([10_000, 20_000], 0)).toEqual([0, 0]);
 	});
 
 	test("returns zeros when the housing base is zero", () => {
-		expect(allocateDiscountByHousingBase([0, 0], 500)).toEqual([0, 0]);
+		expect(allocateDiscountByBase([0, 0], 500)).toEqual([0, 0]);
 	});
 
 	test("always sums back to the total discount", () => {
 		const bases = [3333, 1, 9999, 42];
-		const allocations = allocateDiscountByHousingBase(bases, 777);
+		const allocations = allocateDiscountByBase(bases, 777);
 		expect(allocations.reduce((sum, value) => sum + value, 0)).toBe(777);
+	});
+
+	test("never gives the rounding remainder to an ineligible item", () => {
+		expect(allocateDiscountByBase([1, 1, 1, 0], 2)).toEqual([0, 0, 2, 0]);
+		expect(allocateDiscountByBase([0, 5000, 0], 999)).toEqual([0, 999, 0]);
 	});
 });
 
