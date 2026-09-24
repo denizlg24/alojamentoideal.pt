@@ -50,9 +50,8 @@ describe("BokunActivityCacheSync.pollActivities", () => {
 			0, 1,
 		]);
 		expect(repository.disabledInputs[0]?.keepExternalIds).toEqual(["1", "2"]);
-		expect(
-			(repository.upserts[0]?.raw as Record<string, unknown>).secretToken,
-		).toBeUndefined();
+		expect(repository.upserts[0]?.raw).toBeObject();
+		expect(repository.upserts[0]?.raw).not.toHaveProperty("secretToken");
 		expect(repository.state.status).toBe("complete");
 		expect(repository.state.versionHash).toBe(ACTIVITY_SYNC_VERSION);
 	});

@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
+import type { IdentityDocumentStatus } from "@workspace/db";
 import type Stripe from "stripe";
 import type { VerifiedIdentityDocumentFields } from "../../account/types";
 
@@ -12,7 +13,18 @@ export interface IdentityVerificationSnapshot {
 	id: string;
 	clientSecret: string | null;
 	url: string | null;
-	status: Stripe.Identity.VerificationSession["status"];
+	status: IdentityDocumentStatus;
+}
+
+function isIdentityDocumentStatus(
+	status: string,
+): status is IdentityDocumentStatus {
+	return (
+		status === "canceled" ||
+		status === "processing" ||
+		status === "requires_input" ||
+		status === "verified"
+	);
 }
 
 const STRIPE_IDENTITY_IDEMPOTENCY_PREFIX = "ai_idv";
@@ -62,7 +74,11 @@ function snapshot(
 		id: session.id,
 		clientSecret: session.client_secret ?? null,
 		url: session.url ?? null,
-		status: session.status,
+		// Stripe enums are open; an unrecognised future status is treated as
+		// in-flight until the verification webhook settles it.
+		status: isIdentityDocumentStatus(session.status)
+			? session.status
+			: "processing",
 	};
 }
 
