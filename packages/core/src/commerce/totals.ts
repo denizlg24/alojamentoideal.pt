@@ -2,6 +2,8 @@ import type { AppliedDiscountSnapshot } from "@workspace/db";
 import { CommerceError } from "./errors";
 
 export interface QuoteTotalsInput {
+	/** Pre-tax activity price; zero for stays. */
+	activityBaseMinor?: number;
 	currency: string;
 	/** Pre-tax housing base; null on legacy snapshots predating the column. */
 	housingFeeMinor?: number | null;
@@ -12,8 +14,10 @@ export interface QuoteTotalsInput {
 }
 
 export interface CartTotals {
+	/** Aggregate pre-tax activity price across valid items. */
+	activityBaseMinor: number;
 	currency: string;
-	/** Aggregate pre-tax housing base across valid items. The discountable base. */
+	/** Aggregate pre-tax housing base across valid items. */
 	housingBaseMinor: number;
 	subtotalMinor: number;
 	taxMinor: number;
@@ -27,6 +31,7 @@ export function sumCartTotals(
 	defaultCurrency: string,
 ): CartTotals {
 	const totals: CartTotals = {
+		activityBaseMinor: 0,
 		currency: defaultCurrency,
 		housingBaseMinor: 0,
 		subtotalMinor: 0,
@@ -52,6 +57,7 @@ export function sumCartTotals(
 			);
 		}
 
+		totals.activityBaseMinor += item.activityBaseMinor ?? 0;
 		totals.housingBaseMinor += item.housingFeeMinor ?? 0;
 		totals.subtotalMinor += item.subtotalMinor;
 		totals.taxMinor += item.taxMinor;
@@ -63,23 +69,23 @@ export function sumCartTotals(
 }
 
 /**
- * Resolves a coupon to a discount amount in minor units, applied to the housing
- * base only and capped at it (a discount never touches fees or tax). Percentage
- * coupons use basis points; fixed coupons must match the cart currency or they
- * contribute nothing.
+ * Resolves a coupon to a discount amount in minor units, applied to the base
+ * its scope makes eligible (see `eligibleDiscountBaseMinor`) and capped at it,
+ * so a discount never touches fees or tax. Percentage coupons use basis points;
+ * fixed coupons must match the cart currency or they contribute nothing.
  */
 export function computeDiscountMinor(
 	discount: AppliedDiscountSnapshot,
-	housingBaseMinor: number,
+	eligibleBaseMinor: number,
 	currency: string,
 ): number {
-	if (housingBaseMinor <= 0) {
+	if (eligibleBaseMinor <= 0) {
 		return 0;
 	}
 
 	let raw: number;
 	if (discount.type === "percentage") {
-		raw = Math.round((housingBaseMinor * discount.percentBasisPoints) / 10000);
+		raw = Math.round((eligibleBaseMinor * discount.percentBasisPoints) / 10000);
 	} else {
 		if (discount.currency.toUpperCase() !== currency.toUpperCase()) {
 			return 0;
@@ -87,5 +93,5 @@ export function computeDiscountMinor(
 		raw = discount.amountMinor;
 	}
 
-	return Math.max(0, Math.min(raw, housingBaseMinor));
+	return Math.max(0, Math.min(raw, eligibleBaseMinor));
 }

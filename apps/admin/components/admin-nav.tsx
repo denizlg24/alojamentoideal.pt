@@ -18,6 +18,7 @@ import {
 	RefreshCcw,
 	Settings,
 	Star,
+	TicketPercent,
 	Users,
 } from "lucide-react";
 import Link from "next/link";
@@ -25,6 +26,7 @@ import { usePathname } from "next/navigation";
 
 const links = [
 	{ href: "/orders", icon: ReceiptText, label: "Orders" },
+	{ href: "/promotions", icon: TicketPercent, label: "Promotions" },
 	{ href: "/reviews", icon: Star, label: "Reviews" },
 	{ href: "/contacts", icon: Mail, label: "Contacts" },
 	{ href: "/owner-contacts", icon: ContactRound, label: "Owner contacts" },

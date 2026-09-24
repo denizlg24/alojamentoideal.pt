@@ -197,27 +197,33 @@ export function buildDiscountChargeRow(
 
 /**
  * Splits an order-level discount across items in proportion to each item's
- * housing base, assigning the rounding remainder to the last item so the parts
- * sum back to exactly `totalDiscountMinor`.
+ * discountable base (zero for items outside the coupon's scope), assigning the
+ * rounding remainder to the last item with a base so the parts sum back to
+ * exactly `totalDiscountMinor` and ineligible items never receive any.
  */
-export function allocateDiscountByHousingBase(
-	housingBases: number[],
+export function allocateDiscountByBase(
+	bases: number[],
 	totalDiscountMinor: number,
 ): number[] {
-	const allocations = housingBases.map(() => 0);
-	const totalBase = housingBases.reduce((sum, base) => sum + base, 0);
+	const allocations = bases.map(() => 0);
+	const totalBase = bases.reduce((sum, base) => sum + base, 0);
 	if (totalDiscountMinor <= 0 || totalBase <= 0) {
 		return allocations;
 	}
 
+	let lastEligible = bases.length - 1;
+	while ((bases[lastEligible] ?? 0) <= 0) {
+		lastEligible -= 1;
+	}
 	let allocated = 0;
-	for (let index = 0; index < housingBases.length - 1; index += 1) {
-		const base = housingBases[index] ?? 0;
-		const share = Math.floor((totalDiscountMinor * base) / totalBase);
+	for (let index = 0; index < lastEligible; index += 1) {
+		const share = Math.floor(
+			(totalDiscountMinor * (bases[index] ?? 0)) / totalBase,
+		);
 		allocations[index] = share;
 		allocated += share;
 	}
-	allocations[housingBases.length - 1] = totalDiscountMinor - allocated;
+	allocations[lastEligible] = totalDiscountMinor - allocated;
 
 	return allocations;
 }

@@ -1,11 +1,13 @@
 "use client";
 
+import type { DiscountScope } from "@workspace/db";
 import { Button } from "@workspace/ui/components/button";
 import { Input } from "@workspace/ui/components/input";
 import { useState } from "react";
 
 interface DiscountCodeFormProps {
 	appliedCode: string | null;
+	appliedScope: DiscountScope | null;
 	error: string | null;
 	onApply: (code: string) => void;
 	onRemove: () => void;
@@ -13,8 +15,15 @@ interface DiscountCodeFormProps {
 }
 
 /** Applies/removes a Stripe promotion code via the cart discount route. */
+const SCOPE_SUFFIX: Record<DiscountScope, string> = {
+	activities: " to activities",
+	all: "",
+	housing: " to homes",
+};
+
 export function DiscountCodeForm({
 	appliedCode,
+	appliedScope,
 	error,
 	onApply,
 	onRemove,
@@ -27,6 +36,7 @@ export function DiscountCodeForm({
 			<div className="flex items-center justify-between gap-2 rounded-xl border border-emerald-500/30 bg-emerald-50 px-3 py-2 text-sm dark:bg-emerald-950">
 				<span className="text-emerald-800 dark:text-emerald-200">
 					Promo code <span className="font-medium">{appliedCode}</span> applied
+					{appliedScope ? SCOPE_SUFFIX[appliedScope] : ""}
 				</span>
 				<Button disabled={pending} onClick={onRemove} size="sm" variant="ghost">
 					Remove

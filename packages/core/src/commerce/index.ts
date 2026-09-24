@@ -1,6 +1,7 @@
 export * from "./cancellation-policy";
 export * from "./connected-account-transfers";
 export * from "./conversations";
+export * from "./discount-scope";
 export * from "./errors";
 export * from "./idempotency";
 export * from "./money";

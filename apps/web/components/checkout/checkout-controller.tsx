@@ -1023,11 +1023,13 @@ export function CheckoutController({ seed }: CheckoutControllerProps) {
 				return;
 			}
 			// The cached quote no longer holds: revalidation at draft-order creation
-			// found the dates/price changed. The cart is still mutable, so re-run
-			// validation to flag the affected stays.
+			// found the dates/price changed, or the promo code's coverage changed and
+			// the cart was re-priced. The cart is still mutable, so re-run
+			// validation to flag the affected stays and show the new total.
 			if (
 				err.code === "quote_revalidation_failed" ||
-				err.code === "dates_unavailable"
+				err.code === "dates_unavailable" ||
+				err.code === "cart_changed"
 			) {
 				trackCheckoutEvent("checkout_validation_failed", {
 					itemCount: items.length,
@@ -1565,6 +1567,7 @@ export function CheckoutController({ seed }: CheckoutControllerProps) {
 				phase === "ready" && items.length > 0 ? (
 					<DiscountCodeForm
 						appliedCode={cart?.appliedDiscount?.promotionCode ?? null}
+						appliedScope={cart?.appliedDiscount?.scope ?? null}
 						error={discountError}
 						onApply={handleApplyDiscount}
 						onRemove={handleRemoveDiscount}

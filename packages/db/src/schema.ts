@@ -833,6 +833,9 @@ export interface OrderBillingAddressSnapshot {
 	[key: string]: unknown;
 }
 
+/** Which cart lines a promotion code discounts: homes, activities, or both. */
+export type DiscountScope = "housing" | "activities" | "all";
+
 /**
  * Provenance and resolved value of a Stripe coupon currently applied to a cart
  * or frozen onto an order. Stripe owns the coupon/promotion-code rules; this
@@ -845,6 +848,8 @@ export type AppliedDiscountSnapshot =
 			couponId: string;
 			/** The promotion code the customer entered (null for bare coupon ids). */
 			promotionCode: string | null;
+			/** Absent on snapshots that predate scoped codes; read as `"all"`. */
+			scope?: DiscountScope;
 			type: "percentage";
 			/** 1000 = 10%. */
 			percentBasisPoints: number;
@@ -856,6 +861,8 @@ export type AppliedDiscountSnapshot =
 			couponId: string;
 			/** The promotion code the customer entered (null for bare coupon ids). */
 			promotionCode: string | null;
+			/** Absent on snapshots that predate scoped codes; read as `"all"`. */
+			scope?: DiscountScope;
 			type: "fixed";
 			percentBasisPoints: null;
 			/** In cart currency minor units. */

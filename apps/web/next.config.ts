@@ -23,6 +23,8 @@ const nextConfig: NextConfig = {
 		// Postgres, so keep build fanout aligned with the DB build pool cap.
 		cpus: readPositiveInteger("NEXT_BUILD_WORKERS", 2),
 	},
+	// Self-contained server bundle for the Docker image (docker/next-app.Dockerfile).
+	output: process.env.NEXT_STANDALONE === "true" ? "standalone" : undefined,
 	images: {
 		// Listing/activity photos are served from the Hostify and Bokun CDNs.
 		remotePatterns: [

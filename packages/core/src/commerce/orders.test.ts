@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
-	allocateDiscountByHousingBase,
+	allocateDiscountByBase,
 	buildDraftOrderRows,
 	generatePublicOrderReference,
 } from "./orders";
@@ -369,9 +369,9 @@ describe("generatePublicOrderReference", () => {
 	});
 });
 
-describe("allocateDiscountByHousingBase", () => {
+describe("allocateDiscountByBase", () => {
 	test("keeps the final allocation non-negative when shares have fractions", () => {
-		const allocations = allocateDiscountByHousingBase([1, 1, 1], 2);
+		const allocations = allocateDiscountByBase([1, 1, 1], 2);
 
 		expect(allocations).toEqual([0, 0, 2]);
 		expect(allocations.reduce((sum, amount) => sum + amount, 0)).toBe(2);
