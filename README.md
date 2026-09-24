@@ -77,6 +77,19 @@ bun run dev
 
 The web app runs on port 3000 and the admin panel on port 3001. External integrations (Stripe, Hostify, Bokun, Hostkit) require API credentials configured in a root `.env` file.
 
+## Docker
+
+Each app has its own image (`apps/web/Dockerfile`, `apps/admin/Dockerfile`), built from the repository root as a standalone Next.js server and deployed on Forge. Forge picks the Dockerfile up when a target's framework is set to Dockerfile with no install, build or runtime overrides, and it hands the deployment environment to the build as the `forge-env` secret.
+
+To build one outside Forge, pass a file of shell-safe `KEY='value'` assignments under the same secret id:
+
+```bash
+docker buildx build -f apps/web/Dockerfile --secret id=forge-env,src=build.env -t alojamentoideal-web .
+docker run --env-file .env -p 3000:3000 alojamentoideal-web
+```
+
+The secret is only mounted while building. Like the previous build commands, the builds run database migrations (and, for admin, the root-admin and help-article seeds), and the web build prerenders the catalog, so the `DATABASE_URL` in that file must be reachable from the build. On Docker Desktop use `host.docker.internal` instead of `localhost`.
+
 ## Status
 
 Actively developed. The `docs/` directory tracks the migration roadmap from the legacy application and the design decisions behind each subsystem.
