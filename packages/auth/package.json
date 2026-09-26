@@ -39,6 +39,6 @@
 		"@types/react": "^19",
 		"@workspace/typescript-config": "workspace:*",
 		"react": "19.3.0",
-		"typescript": "^6"
+		"typescript": "^7"
 	}
 }
