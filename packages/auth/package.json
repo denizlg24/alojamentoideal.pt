@@ -21,8 +21,8 @@
 	"dependencies": {
 		"@workspace/db": "workspace:*",
 		"@workspace/emails": "workspace:*",
-		"better-auth": "^1.7.5",
-		"resend": "^6.28.1",
+		"better-auth": "^1.7.7",
+		"resend": "^6.31.0",
 		"zod": "^4.4.3"
 	},
 	"peerDependencies": {
