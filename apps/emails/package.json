@@ -12,7 +12,7 @@
 		"./package.json": "./package.json"
 	},
 	"dependencies": {
-		"@maizzle/framework": "6.1.7",
+		"@maizzle/framework": "6.2.1",
 		"@maizzle/tailwindcss": "1.5.6"
 	},
 	"devDependencies": {
