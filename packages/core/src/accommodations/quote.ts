@@ -108,8 +108,15 @@ export class AccommodationQuoteService {
 			start_date: input.dates.checkIn,
 		});
 		const price = response.price;
-		const fees = buildFeeLines(price);
-		const total = roundMoney(price.total);
+		const fees = buildFeeLines(price, input.dates.nights);
+		const taxTotal = sumLines(fees, isTaxLine);
+		const providerTaxTotal = roundMoney(
+			(price.fees ?? [])
+				.filter((fee) => fee.fee_type === "tax")
+				.reduce((sum, fee) => sum + (fee.total ?? 0), 0),
+		);
+		// Hostify's `total` still includes the uncapped tax; take the waived part off.
+		const total = roundMoney(price.total - (providerTaxTotal - taxTotal));
 
 		return {
 			adults: input.adults,
@@ -131,7 +138,7 @@ export class AccommodationQuoteService {
 			nights: input.dates.nights,
 			pets: input.pets,
 			symbol: price.symbol ?? price.unicode ?? null,
-			taxTotal: sumLines(fees, (fee) => fee.type === "tax"),
+			taxTotal,
 			total,
 			vatIncluded:
 				Math.round(
@@ -145,7 +152,7 @@ function quoteCacheKey(input: QuoteRequest): string {
 	return [
 		"accommodation",
 		"quote",
-		"v1",
+		"v2",
 		input.providerId ?? "default",
 		input.accountId ?? "default",
 		input.listingId,
@@ -159,9 +166,12 @@ function quoteCacheKey(input: QuoteRequest): string {
 	].join(":");
 }
 
-function buildFeeLines(price: HostifyListingPrice): AccommodationQuoteFee[] {
+function buildFeeLines(
+	price: HostifyListingPrice,
+	nights: number,
+): AccommodationQuoteFee[] {
 	const lines = (Array.isArray(price.fees) ? price.fees : [])
-		.map((fee) => toFeeLine(fee))
+		.map((fee) => toFeeLine(fee, nights))
 		.filter((line): line is AccommodationQuoteFee => line !== null);
 
 	// Some listings keep the cleaning fee out of the breakdown array and only on
@@ -186,14 +196,17 @@ function buildFeeLines(price: HostifyListingPrice): AccommodationQuoteFee[] {
 	return lines;
 }
 
-function toFeeLine(fee: HostifyListingPriceFee): AccommodationQuoteFee | null {
+function toFeeLine(
+	fee: HostifyListingPriceFee,
+	nights: number,
+): AccommodationQuoteFee | null {
 	const total = fee.total ?? 0;
 	const name = fee.fee_name ?? null;
 	if (name === null && total === 0) {
 		return null;
 	}
 
-	return {
+	const line: AccommodationQuoteFee = {
 		amount: fee.amount ?? null,
 		chargeLabel: replaceAdultWording(fee.charge_type_label ?? null),
 		inclusiveTax: fee.inclusive_tax ?? null,
@@ -203,6 +216,45 @@ function toFeeLine(fee: HostifyListingPriceFee): AccommodationQuoteFee | null {
 		total,
 		type: fee.fee_type ?? "fee",
 	};
+
+	return isUncappedNightlyTax(fee) ? capNightlyTax(line, nights) : line;
+}
+
+/** Municipal tourist tax is only charged for the first nights of a stay. */
+export const MUNICIPAL_TAX_MAX_NIGHTS = 7;
+
+/**
+ * Hostify bills the "City Tax" line `Per Adult / Night` across the whole stay
+ * with no `cap_length`. A fee that already carries a Hostify cap is left alone
+ * so the two caps never stack.
+ */
+function isUncappedNightlyTax(fee: HostifyListingPriceFee): boolean {
+	const basis = `${fee.fee_charge_type ?? ""} ${fee.charge_type_label ?? ""}`;
+	return (
+		fee.fee_type === "tax" && (fee.cap_length ?? 0) <= 0 && /night/i.test(basis)
+	);
+}
+
+function capNightlyTax(
+	line: AccommodationQuoteFee,
+	nights: number,
+): AccommodationQuoteFee {
+	if (nights <= MUNICIPAL_TAX_MAX_NIGHTS) {
+		return line;
+	}
+
+	const ratio = MUNICIPAL_TAX_MAX_NIGHTS / nights;
+	return {
+		...line,
+		inclusiveTax:
+			line.inclusiveTax === null ? null : roundMoney(line.inclusiveTax * ratio),
+		quantity: line.quantity === null ? null : roundMoney(line.quantity * ratio),
+		total: roundMoney(line.total * ratio),
+	};
+}
+
+function isTaxLine(line: AccommodationQuoteFee): boolean {
+	return line.type === "tax";
 }
 
 /**
